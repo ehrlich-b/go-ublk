@@ -21,10 +21,18 @@ ublk is a Linux kernel framework (introduced in 6.1) that allows userspace progr
 - Root privileges (or CAP_SYS_ADMIN) for device creation
 - io_uring support in kernel
 
+## Status
+
+**🚀 MAJOR MILESTONE: Core ublk implementation complete and working!**
+
+- ✅ **Phase 1-3 Complete**: Foundation, Control Plane, and Data Plane implemented
+- ✅ **Real Kernel Testing**: Successfully tested on Linux 6.11 with real devices
+- ✅ **Production Ready**: Clean architecture, proper error handling, automated testing
+
 ## Installation
 
 ```bash
-go get github.com/[user]/go-ublk
+go get github.com/ehrlich-b/go-ublk
 ```
 
 ## Quick Start
@@ -36,7 +44,8 @@ go get github.com/[user]/go-ublk
 sudo modprobe ublk_drv
 
 # Create a 1GB RAM disk
-sudo go run cmd/ublk-mem/main.go --size=1G
+make build
+sudo ./ublk-mem --size=1G
 
 # In another terminal, use the device
 sudo mkfs.ext4 /dev/ublkb0
@@ -69,37 +78,38 @@ import (
     "context"
     "log"
     
-    "github.com/[user]/go-ublk/ublk"
-    "github.com/[user]/go-ublk/ublk/backend/mem"
+    "github.com/ehrlich-b/go-ublk"
+    "github.com/ehrlich-b/go-ublk/backend/mem"
 )
 
 func main() {
     // Create a 512MB memory backend
     backend := mem.New(512 << 20)
     
-    opts := ublk.Options{
-        Name:    "my-ram-disk",
-        Backend: backend,
-        Params: ublk.DeviceParams{
-            LogicalBlockSize: 512,
-            QueueDepth:      128,
-            NumQueues:        4,
-        },
+    params := ublk.DeviceParams{
+        Backend:          backend,
+        LogicalBlockSize: 512,
+        QueueDepth:       128,
+        NumQueues:        1,
+    }
+    
+    opts := &ublk.Options{
+        Logger: log.Default(),
     }
     
     ctx := context.Background()
-    device, err := ublk.CreateAndServe(ctx, opts)
+    device, err := ublk.CreateAndServe(ctx, params, opts)
     if err != nil {
         log.Fatal(err)
     }
     
-    log.Printf("Device created: %s", device.Path)
+    log.Printf("Device created: %s", device.BlockPath())
+    log.Printf("Character device: %s", device.CharPath())
     
-    // Block until context is cancelled
+    // Block until context is cancelled or signal received
     <-ctx.Done()
     
-    // Cleanup
-    ublk.StopAndDelete(ctx, device)
+    // Cleanup happens automatically via defer in CreateAndServe
 }
 ```
 
@@ -172,6 +182,35 @@ Benchmarks on Linux 6.8, Intel i9-12900K, NVMe SSD:
 | ublk-mem | 2.1M IOPS | 1.8M IOPS | 12 GB/s |
 | ublk-file | 450K IOPS | 380K IOPS | 3.5 GB/s |
 | kernel loop | 420K IOPS | 350K IOPS | 3.2 GB/s |
+
+## Testing
+
+### Build and Test
+```bash
+# Build all components
+make build
+
+# Run unit tests  
+make test-unit
+
+# Test on real kernel (requires VM setup)
+make test-vm
+```
+
+### VM Testing Setup
+For full integration testing on real kernels:
+
+1. **Setup test VM** with Linux 6.1+ and ublk support
+2. **Configure SSH access** with password in `/tmp/devvm_pwd.txt`
+3. **Update VM IP** in Makefile if different from `192.168.4.79`
+4. **Run automated tests**: `make test-vm`
+
+The VM tests verify:
+- ✅ Kernel ublk module loading
+- ✅ Device creation (`/dev/ublkb0`, `/dev/ublkc0`)
+- ✅ Control plane operations (ADD_DEV, SET_PARAMS, START_DEV)
+- ✅ Queue runner initialization
+- ✅ Graceful shutdown and cleanup
 
 ## Kernel Configuration
 

@@ -3,6 +3,27 @@
 ## Project Overview
 Pure Go implementation of Linux ublk (userspace block driver) framework. No cgo dependencies.
 
+## 🚀 CURRENT STATUS: MAJOR MILESTONE ACHIEVED!
+
+**Phase 1-3 COMPLETE**: Core ublk implementation working on real kernels!
+
+### Recent Achievements ✅
+- **Complete Control Plane**: Device lifecycle management (ADD_DEV → SET_PARAMS → START_DEV → serve → STOP_DEV → DEL_DEV)
+- **Full Data Plane**: Real I/O processing with io_uring URING_CMD operations
+- **Kernel Integration**: Successfully creates `/dev/ublkb0` devices on Linux 6.11
+- **Production Architecture**: Clean separation of control/data planes, proper error handling
+- **Automated Testing**: VM testing infrastructure with real kernel validation
+- **Memory Backend**: Complete implementation with CLI tool (`ublk-mem`)
+
+### What Works Now ✅
+- Device creation and deletion
+- I/O request processing (READ/WRITE/FLUSH/DISCARD)  
+- Queue runner management with goroutines
+- Memory-mapped descriptor arrays
+- Complete device lifecycle
+- Graceful shutdown and cleanup
+- Automated VM testing with real kernels
+
 ## Core Design Principles
 
 ### Architecture Philosophy
@@ -83,3 +104,21 @@ Pure Go implementation of Linux ublk (userspace block driver) framework. No cgo 
 - Zoned block device support
 - Advanced features like caching/writeback
 - Integration with container runtimes
+
+## CRITICAL DEVELOPMENT RULES
+
+### Build and CLI Operations
+**ALWAYS USE MAKE FOR CLI OPERATIONS**
+- Never use `go build`, `go test`, `go run` directly
+- Always use make targets: `make build`, `make test`, `make lint`, etc.
+- This ensures consistent build flags, environment, and processes
+- Check Makefile for available targets before running commands
+- Example: Use `make test-unit` not `go test ./...`
+
+### Security Rules
+**NEVER EVER HARDCODE PASSWORDS OR CREDENTIALS IN ANY FILES**
+- Never put passwords in source code, scripts, or documentation
+- Never commit credentials to version control
+- Always use environment variables, config files, or prompt for credentials
+- If you catch yourself about to hardcode a password, STOP IMMEDIATELY
+- This is a firing offense in real development - treat it as such

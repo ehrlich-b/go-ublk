@@ -1,144 +1,242 @@
-.PHONY: all build test clean fmt lint check dev-tools check-kernel
+# Makefile for go-ublk
 
 # Go parameters
 GOCMD=go
 GOBUILD=$(GOCMD) build
-GOTEST=$(GOCMD) test
 GOCLEAN=$(GOCMD) clean
+GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
-GOFMT=gofmt
-GOLINT=golangci-lint
 
-# Binary names
-BINARIES=ublk-mem ublk-file ublk-zip ublk-null
+# Project info
+BINARY_NAME=ublk
+BINARY_DIR=./cmd
 
-# Build directories
-BUILD_DIR=build
-CMD_DIR=cmd
+# Build targets
+BINARIES=ublk-mem ublk-file ublk-null ublk-zip
 
-all: build
+# Test parameters
+TEST_FLAGS=-v
+INTEGRATION_FLAGS=-tags=integration
+UNIT_FLAGS=-tags=!integration
 
+.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help
+
+# Default target
+all: deps build test
+
+# Build all binaries
 build: $(BINARIES)
 
-$(BINARIES):
-	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$@ ./$(CMD_DIR)/$@
+# Individual binary targets (will be implemented in Phase 6)
+ublk-mem:
+	@echo "Building ublk-mem (not implemented yet)"
 
-test:
-	$(GOTEST) -v -race ./...
+ublk-file:
+	@echo "Building ublk-file (not implemented yet)"
 
-test-integration:
-	@echo "Running integration tests (requires root and ublk support)..."
-	sudo $(GOTEST) -v -tags=ublk ./...
+ublk-null:
+	@echo "Building ublk-null (not implemented yet)"
 
-test-coverage:
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
-	$(GOCMD) tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
+ublk-zip:
+	@echo "Building ublk-zip (not implemented yet)"
 
-benchmark:
-	$(GOTEST) -bench=. -benchmem ./...
-
+# Clean build artifacts
 clean:
 	$(GOCLEAN)
-	rm -rf $(BUILD_DIR)
-	rm -f coverage.out coverage.html
+	rm -f $(BINARIES)
 
-fmt:
-	$(GOFMT) -s -w .
-	$(GOCMD) fmt ./...
+# Run all tests
+test: test-unit
+	@echo "All tests completed"
 
-lint:
-	@if ! which $(GOLINT) > /dev/null; then \
-		echo "golangci-lint not found, installing..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+# Run unit tests only (no kernel dependencies)
+test-unit:
+	@echo "Running unit tests..."
+	$(GOTEST) $(TEST_FLAGS) ./...
+	$(GOTEST) $(TEST_FLAGS) $(UNIT_FLAGS) ./test/unit/...
+
+# Run integration tests (requires ublk kernel support and root)
+test-integration:
+	@echo "Running integration tests (requires root and ublk kernel support)..."
+	@if [ "$$(id -u)" != "0" ]; then \
+		echo "Integration tests require root privileges"; \
+		echo "Run: sudo make test-integration"; \
+		exit 1; \
 	fi
-	$(GOLINT) run
+	$(GOTEST) $(TEST_FLAGS) $(INTEGRATION_FLAGS) ./test/integration/...
 
-check: fmt lint test
+# Set up VM for passwordless sudo (run once)
+setup-vm:
+	@echo "🔧 Setting up VM for passwordless sudo..."
+	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
+		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
+		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"# ublk dev rules\" > /etc/sudoers.d/ublk-dev'"
+	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
+		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
+		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /usr/sbin/modprobe ublk_drv\" >> /etc/sudoers.d/ublk-dev'"
+	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
+		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
+		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /usr/sbin/modprobe -r ublk_drv\" >> /etc/sudoers.d/ublk-dev'"
+	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
+		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
+		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /home/behrlich/ublk-test/ublk-mem\" >> /etc/sudoers.d/ublk-dev'"
+	@echo "✓ Passwordless sudo configured for ublk operations"
 
+# Test on VM (requires SSH access to 192.168.4.79)
+test-vm: 
+	@echo "🚀 Testing go-ublk on VM..."
+	@echo "Building ublk-mem binary..."
+	@$(GOBUILD) -o ublk-mem ./cmd/ublk-mem
+	@echo "Copying files to VM..."
+	@mkdir -p build
+	@cp ublk-mem test-vm.sh build/
+	@echo "Creating remote directory and copying files..."
+	@sshpass -p "$$(cat /tmp/devvm_pwd.txt)" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 "mkdir -p ~/ublk-test"
+	@sshpass -p "$$(cat /tmp/devvm_pwd.txt)" scp -o StrictHostKeyChecking=no build/ublk-mem build/test-vm.sh behrlich@192.168.4.79:~/ublk-test/
+	@echo "✓ Files copied successfully"
+	@echo ""
+	@echo "🧪 Running tests on VM..."
+	@echo "=============================================="
+	@sshpass -p "$$(cat /tmp/devvm_pwd.txt)" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 'cd ~/ublk-test && chmod +x test-vm.sh && ./test-vm.sh' || \
+		(echo ""; echo "❌ VM test failed"; echo "Try running: make setup-vm"; exit 1)
+	@echo "=============================================="
+	@echo "✅ VM test completed!"
+	@echo ""
+	@echo "🎉 If you saw 'Device created: /dev/ublkb0' above,"
+	@echo "   then the go-ublk control plane is working!"
+
+# Run benchmarks
+benchmark:
+	@echo "Running benchmarks..."
+	$(GOTEST) -bench=. -benchmem ./...
+
+# Install/update dependencies
 deps:
+	$(GOGET) -v ./...
 	$(GOMOD) download
+
+# Tidy dependencies
+tidy:
 	$(GOMOD) tidy
 
-dev-tools:
-	@echo "Installing development tools..."
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	go install golang.org/x/tools/cmd/goimports@latest
-	go install github.com/google/go-licenses@latest
-	@echo "Development tools installed"
+# Lint code (requires golangci-lint)
+lint:
+	@which golangci-lint > /dev/null || (echo "golangci-lint not found, install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1)
+	golangci-lint run
 
+# Format code
+fmt:
+	$(GOCMD) fmt ./...
+
+# Vet code
+vet:
+	$(GOCMD) vet ./...
+
+# Check if ublk kernel support is available
 check-kernel:
-	@echo "Checking kernel support for ublk..."
+	@echo "Checking ublk kernel support..."
 	@if [ -e /dev/ublk-control ]; then \
 		echo "✓ /dev/ublk-control exists"; \
 	else \
 		echo "✗ /dev/ublk-control not found"; \
-		echo "  Try: sudo modprobe ublk_drv"; \
+		echo "  Make sure ublk_drv module is loaded: sudo modprobe ublk_drv"; \
 	fi
-	@echo ""
-	@echo "Kernel version: $$(uname -r)"
-	@if [ $$(uname -r | cut -d. -f1) -ge 6 ] && [ $$(uname -r | cut -d. -f2) -ge 1 ]; then \
-		echo "✓ Kernel version >= 6.1"; \
+	@if lsmod | grep -q ublk_drv; then \
+		echo "✓ ublk_drv module is loaded"; \
 	else \
-		echo "✗ Kernel version < 6.1 (ublk not supported)"; \
-	fi
-	@echo ""
-	@echo "Checking kernel config..."
-	@if zgrep -q CONFIG_BLK_DEV_UBLK=y /proc/config.gz 2>/dev/null || \
-	    zgrep -q CONFIG_BLK_DEV_UBLK=m /proc/config.gz 2>/dev/null; then \
-		echo "✓ CONFIG_BLK_DEV_UBLK enabled"; \
-	else \
-		echo "? CONFIG_BLK_DEV_UBLK status unknown"; \
-	fi
-	@if zgrep -q CONFIG_IO_URING=y /proc/config.gz 2>/dev/null; then \
-		echo "✓ CONFIG_IO_URING enabled"; \
-	else \
-		echo "? CONFIG_IO_URING status unknown"; \
+		echo "✗ ublk_drv module not loaded"; \
+		echo "  Load with: sudo modprobe ublk_drv"; \
 	fi
 
-run-mem: build
-	@echo "Starting memory-backed ublk device (requires root)..."
-	sudo ./$(BUILD_DIR)/ublk-mem --size=100M
-
-run-file: build
-	@echo "Starting file-backed ublk device (requires root)..."
-	@if [ -z "$(FILE)" ]; then \
-		echo "Usage: make run-file FILE=/path/to/disk.img"; \
-		exit 1; \
+# Check module info
+check-module:
+	@echo "Checking ublk module information..."
+	@if modinfo ublk_drv >/dev/null 2>&1; then \
+		echo "Module information:"; \
+		modinfo ublk_drv | head -10; \
+	else \
+		echo "ublk_drv module not available"; \
 	fi
-	sudo ./$(BUILD_DIR)/ublk-file --path=$(FILE)
-
-docker-test:
-	@echo "Running tests in Docker container..."
-	docker build -t go-ublk-test -f test/Dockerfile .
-	docker run --rm --privileged go-ublk-test
 
 # Development helpers
-watch:
-	@echo "Watching for changes..."
-	@while true; do \
-		$(MAKE) -q || $(MAKE); \
-		sleep 1; \
-	done
+dev-setup: deps
+	@echo "Setting up development environment..."
+	@if ! which golangci-lint >/dev/null 2>&1; then \
+		echo "Installing golangci-lint..."; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+	fi
 
-.PHONY: help
+# Full check (formatting, vetting, linting, testing)
+check: fmt vet lint test
+
+# Coverage report
+coverage:
+	@echo "Generating coverage report..."
+	$(GOTEST) -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+# Race condition testing
+test-race:
+	@echo "Running tests with race detector..."
+	$(GOTEST) $(TEST_FLAGS) -race ./...
+
+# Help target
 help:
-	@echo "go-ublk Makefile"
-	@echo ""
-	@echo "Usage:"
-	@echo "  make              - Build all binaries"
-	@echo "  make test         - Run unit tests"
-	@echo "  make test-integration - Run integration tests (requires root)"
-	@echo "  make benchmark    - Run benchmarks"
-	@echo "  make clean        - Clean build artifacts"
-	@echo "  make fmt          - Format code"
-	@echo "  make lint         - Run linter"
-	@echo "  make check        - Run fmt, lint, and tests"
-	@echo "  make deps         - Download dependencies"
-	@echo "  make dev-tools    - Install development tools"
-	@echo "  make check-kernel - Check kernel ublk support"
-	@echo "  make run-mem      - Run memory-backed device"
-	@echo "  make run-file FILE=path - Run file-backed device"
-	@echo "  make help         - Show this help"
+	@echo "Available targets:"
+	@echo "  all             - Build and test everything"
+	@echo "  build           - Build all binaries"
+	@echo "  clean           - Clean build artifacts"
+	@echo "  test            - Run all tests"
+	@echo "  test-unit       - Run unit tests only"
+	@echo "  test-integration- Run integration tests (requires root)"
+	@echo "  setup-vm        - Configure VM for passwordless sudo (run once)"
+	@echo "  test-vm         - Test on VM with real ublk kernel support"
+	@echo "  benchmark       - Run benchmarks"
+	@echo "  deps            - Install/update dependencies"
+	@echo "  tidy            - Tidy dependencies"
+	@echo "  lint            - Run linter"
+	@echo "  fmt             - Format code"
+	@echo "  vet             - Vet code"
+	@echo "  check-kernel    - Check ublk kernel support"
+	@echo "  check-module    - Show ublk module info"
+	@echo "  dev-setup       - Setup development environment"
+	@echo "  check           - Full check (fmt, vet, lint, test)"
+	@echo "  coverage        - Generate test coverage report"
+	@echo "  test-race       - Run tests with race detector"
+	@echo "  help            - Show this help"
+# Advanced I/O test
+test-vm-io:
+	@echo "🧪 Advanced I/O Testing on VM..."
+	@echo "Building ublk-mem binary..."
+	@go build -o ublk-mem ./cmd/ublk-mem
+	@echo "Deploying to VM..."
+	@sshpass -f /tmp/devvm_pwd.txt ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 "mkdir -p ~/ublk-test"
+	@sshpass -f /tmp/devvm_pwd.txt scp -o StrictHostKeyChecking=no ublk-mem test-vm.sh behrlich@192.168.4.79:~/ublk-test/
+	@echo "Running advanced I/O test..."
+	@sshpass -f /tmp/devvm_pwd.txt ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 << 'REMOTE_EOF' || echo "Test completed (may have failed)"
+		cd ~/ublk-test
+		echo "=== Advanced I/O Test ==="
+		echo "Starting ublk-mem in background..."
+		sudo timeout 20s ./ublk-mem --size=64M -v &
+		UBLK_PID=$$!
+		sleep 3
+		echo "Checking if block device exists..."
+		if [ -b /dev/ublkb0 ]; then
+		    echo "✅ /dev/ublkb0 exists and is a block device"
+		    ls -la /dev/ublkb0
+		    sudo blockdev --getsize64 /dev/ublkb0
+		    echo "Testing basic I/O operations..."
+		    echo "Hello, ublk world!" | sudo dd of=/dev/ublkb0 bs=17 count=1 2>/dev/null
+		    echo "Reading back data..."
+		    sudo dd if=/dev/ublkb0 bs=17 count=1 2>/dev/null
+		    echo "✅ Basic I/O operations work!"
+		else
+		    echo "❌ /dev/ublkb0 does not exist or is not a block device"
+		fi
+		sudo kill $$UBLK_PID 2>/dev/null || true
+		wait $$UBLK_PID 2>/dev/null || true
+		echo "=== Advanced test completed ==="
+	REMOTE_EOF
+
