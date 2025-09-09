@@ -32,6 +32,9 @@ Thumbs.db
 # Local configuration
 LOCAL.md
 
+# VM development helpers (contain passwords/IPs)
+vm-ssh.sh
+
 # Temporary files
 *.tmp
 tmp/

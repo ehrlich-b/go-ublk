@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
+	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
@@ -41,16 +42,27 @@ type Config struct {
 
 // NewRunner creates a new queue runner
 func NewRunner(ctx context.Context, config Config) (*Runner, error) {
-	// Open character device
+	// The character device (/dev/ublkcN) gets created by the kernel AFTER
+	// we start submitting FETCH_REQ commands. So we need to retry opening it.
 	charPath := uapi.UblkDevicePath(config.DevID)
-	fd, err := syscall.Open(charPath, syscall.O_RDWR, 0)
-	if err != nil {
-		// Check if we're in stub mode (device file doesn't exist)
-		if err == syscall.ENOENT {
-			// Return a stub runner that simulates queue operations
-			return NewStubRunner(ctx, config), nil
+	
+	// Try to open the character device with retries
+	var fd int
+	var err error
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
+		if err == nil {
+			break
 		}
-		return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+		
+		if err == syscall.ENOENT {
+			// Device doesn't exist yet - this is expected initially
+			// Return a special "waiting" runner that will start the data plane
+			return NewWaitingRunner(ctx, config), nil
+		} else {
+			return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+		}
 	}
 
 	// Create io_uring for this queue
@@ -120,13 +132,24 @@ func (r *Runner) Close() error {
 		r.ring.Close()
 	}
 	
-	if r.charFd >= 0 {
-		syscall.Close(r.charFd)
+	// Unmap memory-mapped regions
+	if r.descPtr != 0 {
+		descSize := r.depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
+		syscall.Syscall(syscall.SYS_MUNMAP, r.descPtr, uintptr(descSize), 0)
+		r.descPtr = 0
 	}
 	
-	// TODO(Phase 4): Properly unmap memory-mapped regions
-	// Currently we rely on OS cleanup on process exit
-	// For production, should call munmap() for descPtr and bufPtr
+	if r.bufPtr != 0 {
+		bufSize := r.depth * 64 * 1024 // 64KB per request buffer
+		syscall.Syscall(syscall.SYS_MUNMAP, r.bufPtr, uintptr(bufSize), 0)
+		r.bufPtr = 0
+	}
+	
+	if r.charFd >= 0 {
+		syscall.Close(r.charFd)
+		r.charFd = -1
+	}
+	
 	return nil
 }
 
@@ -187,24 +210,141 @@ func (r *Runner) submitFetchReq(tag uint16) error {
 	return err
 }
 
+// waitAndStartDataPlane waits for the character device to appear and starts the data plane
+func (r *Runner) waitAndStartDataPlane() {
+	logger := logging.Default().WithDevice(int(r.devID)).WithQueue(int(r.queueID))
+	logger.Info("waiting for character device to appear")
+	
+	charPath := uapi.UblkDevicePath(r.devID)
+	
+	// Wait for the character device to appear with longer timeout
+	maxWait := 30 // 30 seconds
+	for i := 0; i < maxWait; i++ {
+		select {
+		case <-r.ctx.Done():
+			logger.Info("context cancelled while waiting for device")
+			return
+		default:
+		}
+		
+		// Try to open the character device
+		fd, err := syscall.Open(charPath, syscall.O_RDWR, 0)
+		if err == nil {
+			logger.Info("character device appeared, starting data plane", "char_path", charPath)
+			
+			// Initialize the real data plane
+			err = r.initializeDataPlane(fd)
+			if err != nil {
+				logger.Error("failed to initialize data plane", "error", err)
+				syscall.Close(fd)
+				return
+			}
+			
+			// Start processing requests
+			go func() {
+				err := r.processRequests()
+				if err != nil {
+					logger.Error("data plane processing failed", "error", err)
+				}
+			}()
+			return
+		}
+		
+		if err != syscall.ENOENT {
+			logger.Error("failed to open character device", "error", err, "char_path", charPath)
+			return
+		}
+		
+		// Wait 1 second before retrying
+		syscall.Syscall(syscall.SYS_NANOSLEEP, uintptr(unsafe.Pointer(&syscall.Timespec{Sec: 1})), 0, 0)
+	}
+	
+	logger.Error("character device never appeared", "char_path", charPath)
+}
+
+// initializeDataPlane sets up the io_uring and memory mapping for the data plane
+func (r *Runner) initializeDataPlane(fd int) error {
+	logger := logging.Default().WithDevice(int(r.devID)).WithQueue(int(r.queueID))
+	logger.Debug("initializing data plane", "fd", fd)
+	
+	// Create io_uring for this queue
+	ringConfig := uring.Config{
+		Entries: uint32(r.depth),
+		FD:      int32(fd),
+		Flags:   0,
+	}
+
+	ring, err := uring.NewRing(ringConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create io_uring: %v", err)
+	}
+
+	// Memory map the descriptor array and I/O buffers
+	descPtr, bufPtr, err := mmapQueues(fd, r.queueID, r.depth)
+	if err != nil {
+		ring.Close()
+		return fmt.Errorf("failed to mmap queues: %v", err)
+	}
+	
+	// Update runner with initialized resources
+	r.charFd = fd
+	r.ring = ring
+	r.descPtr = descPtr
+	r.bufPtr = bufPtr
+	
+	logger.Info("data plane initialized successfully")
+	return nil
+}
+
 // processRequests processes completed I/O requests
 func (r *Runner) processRequests() error {
-	// In a real io_uring implementation, this would:
-	// 1. Call io_uring_wait_cqe() to wait for completion events
-	// 2. Process each completed request
-	// 3. Mark completion entry as consumed
+	// Wait for completion events from io_uring
+	// Use a short timeout to avoid blocking forever
+	completions, err := r.ring.WaitForCompletion(100) // 100ms timeout
+	if err != nil {
+		return fmt.Errorf("failed to wait for completions: %w", err)
+	}
 	
-	// For now, we're using a simplified approach since our io_uring
-	// implementation is still basic. In the future, this will be
-	// replaced with proper completion queue processing.
+	// Process each completion event
+	for _, completion := range completions {
+		// Extract tag from user data
+		userData := completion.UserData()
+		tag := uint16(userData & 0xFFFF)
+		
+		if r.logger != nil && completion.Value() != 0 {
+			r.logger.Printf("Queue %d: Completion for tag %d: result=%d", 
+				r.queueID, tag, completion.Value())
+		}
+		
+		// For FETCH_REQ completions, we get new I/O requests to process
+		if completion.Value() == 0 { // Success
+			// Get descriptor for this tag
+			if tag >= uint16(r.depth) {
+				if r.logger != nil {
+					r.logger.Printf("Queue %d: Invalid tag %d (depth=%d)", r.queueID, tag, r.depth)
+				}
+				continue
+			}
+			
+			// Access memory-mapped descriptor array
+			descSize := int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
+			descPtr := unsafe.Pointer(r.descPtr + uintptr(int(tag)*descSize))
+			desc := (*uapi.UblksrvIODesc)(descPtr)
+			
+			// Process the I/O request
+			if err := r.handleIORequest(tag, desc); err != nil {
+				if r.logger != nil {
+					r.logger.Printf("Queue %d: Failed to handle I/O for tag %d: %v", r.queueID, tag, err)
+				}
+				// Continue processing other requests even if one fails
+			}
+		}
+	}
 	
-	// The key insight is that FETCH_REQ completions tell us about
-	// new I/O requests that need processing, while COMMIT_AND_FETCH_REQ
-	// completions both complete previous I/O and provide new requests.
-	
-	// Since we don't have real CQE processing yet, simulate by yielding
-	// This allows other goroutines to run and prevents busy looping
-	syscall.Syscall(syscall.SYS_SCHED_YIELD, 0, 0, 0)
+	// If no completions, yield briefly to avoid busy looping
+	if len(completions) == 0 {
+		syscall.Syscall(syscall.SYS_SCHED_YIELD, 0, 0, 0)
+	}
 	
 	return nil
 }
@@ -308,6 +448,30 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 }
 
 // NewStubRunner creates a stub runner for simulation/testing
+// NewWaitingRunner creates a runner that waits for device creation and starts data plane
+func NewWaitingRunner(ctx context.Context, config Config) *Runner {
+	ctx, cancel := context.WithCancel(ctx)
+	
+	runner := &Runner{
+		devID:   config.DevID,
+		queueID: config.QueueID,  
+		depth:   config.Depth,
+		backend: config.Backend,
+		charFd:  -1, // No device yet
+		ring:    nil, // No ring yet
+		descPtr: 0,   // No mmap yet
+		bufPtr:  0,   // No buffers yet
+		ctx:     ctx,
+		cancel:  cancel,
+		logger:  config.Logger,
+	}
+	
+	// Start a goroutine that will initialize the real data plane once the device appears
+	go runner.waitAndStartDataPlane()
+	
+	return runner
+}
+
 func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 	

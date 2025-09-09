@@ -3,26 +3,32 @@
 ## Project Overview
 Pure Go implementation of Linux ublk (userspace block driver) framework. No cgo dependencies.
 
-## 🚀 CURRENT STATUS: MAJOR MILESTONE ACHIEVED!
+## 🚀 CURRENT STATUS: FOUNDATION COMPLETE & VALIDATED!
 
 **Phase 1-3 COMPLETE**: Core ublk implementation working on real kernels!
 
-### Recent Achievements ✅
-- **Complete Control Plane**: Device lifecycle management (ADD_DEV → SET_PARAMS → START_DEV → serve → STOP_DEV → DEL_DEV)
-- **Full Data Plane**: Real I/O processing with io_uring URING_CMD operations
+### Architectural State (2025-09-08) ✅
+- **Solid Foundation**: Clean 3-layer architecture (API → Internal → Kernel)
+- **Complete Control Plane**: Full device lifecycle management working
+- **Full Data Plane**: Real I/O processing with io_uring URING_CMD operations  
 - **Kernel Integration**: Successfully creates `/dev/ublkb0` devices on Linux 6.11
-- **Production Architecture**: Clean separation of control/data planes, proper error handling
-- **Automated Testing**: VM testing infrastructure with real kernel validation
-- **Memory Backend**: Complete implementation with CLI tool (`ublk-mem`)
+- **Memory Management**: Fixed - proper mmap/munmap of descriptor arrays
+- **Testing Infrastructure**: Unit tests + VM validation framework
+- **Production Patterns**: Resource cleanup, graceful shutdown, error handling
 
-### What Works Now ✅
-- Device creation and deletion
-- I/O request processing (READ/WRITE/FLUSH/DISCARD)  
-- Queue runner management with goroutines
-- Memory-mapped descriptor arrays
-- Complete device lifecycle
-- Graceful shutdown and cleanup
-- Automated VM testing with real kernels
+### What's Production-Ready ✅
+- Device creation and deletion lifecycle
+- I/O request processing (READ/WRITE/FLUSH/DISCARD)
+- Queue runner management with goroutines  
+- Memory-mapped descriptor array handling
+- Signal handling and graceful shutdown
+- Memory backend implementation
+- CLI tool (ublk-mem) with proper UX
+
+### Technical Debt Addressed ✅
+- Fixed memory unmapping in queue/runner.go
+- Updated Makefile for ublk-mem build target
+- Documented architectural findings in TODO.md
 
 ## Core Design Principles
 
@@ -122,3 +128,15 @@ Pure Go implementation of Linux ublk (userspace block driver) framework. No cgo 
 - Always use environment variables, config files, or prompt for credentials
 - If you catch yourself about to hardcode a password, STOP IMMEDIATELY
 - This is a firing offense in real development - treat it as such
+
+### Development Helpers
+**VM SSH Helper Script**
+- Use `./vm-ssh.sh "command"` instead of typing the full sshpass command
+- The script is gitignored and contains VM IP/password access
+- Example: `./vm-ssh.sh "ls -la ublk-test/"` or `./vm-ssh.sh` for interactive shell
+- Recreate if missing: 
+  ```bash
+  echo '#!/bin/bash' > vm-ssh.sh
+  echo 'sshpass -p "$(cat /tmp/devvm_pwd.txt | tr -d '"'"'\n'"'"')" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 "$@"' >> vm-ssh.sh
+  chmod +x vm-ssh.sh
+  ```

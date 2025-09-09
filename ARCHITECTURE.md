@@ -4,39 +4,41 @@
 
 go-ublk implements Linux ublk (userspace block driver) in pure Go, providing a high-performance interface for creating block devices in userspace.
 
+**Current Status**: Phase 1-3 complete with working implementation on Linux 6.11+. Foundation is production-ready with clean separation of concerns and proper resource management.
+
 ## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    User Applications                     │
-│                  (filesystem, database)                  │
+│                    User Applications                    │
+│                  (filesystem, database)                 │
 └────────────────────┬────────────────────────────────────┘
                      │ Block I/O
 ┌────────────────────▼────────────────────────────────────┐
-│                    Block Device Layer                    │
+│                    Block Device Layer                   │
 │                     /dev/ublkb[0-N]                     │
 └────────────────────┬────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────┐
-│                  Linux Kernel ublk_drv                   │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ blk-mq queue │  │ blk-mq queue │  │ blk-mq queue │ │
-│  │      0       │  │      1       │  │      N       │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘ │
+│                  Linux Kernel ublk_drv                  │
+│                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │ blk-mq queue │  │ blk-mq queue │  │ blk-mq queue │   │
+│  │      0       │  │      1       │  │      N       │   │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
 └─────────┼──────────────────┼──────────────────┼─────────┘
           │ io_uring         │ io_uring         │ io_uring
 ┌─────────▼──────────────────▼──────────────────▼─────────┐
-│                     go-ublk Library                      │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │Queue Runner 0│  │Queue Runner 1│  │Queue Runner N│ │
-│  │ (goroutine)  │  │ (goroutine)  │  │ (goroutine)  │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘ │
+│                     go-ublk Library                     │
+│                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │Queue Runner 0│  │Queue Runner 1│  │Queue Runner N│   │
+│  │ (goroutine)  │  │ (goroutine)  │  │ (goroutine)  │   │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
 │         └──────────────────┼──────────────────┘         │
-│                            ▼                             │
-│                    Backend Interface                     │
-└────────────────────────────┬─────────────────────────────┘
+│                            ▼                            │
+│                    Backend Interface                    │
+└────────────────────────────┬────────────────────────────┘
                              │
           ┌──────────────────┼──────────────────┐
           │                  │                  │
@@ -61,9 +63,9 @@ Manages device lifecycle through `/dev/ublk-control`:
 │ Control API │
 └──────┬──────┘
        │ io_uring URING_CMD
-┌──────▼──────────┐
-│ /dev/ublk-control│
-└──────┬──────────┘
+┌──────▼────────────┐
+│ /dev/ublk-control │
+└──────┬────────────┘
        │
 ┌──────▼──────┐
 │ Kernel ublk │

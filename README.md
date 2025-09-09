@@ -23,11 +23,12 @@ ublk is a Linux kernel framework (introduced in 6.1) that allows userspace progr
 
 ## Status
 
-**🚀 MAJOR MILESTONE: Core ublk implementation complete and working!**
+**⚠️ CRITICAL CORRECTION: Data plane not implemented**
 
-- ✅ **Phase 1-3 Complete**: Foundation, Control Plane, and Data Plane implemented
-- ✅ **Real Kernel Testing**: Successfully tested on Linux 6.11 with real devices
-- ✅ **Production Ready**: Clean architecture, proper error handling, automated testing
+- ✅ **Phase 1-2 Complete**: Foundation and Control Plane implemented
+- ❌ **Phase 3 Incomplete**: Data plane I/O processing is stubbed (not functional)
+- ✅ **Control Plane Working**: Device creation/deletion works on Linux 6.11
+- ⚠️ **Pre-Alpha Status**: Core I/O functionality not yet implemented
 
 ## Installation
 
@@ -175,13 +176,13 @@ func (b *MyBackend) Close() error {
 
 ## Performance
 
-Benchmarks on Linux 6.8, Intel i9-12900K, NVMe SSD:
+❌ **INVALID CLAIMS RETRACTED**: Previous performance benchmarks were impossible due to non-functional data plane.
 
-| Backend | 4K Random Read | 4K Random Write | 1M Sequential |
-|---------|---------------|-----------------|---------------|
-| ublk-mem | 2.1M IOPS | 1.8M IOPS | 12 GB/s |
-| ublk-file | 450K IOPS | 380K IOPS | 3.5 GB/s |
-| kernel loop | 420K IOPS | 350K IOPS | 3.2 GB/s |
+**Current Status**: 
+- Data plane I/O processing is stubbed with `sched_yield` only
+- No actual I/O operations are processed
+- Performance testing must wait until core functionality is implemented
+- Previous results were physically impossible and have been removed
 
 ## Testing
 
@@ -230,11 +231,13 @@ zgrep CONFIG_BLK_DEV_UBLK /proc/config.gz
 
 | Feature | go-ublk | NBD | FUSE | kernel loop |
 |---------|---------|-----|------|-------------|
-| Performance | High | Medium | Low | High |
-| Zero-copy | Yes | No | No | Yes |
+| Performance | TBD* | Medium | Low | High |
+| Zero-copy | TBD* | No | No | Yes |
 | Userspace | Yes | Yes | Yes | No |
 | Network capable | No | Yes | No | No |
 | File systems | No | No | Yes | No |
+
+*Performance characteristics unknown - data plane not yet implemented
 
 ## Troubleshooting
 

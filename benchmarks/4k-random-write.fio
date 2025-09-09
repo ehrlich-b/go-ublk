@@ -1,0 +1,18 @@
+# 4K Random Write Test - Measures small random write performance
+[global]
+ioengine=libaio
+direct=1
+runtime=30
+time_based=1
+group_reporting=1
+lat_percentiles=1
+clat_percentiles=1
+percentile_list=50:90:95:99:99.9:99.99:99.999
+
+[4k-random-write]
+filename=/dev/ublkb0
+rw=randwrite
+bs=4k
+numjobs=1
+iodepth=32
+size=100%

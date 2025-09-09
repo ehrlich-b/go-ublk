@@ -13,6 +13,7 @@ import (
 
 	"github.com/ehrlich-b/go-ublk"
 	"github.com/ehrlich-b/go-ublk/backend"
+	"github.com/ehrlich-b/go-ublk/internal/logging"
 )
 
 func main() {
@@ -37,18 +38,18 @@ func main() {
 	params.QueueDepth = 32
 	params.NumQueues = 1
 
-	// Create logger if verbose
-	var logger ublk.Logger
+	// Set up logging
+	logConfig := logging.DefaultConfig()
 	if *verbose {
-		logger = &simpleLogger{}
+		logConfig.Level = logging.LevelDebug
 	}
+	logger := logging.NewLogger(logConfig)
+	logging.SetDefault(logger)
 
-	// Create options
-	options := &ublk.Options{
-		Logger: logger,
-	}
+	// Create options  
+	options := &ublk.Options{}
 
-	fmt.Printf("Creating %s memory disk...\n", formatSize(size))
+	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size)
 	
 	// Create and serve the device
 	ctx, cancel := context.WithCancel(context.Background())
@@ -56,17 +57,24 @@ func main() {
 
 	device, err := ublk.CreateAndServe(ctx, params, options)
 	if err != nil {
-		log.Fatalf("Failed to create device: %v", err)
+		logger.Error("failed to create device", "error", err)
+		os.Exit(1)
 	}
 	defer func() {
-		fmt.Printf("Stopping device...\n")
+		logger.Info("stopping device")
 		if err := ublk.StopAndDelete(ctx, device); err != nil {
-			log.Printf("Error stopping device: %v", err)
+			logger.Error("error stopping device", "error", err)
 		} else {
-			fmt.Printf("Device stopped successfully\n")
+			logger.Info("device stopped successfully")
 		}
 	}()
 
+	logger.Info("device created successfully",
+		"block_device", device.Path,
+		"char_device", device.CharPath,
+		"size", formatSize(size),
+		"size_bytes", size)
+	
 	fmt.Printf("Device created: %s\n", device.Path)
 	fmt.Printf("Character device: %s\n", device.CharPath)
 	fmt.Printf("Size: %s (%d bytes)\n", formatSize(size), size)
@@ -81,19 +89,9 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
-	fmt.Printf("\nReceived signal, shutting down...\n")
+	logger.Info("received shutdown signal")
 }
 
-// simpleLogger implements the Logger interface
-type simpleLogger struct{}
-
-func (l *simpleLogger) Printf(format string, args ...interface{}) {
-	log.Printf(format, args...)
-}
-
-func (l *simpleLogger) Debugf(format string, args ...interface{}) {
-	log.Printf("[DEBUG] "+format, args...)
-}
 
 // parseSize parses a size string like "64M", "1G", "512K"
 func parseSize(s string) (int64, error) {

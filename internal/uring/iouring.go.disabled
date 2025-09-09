@@ -142,6 +142,17 @@ func (r *iouRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uin
 	}, nil
 }
 
+func (r *iouRing) WaitForCompletion(timeout int) ([]Result, error) {
+	// This is for data plane operations - typically used for I/O completion polling
+	// For control operations, we use synchronous SubmitCtrlCmd
+	// For now, implement a basic polling mechanism
+	
+	// TODO: Implement proper asynchronous completion polling for data plane
+	// This would involve submitting multiple requests and waiting for their completions
+	
+	return []Result{}, nil
+}
+
 func (r *iouRing) NewBatch() Batch {
 	return &iouBatch{
 		ring:   r.ring,

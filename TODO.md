@@ -1,23 +1,78 @@
 # TODO.md - go-ublk Development Roadmap
 
-## 🚀 MAJOR MILESTONE: Core Implementation Complete!
+## ⚠️ CRITICAL STATUS CORRECTION: Data Plane NOT IMPLEMENTED
 
-**Phase 1-3 COMPLETED**: Full working ublk userspace block driver with:
+**ACTUAL STATUS**: Control plane working, data plane stubbed
+
+**What's Working**: 
 - ✅ Complete kernel interface (UAPI) 
 - ✅ Control plane with device lifecycle management
-- ✅ Data plane with real I/O processing via io_uring  
 - ✅ VM testing infrastructure with automation
-- ✅ Memory backend and CLI tools
-- ✅ Production-ready architecture
+- ✅ Memory backend interface design
+- ✅ CLI tools framework
 
-**Status**: Ready for first major commit and Phase 4 development!
+**What's NOT Working**:
+- ❌ Data plane I/O processing (stubbed with sched_yield)
+- ❌ Real io_uring integration (using stub)
+- ❌ Actual block device functionality
 
-## Next Steps
-1. **First Major Commit**: Commit Phase 1-3 implementation  
-2. **Phase 4**: Backend Interface improvements and additional backends
-3. **Phase 5**: Public API refinement
-4. **Phase 6**: Additional CLI tools
-5. **Phase 7**: Comprehensive testing and benchmarks
+**Status**: Pre-alpha, core functionality not implemented
+
+## Architectural Review Findings (2025-09-08)
+
+### ✅ Architectural Strengths
+- **Clean Layered Architecture**: Well-separated control/data planes and backends
+- **Pure Go Achievement**: Successfully avoided cgo, using syscalls and unsafe appropriately  
+- **Idiomatic Go Patterns**: Proper interfaces, error handling, context usage
+- **Production Foundation**: Resource cleanup, graceful shutdown, signal handling
+- **Good Test Coverage**: Unit tests passing, VM infrastructure working
+- **Clean Backend Interface**: Mirrors standard Go io.ReaderAt/WriterAt patterns
+- **Comprehensive Documentation**: Excellent technical docs in /docs directory
+
+### ⚠️ Technical Debt & Immediate Fixes Needed
+1. **Memory Unmapping**: mmap'd regions not properly unmapped (runner.go:127)
+2. **Missing Tests**: No unit tests for internal/queue package
+3. **Integration Tests Stubbed**: Tests have TODOs instead of implementations
+4. **Error Code Mapping**: Need proper errno to Go error conversion
+5. **Resource Limits**: RLIMIT_MEMLOCK handling not implemented
+6. **Makefile Updated**: ✅ Fixed build target for ublk-mem
+
+### 🔧 Architectural Improvements for Next Phase
+1. **Backend Registry**: Factory pattern for backend type registration
+2. **Configuration Management**: Structured config file support (YAML/TOML)
+3. **Observability**: Metrics, tracing, structured logging hooks
+4. **Recovery Modes**: User recovery and crash resilience
+5. **Performance**: CPU affinity, NUMA awareness, buffer pool optimization
+
+## Immediate Priority Tasks (Phase 3.5 - Cleanup & Performance Baseline)
+
+### Performance Baseline (HIGH PRIORITY) ❌ INVALID RESULTS!
+- [x] Create fio job files for standard tests (4K random, 128K sequential)
+- [ ] **REDO: Benchmark go-ublk runtime overhead** - Previous results invalid due to non-functional data plane
+- [ ] Implement real I/O processing first
+- [ ] Measure actual latency distribution after I/O works
+- [ ] Compare with kernel loop device as baseline
+- [ ] Document real userspace overhead
+- [ ] Profile CPU usage and context switches
+- [ ] Test with different queue depths (1, 32)
+
+**CRITICAL**: Previous performance claims were impossible - data plane is stubbed with sched_yield only!
+
+### CRITICAL: End-to-End I/O Verification (MANDATORY)
+- [x] Create end-to-end test with dd commands ✅ - test-e2e.sh
+- [ ] **MANDATORY: test-e2e.sh MUST PASS before any functionality claims**
+- [ ] **MANDATORY: test-e2e.sh MUST PASS before any performance testing**  
+- [ ] Add end-to-end test to CI/automated testing
+- [ ] Document that ALL development must verify with test-e2e.sh
+
+**RULE: NEVER claim functionality works without test-e2e.sh passing**
+
+### Technical Debt  
+- [x] Fix memory unmapping in queue/runner.go Close() method ✅
+- [ ] Add unit tests for internal/queue package  
+- [ ] Implement proper errno to Go error mapping
+- [ ] Add RLIMIT_MEMLOCK checking and setting
+- [ ] Create error recovery documentation
 
 ## Phase 0: Technical Preparation [COMPLETED]
 - [x] Research and Documentation
@@ -107,13 +162,13 @@
   - [x] Passwordless sudo setup for ublk operations
   - [x] Control plane validation (ADD_DEV, SET_PARAMS, START_DEV working)
 
-## Phase 3: Data Plane (Full Implementation) [COMPLETED ✅]
-- [x] Queue runner implementation
+## Phase 3: Data Plane (Full Implementation) [NOT COMPLETED ❌]
+- [ ] Queue runner implementation
   - [x] Per-queue goroutine management
   - [x] mmap descriptor array from /dev/ublkc<ID>
-  - [x] Implement FETCH_REQ submission
-  - [x] Implement COMMIT_AND_FETCH_REQ loop
-  - [x] Handle different I/O operations (READ/WRITE/FLUSH/DISCARD)
+  - [x] Implement FETCH_REQ submission (stub only)
+  - [ ] Implement real completion processing (currently just sched_yield)
+  - [ ] Handle different I/O operations (READ/WRITE/FLUSH/DISCARD) - not implemented
 
 - [x] Buffer management
   - [x] Default path with pre-allocated buffers

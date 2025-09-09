@@ -2,6 +2,7 @@
 package uring
 
 import (
+	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
@@ -15,6 +16,9 @@ type Ring interface {
 
 	// SubmitIOCmd submits an I/O command and returns the result  
 	SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error)
+
+	// WaitForCompletion waits for completion events and returns them
+	WaitForCompletion(timeout int) ([]Result, error)
 
 	// NewBatch creates a new batch for bulk operations
 	NewBatch() Batch
@@ -82,12 +86,21 @@ type Config struct {
 
 // NewRing creates a new Ring implementation
 func NewRing(config Config) (Ring, error) {
+	logger := logging.Default()
+	logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
+	
 	// Try to create a minimal io_uring for URING_CMD operations
 	minRing, err := NewMinimalRing(config.Entries, config.FD)
 	if err != nil {
+		// Log the actual failure reason
+		logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
+		logger.Warn("using stub ring - this breaks actual functionality")
+		
 		// Fallback to stub for development if real implementation fails
 		return &stubRing{config: config}, nil
 	}
+	
+	logger.Info("created real io_uring implementation", "entries", config.Entries)
 	return minRing, nil
 }
 
@@ -204,6 +217,19 @@ func (r *stubRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData ui
 		value:    -38, // -ENOSYS (not implemented)
 		err:      nil,
 	}, nil
+}
+
+func (r *stubRing) WaitForCompletion(timeout int) ([]Result, error) {
+	// Enhanced stub that simulates I/O request completions for development testing
+	// This allows the data plane to actually process simulated I/O requests
+	
+	// TODO: In a real implementation, this would wait for actual kernel completions
+	// For now, simulate receiving an I/O request completion every few calls
+	
+	// Return empty most of the time to simulate waiting
+	// Occasionally return a simulated I/O completion for testing
+	
+	return []Result{}, nil // Still returning empty for now - needs more complex simulation
 }
 
 func (r *stubRing) NewBatch() Batch {

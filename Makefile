@@ -28,18 +28,19 @@ all: deps build test
 # Build all binaries
 build: $(BINARIES)
 
-# Individual binary targets (will be implemented in Phase 6)
+# Individual binary targets
 ublk-mem:
-	@echo "Building ublk-mem (not implemented yet)"
+	@echo "Building ublk-mem..."
+	@$(GOBUILD) -o ublk-mem ./cmd/ublk-mem
 
 ublk-file:
-	@echo "Building ublk-file (not implemented yet)"
+	@echo "Building ublk-file (Phase 4)"
 
 ublk-null:
-	@echo "Building ublk-null (not implemented yet)"
+	@echo "Building ublk-null (Phase 4)"
 
 ublk-zip:
-	@echo "Building ublk-zip (not implemented yet)"
+	@echo "Building ublk-zip (Phase 4)"
 
 # Clean build artifacts
 clean:
