@@ -1,25 +1,26 @@
 package uapi
 
 import (
-	"fmt"
-	"unsafe"
+    "fmt"
+    "unsafe"
 )
 
-// UblksrvCtrlCmd is sent via io_uring command for control operations
+// UblksrvCtrlCmd must match kernel struct (32 bytes):
+// __u32 dev_id; __u16 queue_id; __u16 len; __u64 addr; __u64 data[1];
+// __u16 dev_path_len; __u16 pad; __u32 reserved;
 type UblksrvCtrlCmd struct {
-	DevID      uint32   // sent to which device, must be valid
-	QueueID    uint16   // sent to which queue, must be -1 if not queue-specific
-	Len        uint16   // cmd specific buffer length
-	Addr       uint64   // cmd specific buffer address (can be IN or OUT)
-	Data       [1]uint64 // inline data
-	DevPathLen uint16   // for UBLK_F_UNPRIVILEGED_DEV, includes null char
-	Pad        uint16   // padding
-	Reserved   uint32   // reserved for future use
-	_          [12]byte // padding to reach 48 bytes
+    DevID      uint32
+    QueueID    uint16
+    Len        uint16
+    Addr       uint64
+    Data       uint64 // data[0]
+    DevPathLen uint16
+    Pad        uint16
+    Reserved   uint32
 }
 
-// Compile-time size check
-var _ [48]byte = [unsafe.Sizeof(UblksrvCtrlCmd{})]byte{}
+// Compile-time size check - must be exactly 32 bytes
+var _ [32]byte = [unsafe.Sizeof(UblksrvCtrlCmd{})]byte{}
 
 // UblksrvCtrlDevInfo contains device information
 type UblksrvCtrlDevInfo struct {

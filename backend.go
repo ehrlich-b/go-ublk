@@ -139,6 +139,7 @@ type Logger interface {
 //   params := ublk.DefaultParams(backend)
 //   device, err := ublk.CreateAndServe(context.Background(), params, nil)
 func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) (*Device, error) {
+	fmt.Printf("*** CRITICAL: CreateAndServe starting with new code\n")
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -174,13 +175,6 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		return nil, fmt.Errorf("failed to set parameters: %v", err)
 	}
 
-	// Start device
-	err = ctrl.StartDevice(devID)
-	if err != nil {
-		ctrl.DeleteDevice(devID)
-		return nil, fmt.Errorf("failed to start device: %v", err)
-	}
-
 	// Create Device struct
 	device := &Device{
 		ID:        devID,
@@ -190,17 +184,29 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		queues:    params.NumQueues,
 		depth:     params.QueueDepth,
 		blockSize: params.LogicalBlockSize,
-		started:   true,
+		started:   false, // Not started yet
 	}
 
 	device.ctx, device.cancel = context.WithCancel(ctx)
 
-	// Start queue runners for minimal data plane
 	numQueues := params.NumQueues
 	if numQueues == 0 {
 		numQueues = 1 // Single queue for minimal implementation
 	}
 
+	// STEP 1: Start device first
+	err = ctrl.StartDevice(devID)
+	if err != nil {
+		ctrl.DeleteDevice(devID)
+		return nil, fmt.Errorf("failed to start device: %v", err)
+	}
+
+	// STEP 2: Check if device nodes exist after START_DEV
+	fmt.Printf("*** CRITICAL: Checking if device nodes exist after START_DEV\n")
+	// Device nodes should exist after START_DEV according to some kernel docs
+	// Let's test this theory by skipping FETCH_REQ entirely
+
+	// STEP 3: Now start queue runners - device nodes should exist
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
 		runnerConfig := queue.Config{
@@ -240,6 +246,8 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
 		}
 	}
+
+	device.started = true
 
 	if options.Logger != nil {
 		options.Logger.Printf("Device created: %s (ID: %d) with %d queues", device.Path, device.ID, numQueues)

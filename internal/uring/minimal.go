@@ -2,14 +2,13 @@
 package uring
 
 import (
-	"encoding/binary"
-	"fmt"
-	"syscall"
-	"unsafe"
-	
-	"golang.org/x/sys/unix"
-	"github.com/ehrlich-b/go-ublk/internal/logging"
-	"github.com/ehrlich-b/go-ublk/internal/uapi"
+    "fmt"
+    "syscall"
+    "unsafe"
+
+    "golang.org/x/sys/unix"
+    "github.com/ehrlich-b/go-ublk/internal/logging"
+    "github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
 // System call numbers for io_uring
@@ -22,10 +21,15 @@ const (
 // Based on kernel include/uapi/linux/io_uring.h
 
 const (
-	IORING_OP_URING_CMD = 50
-	
-	IORING_SETUP_SQE128 = 1 << 10
-	IORING_SETUP_CQE32  = 1 << 11
+    IORING_OP_URING_CMD = 50
+    
+    IORING_SETUP_SQE128 = 1 << 10
+    IORING_SETUP_CQE32  = 1 << 11
+
+    // io_uring mmap offsets
+    IORING_OFF_SQ_RING = 0
+    IORING_OFF_CQ_RING = 0x8000000
+    IORING_OFF_SQES    = 0x10000000
 )
 
 // Minimal SQE for URING_CMD (128-byte version)
@@ -91,10 +95,12 @@ type io_uring_params struct {
 
 // minimalRing implements just URING_CMD for ublk control operations  
 type minimalRing struct {
-	fd     int
-	params io_uring_params
-	sqAddr unsafe.Pointer
-	cqAddr unsafe.Pointer
+    ringFd    int // io_uring file descriptor
+    controlFd int // ring target fd (control or ublkc)
+    params    io_uring_params
+    sqAddr    unsafe.Pointer // SQ ring mapping base
+    cqAddr    unsafe.Pointer // CQ ring mapping base
+    sqesAddr  unsafe.Pointer // SQEs mapping base
 }
 
 // NewMinimalRing creates a minimal io_uring for ublk control operations
@@ -123,69 +129,72 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	
 	logger.Debug("io_uring_setup succeeded", "ring_fd", ringFd)
 	
-	// Map the submission and completion queue rings
-	// This is simplified - a full implementation would map all the necessary regions
-	sqSize := params.sqOff.array + params.sqEntries*4
-	cqSize := params.cqOff.cqes + params.cqEntries*uint32(unsafe.Sizeof(cqe32{}))
+    // Map SQ ring
+    sqSize := params.sqOff.array + params.sqEntries*4
+    sqAddr, err := unix.Mmap(int(ringFd), IORING_OFF_SQ_RING, int(sqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+    if err != nil {
+        syscall.Close(int(ringFd))
+        return nil, fmt.Errorf("failed to mmap SQ: %v", err)
+    }
+    // Map CQ ring
+    cqSize := params.cqOff.cqes + params.cqEntries*uint32(unsafe.Sizeof(cqe32{}))
+    cqAddr, err := unix.Mmap(int(ringFd), IORING_OFF_CQ_RING, int(cqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+    if err != nil {
+        unix.Munmap(sqAddr)
+        syscall.Close(int(ringFd))
+        return nil, fmt.Errorf("failed to mmap CQ: %v", err)  
+    }
+    // Map SQEs array
+    sqesSize := int(params.sqEntries) * int(unsafe.Sizeof(sqe128{}))
+    sqesAddr, err := unix.Mmap(int(ringFd), IORING_OFF_SQES, sqesSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+    if err != nil {
+        unix.Munmap(cqAddr)
+        unix.Munmap(sqAddr)
+        syscall.Close(int(ringFd))
+        return nil, fmt.Errorf("failed to mmap SQEs: %v", err)
+    }
 	
-	sqAddr, err := unix.Mmap(int(ringFd), 0, int(sqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap SQ: %v", err)
-	}
-	
-	cqAddr, err := unix.Mmap(int(ringFd), 0x8000000, int(cqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		unix.Munmap(sqAddr)
-		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap CQ: %v", err)  
-	}
-	
-	return &minimalRing{
-		fd:     int(ringFd),
-		params: params,
-		sqAddr: unsafe.Pointer(&sqAddr[0]),
-		cqAddr: unsafe.Pointer(&cqAddr[0]),
-	}, nil
+    return &minimalRing{
+        ringFd:    int(ringFd),
+        controlFd: int(ctrlFd),
+        params:    params,
+        sqAddr:    unsafe.Pointer(&sqAddr[0]),
+        cqAddr:    unsafe.Pointer(&cqAddr[0]),
+        sqesAddr:  unsafe.Pointer(&sqesAddr[0]),
+    }, nil
 }
 
 func (r *minimalRing) Close() error {
 	// This is a minimal implementation - full cleanup would unmap regions
-	return syscall.Close(r.fd)
+	return syscall.Close(r.ringFd)
 }
 
 func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
 	logger := logging.Default()
+	logger.Info("*** CRITICAL: SubmitCtrlCmd called", "cmd", cmd, "dev_id", ctrlCmd.DevID)
 	logger.Debug("preparing URING_CMD", "cmd", cmd, "dev_id", ctrlCmd.DevID)
 	
-	// Open /dev/ublk-control for URING_CMD operations  
-	controlFd, err := syscall.Open("/dev/ublk-control", syscall.O_RDWR, 0)
-	if err != nil {
-		logger.Error("failed to open /dev/ublk-control", "error", err)
-		return nil, fmt.Errorf("failed to open control device: %v", err)
-	}
-	defer syscall.Close(controlFd)
-	
-	// Create URING_CMD SQE for control operations
-	sqe := &sqe128{
-		opcode:      IORING_OP_URING_CMD,
-		flags:       0,
-		ioprio:      0,
-		fd:          int32(controlFd), // Use actual control device fd
-		off:         0,
-		addr:        uint64(uintptr(unsafe.Pointer(ctrlCmd))),
-		len:         uint32(unsafe.Sizeof(*ctrlCmd)),
-		opcodeFlags: 0,
-		userData:    userData,
-		bufIndex:    0,
+    // Create URING_CMD SQE for control operations
+    sqe := &sqe128{
+        opcode:      IORING_OP_URING_CMD,
+        flags:       0,
+        ioprio:      0,
+        fd:          int32(r.controlFd), // Control device fd
+        off:         uint64(cmd),        // command opcode (caller may pass raw or ioctl-encoded)
+        addr:        0,                  // Not used for URING_CMD
+        len:         0,                  // Not used for URING_CMD  
+        opcodeFlags: 0,
+        userData:    userData,
+        bufIndex:    0,
 		personality: 0,
 		spliceOff:   0,
 		addr3:       0,
 	}
 
-	// Encode the ublk control command in the cmd field
+	// Copy the entire ublk command struct into the SQE128 cmd area (not via addr/len!)
 	cmdBytes := (*[80]byte)(unsafe.Pointer(&sqe.cmd[0]))
-	binary.LittleEndian.PutUint32(cmdBytes[0:4], cmd)
+    ctrlCmdBytes := (*[32]byte)(unsafe.Pointer(ctrlCmd))
+    copy(cmdBytes[:32], ctrlCmdBytes[:])
 	
 	logger.Debug("SQE prepared", "fd", sqe.fd, "cmd", cmd, "addr", sqe.addr)
 
@@ -212,34 +221,33 @@ func (r *minimalResult) Value() int32     { return r.value }
 func (r *minimalResult) Error() error     { return r.err }
 
 func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
-	// Create URING_CMD SQE for I/O operations
-	sqe := &sqe128{
-		opcode:      IORING_OP_URING_CMD,
-		flags:       0,
-		ioprio:      0,
-		fd:          int32(r.params.wqFd), // Use character device fd
-		off:         0,
-		addr:        uint64(uintptr(unsafe.Pointer(ioCmd))),
-		len:         uint32(unsafe.Sizeof(*ioCmd)),
-		opcodeFlags: 0,
-		userData:    userData,
-		bufIndex:    0,
-		personality: 0,
-		spliceOff:   0,
-		addr3:       0,
-	}
+    // Submit URING_CMD for data-plane to this ring's fd (expected to be /dev/ublkc<ID>)
+    sqe := &sqe128{
+        opcode:      IORING_OP_URING_CMD,
+        flags:       0,
+        ioprio:      0,
+        fd:          int32(r.controlFd),
+        off:         uint64(cmd), // IO command opcode (caller may pass raw or ioctl-encoded)
+        addr:        0,
+        len:         0,
+        opcodeFlags: 0,
+        userData:    userData,
+        bufIndex:    0,
+        personality: 0,
+        spliceOff:   0,
+        addr3:       0,
+    }
 
-	// Encode the ublk I/O command in the cmd field
-	cmdBytes := (*[80]byte)(unsafe.Pointer(&sqe.cmd[0]))
-	binary.LittleEndian.PutUint32(cmdBytes[0:4], cmd)
+    // Encode io_cmd in SQE cmd area
+    cmdBytes := (*[80]byte)(unsafe.Pointer(&sqe.cmd[0]))
+    ioCmdBytes := (*[16]byte)(unsafe.Pointer(ioCmd))
+    copy(cmdBytes[:16], ioCmdBytes[:])
 
-	// Submit the command and wait for completion
-	result, err := r.submitAndWait(sqe)
-	if err != nil {
-		return nil, fmt.Errorf("failed to submit I/O command: %v", err)
-	}
-
-	return result, nil
+    result, err := r.submitAndWait(sqe)
+    if err != nil {
+        return nil, fmt.Errorf("failed to submit I/O command: %v", err)
+    }
+    return result, nil
 }
 
 func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
@@ -277,6 +285,7 @@ func (b *minimalBatch) Len() int {
 // submitAndWait submits an SQE and waits for completion using real io_uring
 func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	logger := logging.Default()
+	logger.Info("*** CRITICAL: submitAndWait called - making syscalls", "fd", sqe.fd, "opcode", sqe.opcode, "user_data", sqe.userData)
 	logger.Debug("submitting URING_CMD via io_uring", "fd", sqe.fd, "opcode", sqe.opcode, "user_data", sqe.userData)
 	
 	// This is the real io_uring submission implementation
@@ -290,13 +299,13 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 		return nil, fmt.Errorf("submission queue full")
 	}
 	
-	// Step 2: Get SQE slot and copy our prepared SQE
-	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
-	sqIndex := *sqTail & sqMask
-	sqeSlot := unsafe.Add(r.sqAddr, uintptr(128*sqIndex)) // 128-byte SQEs
-	
-	// Copy our SQE to the ring
-	*(*sqe128)(sqeSlot) = *sqe
+    // Step 2: Get SQE slot and copy our prepared SQE into SQEs mapping
+    sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
+    sqIndex := *sqTail & sqMask
+    sqeSlot := unsafe.Add(r.sqesAddr, uintptr(unsafe.Sizeof(*sqe))*uintptr(sqIndex))
+
+    // Copy our SQE to the SQEs array
+    *(*sqe128)(sqeSlot) = *sqe
 	
 	// Update array entry
 	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), uintptr(4*sqIndex))) = sqIndex
@@ -327,7 +336,7 @@ func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted
 	
 	r1, r2, err := syscall.Syscall6(
 		unix.SYS_IO_URING_ENTER,
-		uintptr(r.fd),
+		uintptr(r.ringFd),
 		uintptr(toSubmit),
 		uintptr(minComplete),
 		uintptr(flags),
@@ -349,10 +358,10 @@ func (r *minimalRing) processCompletion() (Result, error) {
 		return nil, fmt.Errorf("no completions available")
 	}
 	
-	// Get CQE
-	cqMask := r.params.cqEntries - 1
-	cqIndex := *cqHead & cqMask
-	cqeSlot := unsafe.Add(r.cqAddr, uintptr(32*cqIndex)) // 32-byte CQEs
+    // Get CQE
+    cqMask := r.params.cqEntries - 1
+    cqIndex := *cqHead & cqMask
+    cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
 	cqe := (*cqe32)(cqeSlot)
 	
 	logger.Debug("processing completion", "user_data", cqe.userData, "res", cqe.res, "flags", cqe.flags)
@@ -376,49 +385,6 @@ func (r *minimalRing) processCompletion() (Result, error) {
 
 // performControlOperation performs the actual kernel communication for control operations
 func (r *minimalRing) performControlOperation(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd) (int32, syscall.Errno) {
-	// This implements real URING_CMD submission to the kernel
-	// This is a simplified version that bypasses full ring management
-	
-	logger := logging.Default()
-	
-	// Open /dev/ublk-control for the URING_CMD operation
-	controlFd, err := syscall.Open("/dev/ublk-control", syscall.O_RDWR, 0)
-	if err != nil {
-		logger.Error("failed to open /dev/ublk-control", "error", err)
-		return 0, err.(syscall.Errno)
-	}
-	defer syscall.Close(controlFd)
-	
-	// For now, implement a synchronous approach
-	// We could implement proper io_uring submission here, but let's try a simpler approach first
-	// Actually, let's try to use the existing SQE we already prepared and submit it properly
-	
-	// The key insight is that we need to submit this via io_uring_enter, not ioctl
-	// But for control operations, many ublk drivers also support legacy ioctl interface
-	// Let's try the ublksrv approach which often uses simple read/write operations
-	
-	// Try a different approach - some ublk interfaces work with write() operations
-	dataBytes := (*[unsafe.Sizeof(*ctrlCmd)]byte)(unsafe.Pointer(ctrlCmd))[:]
-	
-	// Write the command structure to the control device
-	n, err := syscall.Write(controlFd, dataBytes)
-	if err != nil {
-		logger.Debug("write failed, trying io_uring approach", "error", err, "wrote", n)
-		
-		// If write fails, we need to implement proper URING_CMD
-		// For now, return error indicating we need the proper io_uring implementation
-		return 0, syscall.EOPNOTSUPP
-	}
-	
-	logger.Debug("control operation via write succeeded", "cmd", cmd, "bytes_written", n)
-	
-	// For ADD_DEV, the device ID is often returned in the result
-	// For other operations, success is typically indicated by return value 0
-	if cmd == uapi.UBLK_CMD_ADD_DEV && ctrlCmd.DevID == 0xFFFFFFFF {
-		// Device ID should be assigned by kernel and returned
-		// For now, assume device ID 0 for testing
-		return 0, 0 // Success, device ID 0
-	}
-	
-	return 0, 0 // Success
+    // Not used; URING_CMD is implemented via submitAndWait
+    return 0, syscall.ENOSYS
 }

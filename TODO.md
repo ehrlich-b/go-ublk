@@ -1,22 +1,26 @@
 # TODO.md - go-ublk Development Roadmap
 
-## ⚠️ CRITICAL STATUS CORRECTION: Data Plane NOT IMPLEMENTED
+## ⚠️ STATUS: DEEP KERNEL PROTOCOL ISSUE IDENTIFIED
 
-**ACTUAL STATUS**: Control plane working, data plane stubbed
+**ACTUAL STATUS**: Control plane working, FETCH_REQ commands submitting, but kernel protocol incomplete
 
 **What's Working**: 
-- ✅ Complete kernel interface (UAPI) 
-- ✅ Control plane with device lifecycle management
-- ✅ VM testing infrastructure with automation
+- ✅ Complete kernel interface (UAPI) definitions
+- ✅ VM testing infrastructure with automation  
 - ✅ Memory backend interface design
 - ✅ CLI tools framework
+- ✅ Data plane I/O processing logic implemented
+- ✅ **io_uring syscalls confirmed working** - real kernel communication happening
+- ✅ **Control plane functional** - ADD_DEV, SET_PARAMS, START_DEV all succeed
+- ✅ **FETCH_REQ commands submitting** - 32 commands per queue submitted successfully
+- ✅ **Fixed architectural ordering** - START_DEV → FETCH_REQ → queue runners
 
 **What's NOT Working**:
-- ❌ Data plane I/O processing (stubbed with sched_yield)
-- ❌ Real io_uring integration (using stub)
-- ❌ Actual block device functionality
+- ❌ **CRITICAL**: Device nodes (/dev/ublkb*, /dev/ublkc*) still not created despite successful FETCH_REQ
+- ❌ **Kernel protocol gap**: Missing some step or parameter that triggers device node creation
+- ❌ End-to-end I/O blocked by missing device nodes
 
-**Status**: Pre-alpha, core functionality not implemented
+**Status**: Pre-alpha, **advanced debugging stage - kernel protocol investigation needed**
 
 ## Architectural Review Findings (2025-09-08)
 

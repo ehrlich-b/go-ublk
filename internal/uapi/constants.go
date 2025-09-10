@@ -148,7 +148,7 @@ func IoctlEncode(dir, typ, nr, size uint32) uint32 {
 
 // Helper function to create ublk ioctl commands
 func UblkCtrlCmd(cmd uint32) uint32 {
-	return IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', cmd, 48) // sizeof(UblksrvCtrlCmd)
+    return IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', cmd, 32) // sizeof(UblksrvCtrlCmd)
 }
 
 func UblkIOCmd(cmd uint32) uint32 {

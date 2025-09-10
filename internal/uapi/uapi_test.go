@@ -12,7 +12,7 @@ func TestStructSizes(t *testing.T) {
 		size uintptr
 		expected int
 	}{
-		{"UblksrvCtrlCmd", unsafe.Sizeof(UblksrvCtrlCmd{}), 48},
+        {"UblksrvCtrlCmd", unsafe.Sizeof(UblksrvCtrlCmd{}), 32},
 		{"UblksrvCtrlDevInfo", unsafe.Sizeof(UblksrvCtrlDevInfo{}), 80},
 		{"UblksrvIODesc", unsafe.Sizeof(UblksrvIODesc{}), 32},
 		{"UblksrvIOCmd", unsafe.Sizeof(UblksrvIOCmd{}), 16},
@@ -70,38 +70,38 @@ func TestParamsHelpers(t *testing.T) {
 
 // Test marshaling and unmarshaling
 func TestMarshalUnmarshal(t *testing.T) {
-	t.Run("UblksrvCtrlCmd", func(t *testing.T) {
-		original := &UblksrvCtrlCmd{
-			DevID:      42,
-			QueueID:    0xFFFF, // -1 as uint16
-			Len:        100,
-			Addr:       0x123456789ABCDEF0,
-			Data:       [1]uint64{0xDEADBEEF},
-			DevPathLen: 0,
-			Pad:        0,
-			Reserved:   0,
-		}
-		
-		data := Marshal(original)
-		if len(data) != 48 {
-			t.Errorf("Marshal length = %d, want 48", len(data))
-		}
-		
-		var unmarshaled UblksrvCtrlCmd
-		if err := Unmarshal(data, &unmarshaled); err != nil {
-			t.Errorf("Unmarshal failed: %v", err)
-		}
-		
-		if unmarshaled.DevID != original.DevID {
-			t.Errorf("DevID = %d, want %d", unmarshaled.DevID, original.DevID)
-		}
-		if unmarshaled.QueueID != original.QueueID {
-			t.Errorf("QueueID = %d, want %d", unmarshaled.QueueID, original.QueueID)
-		}
-		if unmarshaled.Addr != original.Addr {
-			t.Errorf("Addr = %x, want %x", unmarshaled.Addr, original.Addr)
-		}
-	})
+    t.Run("UblksrvCtrlCmd", func(t *testing.T) {
+        original := &UblksrvCtrlCmd{
+            DevID:   42,
+            QueueID: 0xFFFF, // -1 as uint16
+            Len:     100,
+            Addr:    0x123456789ABCDEF0,
+            Data:    0xDEADBEEF,
+        }
+        
+        data := Marshal(original)
+        if len(data) != 32 {
+            t.Errorf("Marshal length = %d, want 32", len(data))
+        }
+        
+        var unmarshaled UblksrvCtrlCmd
+        if err := Unmarshal(data, &unmarshaled); err != nil {
+            t.Errorf("Unmarshal failed: %v", err)
+        }
+        
+        if unmarshaled.DevID != original.DevID {
+            t.Errorf("DevID = %d, want %d", unmarshaled.DevID, original.DevID)
+        }
+        if unmarshaled.QueueID != original.QueueID {
+            t.Errorf("QueueID = %d, want %d", unmarshaled.QueueID, original.QueueID)
+        }
+        if unmarshaled.Addr != original.Addr {
+            t.Errorf("Addr = %x, want %x", unmarshaled.Addr, original.Addr)
+        }
+        if unmarshaled.Data != original.Data || unmarshaled.Reserved != 0 || unmarshaled.Pad != 0 || unmarshaled.DevPathLen != 0 {
+            t.Errorf("Control fields mismatch after unmarshal")
+        }
+    })
 	
 	t.Run("UblksrvIOCmd", func(t *testing.T) {
 		original := &UblksrvIOCmd{
@@ -138,8 +138,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 
 // Test ioctl encoding
 func TestIoctlEncoding(t *testing.T) {
-	// Test basic encoding
-	cmd := IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', UBLK_CMD_ADD_DEV, 48)
+    // Test basic encoding
+    cmd := IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', UBLK_CMD_ADD_DEV, 32)
 	if cmd == 0 {
 		t.Error("IoctlEncode returned 0")
 	}
@@ -186,13 +186,13 @@ func TestConstants(t *testing.T) {
 
 // Benchmark marshaling performance
 func BenchmarkMarshal(b *testing.B) {
-	cmd := &UblksrvCtrlCmd{
-		DevID:      42,
-		QueueID:    0,
-		Len:        100,
-		Addr:       0x123456789ABCDEF0,
-		Data:       [1]uint64{0xDEADBEEF},
-	}
+    cmd := &UblksrvCtrlCmd{
+        DevID:   42,
+        QueueID: 0,
+        Len:     100,
+        Addr:    0x123456789ABCDEF0,
+        Data:    0xDEADBEEF,
+    }
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -201,13 +201,13 @@ func BenchmarkMarshal(b *testing.B) {
 }
 
 func BenchmarkUnmarshal(b *testing.B) {
-	cmd := &UblksrvCtrlCmd{
-		DevID:      42,
-		QueueID:    0,
-		Len:        100,
-		Addr:       0x123456789ABCDEF0,
-		Data:       [1]uint64{0xDEADBEEF},
-	}
+    cmd := &UblksrvCtrlCmd{
+        DevID:   42,
+        QueueID: 0,
+        Len:     100,
+        Addr:    0x123456789ABCDEF0,
+        Data:    0xDEADBEEF,
+    }
 	data := Marshal(cmd)
 	
 	b.ResetTimer()

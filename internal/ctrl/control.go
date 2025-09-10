@@ -53,24 +53,47 @@ func (c *Controller) Close() error {
 }
 
 func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:   uint32(params.DeviceID),
-		QueueID: 0xFFFF,
-		Len:     0,
-		Addr:    0,
-	}
+    // Kernel fills ctrl_dev_info in user buffer; length varies by kernel (64 or 80 bytes).
+    // Also, some kernels may require raw vs ioctl-encoded cmd_op. Try combinations.
 
-	result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_ADD_DEV, cmd, 0)
-	if err != nil {
-		return 0, fmt.Errorf("ADD_DEV failed: %v", err)
-	}
+    tryLens := []int{80, 64}
+    tryEnc := []bool{true, false} // true=ioctl-encoded, false=raw
 
-	if result.Value() < 0 {
-		return 0, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
-	}
+    for _, enc := range tryEnc {
+        for _, l := range tryLens {
+            infoBuf := make([]byte, l)
+            cmd := &uapi.UblksrvCtrlCmd{
+                DevID:   uint32(params.DeviceID), // -1 => auto-assign
+                QueueID: 0xFFFF,
+                Len:     uint16(len(infoBuf)),
+                Addr:    uint64(uintptr(unsafe.Pointer(&infoBuf[0]))),
+                Data:    0,
+            }
 
-	devID := uint32(result.Value())
-	return devID, nil
+            var op uint32 = uapi.UBLK_CMD_ADD_DEV
+            if enc {
+                op = uapi.UblkCtrlCmd(op)
+            }
+
+            result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
+            if err != nil {
+                return 0, fmt.Errorf("ADD_DEV submit failed: %v", err)
+            }
+
+            if result.Value() < 0 {
+                // If EINVAL, try next combination; else fail
+                if result.Value() == -22 {
+                    continue
+                }
+                return 0, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
+            }
+
+            // Success
+            info := uapi.UnmarshalCtrlDevInfo(infoBuf)
+            return info.DevID, nil
+        }
+    }
+    return 0, fmt.Errorf("ADD_DEV failed with EINVAL for all encodings/lengths")
 }
 
 func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
@@ -139,6 +162,24 @@ func (c *Controller) StartDevice(devID uint32) error {
 		return fmt.Errorf("START_DEV failed with error: %d", result.Value())
 	}
 
+	return nil
+}
+
+// StartDataPlane is removed - FETCH_REQ must be done by per-queue runners
+// Device nodes are created by the kernel after START_DEV, not by FETCH_REQ
+func (c *Controller) StartDataPlane(devID uint32, numQueues, queueDepth int) error {
+	fmt.Printf("*** CRITICAL: StartDataPlane - FETCH_REQ approach was wrong!\n")
+	fmt.Printf("*** Device nodes should appear after START_DEV, not after FETCH_REQ\n")
+	fmt.Printf("*** FETCH_REQ must be done by queue runners on /dev/ublkc%d fds\n", devID)
+	
+	// The correct sequence is:
+	// 1. ADD_DEV (done)
+	// 2. SET_PARAMS (done) 
+	// 3. START_DEV (done)
+	// 4. Device nodes /dev/ublkb<ID> and /dev/ublkc<ID> should now exist
+	// 5. Queue runners open /dev/ublkc<ID> and submit FETCH_REQ on those fds
+	
+	// For now, just return success - device creation should already have triggered node creation
 	return nil
 }
 
