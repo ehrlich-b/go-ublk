@@ -38,11 +38,10 @@ type UblksrvCtrlDevInfo struct {
 	OwnerGID        uint32 // owner GID (set by kernel)
 	Reserved1       uint64 // reserved
 	Reserved2       uint64 // reserved
-	_               [16]byte // padding to reach 80 bytes
 }
 
-// Compile-time size check
-var _ [80]byte = [unsafe.Sizeof(UblksrvCtrlDevInfo{})]byte{}
+// Compile-time size check - 64 bytes as per kernel 6.6+
+var _ [64]byte = [unsafe.Sizeof(UblksrvCtrlDevInfo{})]byte{}
 
 // UblksrvIODesc describes each I/O operation (stored in shared memory)
 type UblksrvIODesc struct {

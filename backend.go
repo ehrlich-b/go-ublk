@@ -2,12 +2,12 @@
 package ublk
 
 import (
-	"context"
-	"fmt"
+    "context"
+    "fmt"
 
-	"github.com/ehrlich-b/go-ublk/internal/ctrl"
-	"github.com/ehrlich-b/go-ublk/internal/interfaces"
-	"github.com/ehrlich-b/go-ublk/internal/queue"
+    "github.com/ehrlich-b/go-ublk/internal/ctrl"
+    "github.com/ehrlich-b/go-ublk/internal/interfaces"
+    "github.com/ehrlich-b/go-ublk/internal/queue"
 )
 
 // Re-export interfaces from internal package
@@ -194,19 +194,16 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		numQueues = 1 // Single queue for minimal implementation
 	}
 
-	// STEP 1: Start device first
-	err = ctrl.StartDevice(devID)
-	if err != nil {
-		ctrl.DeleteDevice(devID)
-		return nil, fmt.Errorf("failed to start device: %v", err)
-	}
+    // STEP 1: Start device first
+    err = ctrl.StartDevice(devID)
+    if err != nil {
+        ctrl.DeleteDevice(devID)
+        return nil, fmt.Errorf("failed to start device: %v", err)
+    }
 
-	// STEP 2: Check if device nodes exist after START_DEV
-	fmt.Printf("*** CRITICAL: Checking if device nodes exist after START_DEV\n")
-	// Device nodes should exist after START_DEV according to some kernel docs
-	// Let's test this theory by skipping FETCH_REQ entirely
+    // STEP 2: Proceed to queue runners - kernel should create device nodes
 
-	// STEP 3: Now start queue runners - device nodes should exist
+    // STEP 3: Now start queue runners - device nodes should exist
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
 		runnerConfig := queue.Config{

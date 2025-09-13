@@ -2,8 +2,7 @@
 # CRITICAL END-TO-END TEST - MUST VERIFY ACTUAL I/O WORKS
 # This test prevents claiming devices work when I/O is broken
 
-set -e  # Exit on any error
-set -u  # Exit on undefined variables
+set -euo pipefail
 
 echo "=== CRITICAL I/O VERIFICATION TEST ==="
 echo "This test MUST pass before claiming device functionality works"
@@ -26,31 +25,43 @@ fi
 # Clean up any previous test
 cleanup() {
     echo "Cleaning up..."
+    if [ -n "${TAIL_PID:-}" ]; then kill $TAIL_PID 2>/dev/null || true; fi
     if [ -n "${UBLK_PID:-}" ]; then
         sudo kill -SIGINT $UBLK_PID 2>/dev/null || true
         wait $UBLK_PID 2>/dev/null || true
     fi
-    rm -f /tmp/test_data /tmp/read_back
+    rm -f /tmp/test_data /tmp/read_back /tmp/ublk_mem.log
 }
 trap cleanup EXIT
 
 # Start ublk device in background
 echo "Starting ublk memory device (16MB for testing)..."
-sudo ./ublk-mem --size=16M &
+sudo env UBLK_DEVINFO_LEN=${UBLK_DEVINFO_LEN:-} ./ublk-mem --size=16M -v > /tmp/ublk_mem.log 2>&1 &
 UBLK_PID=$!
+sleep 0.2
+echo "Tailing ublk-mem logs (live)..."
+tail -n +1 -F /tmp/ublk_mem.log &
+TAIL_PID=$!
 
-# Wait for device to be created
-echo "Waiting for device creation..."
-sleep 3
+echo "Waiting for device nodes to appear (up to 5s)..."
+for i in $(seq 1 5); do
+    if [ -b /dev/ublkb0 ] && [ -c /dev/ublkc0 ]; then
+        echo "  ($i) found: $(ls -la /dev/ublk* 2>/dev/null | tr '\n' ' ' )"
+        break
+    fi
+    echo "  ($i) waiting..."; ls -la /dev/ublk* 2>/dev/null || true
+    sleep 1
+done
 
 # Verify device exists
-if [ ! -b /dev/ublkb0 ]; then
-    echo "ERROR: Device /dev/ublkb0 was not created"
-    echo "Control plane may work but device creation failed"
+if [ ! -b /dev/ublkb0 ] || [ ! -c /dev/ublkc0 ]; then
+    echo "ERROR: Device nodes did not appear in time"
+    ls -la /dev/ublk* 2>/dev/null || true
+    echo "--- dmesg (last 200) ---"; sudo dmesg | tail -200 || true
     exit 1
 fi
 
-echo "✅ Device created at /dev/ublkb0"
+echo "✅ Device nodes ready: /dev/ublkb0 and /dev/ublkc0"
 
 # Create test data
 echo "Creating test data..."

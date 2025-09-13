@@ -107,6 +107,64 @@ test-vm:
 	@echo "🎉 If you saw 'Device created: /dev/ublkb0' above,"
 	@echo "   then the go-ublk control plane is working!"
 
+# --- VM Convenience Targets ---
+.PHONY: vm-copy vm-run vm-stop vm-e2e
+
+VM_HOST=192.168.4.79
+VM_USER=behrlich
+VM_DIR=~/ublk-test
+VM_PASS=$(shell cat /tmp/devvm_pwd.txt)
+
+vm-copy: ublk-mem
+	@echo "📦 Copying ublk-mem and tests to VM..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true; rm -f $(VM_DIR)/ublk-mem"
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no ublk-mem test-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@echo "✓ Copied."
+
+vm-run: ublk-mem vm-copy
+	@echo "🚀 Running ublk-mem on VM (10s)..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"cd $(VM_DIR) && sudo timeout 10 ./ublk-mem --size=16M -v || true; ls -la /dev/ublk* || true"
+
+vm-stop:
+	@echo "🛑 Stopping ublk-mem on VM (best-effort)..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"sudo killall ublk-mem 2>/dev/null || true"
+
+vm-e2e: ublk-mem vm-copy
+	@echo "🧪 Running e2e I/O test on VM..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && ./test-e2e.sh"
+	@echo "✅ VM e2e test completed"
+
+.PHONY: vm-e2e-80 vm-e2e-64 vm-e2e-80-raw vm-e2e-64-raw vm-run-env
+vm-e2e-80: ublk-mem vm-copy
+	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=80 ..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_DEVINFO_LEN=80 ./test-e2e.sh"
+
+vm-e2e-64: ublk-mem vm-copy
+	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=64 ..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_DEVINFO_LEN=64 ./test-e2e.sh"
+
+vm-e2e-80-raw: ublk-mem vm-copy
+	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=80 + raw ctrl encoding..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_CTRL_ENC=raw UBLK_DEVINFO_LEN=80 ./test-e2e.sh"
+
+vm-e2e-64-raw: ublk-mem vm-copy
+	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=64 + raw ctrl encoding..."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_CTRL_ENC=raw UBLK_DEVINFO_LEN=64 ./test-e2e.sh"
+
+# Run ublk-mem on VM with custom environment variables
+# Usage: make vm-run-env ENV="UBLK_CTRL_ENC=raw UBLK_DEVINFO_LEN=64"
+vm-run-env: ublk-mem vm-copy
+	@echo "🚀 Running ublk-mem on VM with custom env: $(ENV)"
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"cd $(VM_DIR) && sudo env $(ENV) timeout 15 ./ublk-mem --size=16M -v || true; ls -la /dev/ublk* || true"
+
 # Run benchmarks
 benchmark:
 	@echo "Running benchmarks..."
@@ -240,4 +298,3 @@ test-vm-io:
 		wait $$UBLK_PID 2>/dev/null || true
 		echo "=== Advanced test completed ==="
 	REMOTE_EOF
-

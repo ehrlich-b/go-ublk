@@ -46,11 +46,11 @@ func main() {
 	logger := logging.NewLogger(logConfig)
 	logging.SetDefault(logger)
 
-	// Create options  
+	// Create options
 	options := &ublk.Options{}
 
 	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size)
-	
+
 	// Create and serve the device
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -74,7 +74,7 @@ func main() {
 		"char_device", device.CharPath,
 		"size", formatSize(size),
 		"size_bytes", size)
-	
+
 	fmt.Printf("Device created: %s\n", device.Path)
 	fmt.Printf("Character device: %s\n", device.CharPath)
 	fmt.Printf("Size: %s (%d bytes)\n", formatSize(size), size)
@@ -96,10 +96,10 @@ func main() {
 // parseSize parses a size string like "64M", "1G", "512K"
 func parseSize(s string) (int64, error) {
 	s = strings.ToUpper(s)
-	
+
 	var multiplier int64 = 1
 	var numStr string
-	
+
 	if strings.HasSuffix(s, "K") {
 		multiplier = 1024
 		numStr = strings.TrimSuffix(s, "K")
@@ -112,12 +112,12 @@ func parseSize(s string) (int64, error) {
 	} else {
 		numStr = s
 	}
-	
+
 	num, err := strconv.ParseInt(numStr, 10, 64)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return num * multiplier, nil
 }
 
@@ -127,13 +127,13 @@ func formatSize(bytes int64) string {
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)
 	}
-	
+
 	div, exp := int64(unit), 0
 	for n := bytes / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	
+
 	units := []string{"K", "M", "G", "T"}
 	return fmt.Sprintf("%.1f %sB", float64(bytes)/float64(div), units[exp])
 }

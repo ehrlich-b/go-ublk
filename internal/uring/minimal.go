@@ -38,7 +38,8 @@ type sqe128 struct {
 	flags       uint8
 	ioprio      uint16
 	fd          int32
-	off         uint64
+	// Union field: off overlaps with cmd_op for URING_CMD
+	union0      [8]byte // Contains cmd_op (uint32) at offset 0 for URING_CMD
 	addr        uint64
 	len         uint32
 	opcodeFlags uint32
@@ -49,6 +50,16 @@ type sqe128 struct {
 	addr3       uint64
 	_           uint64
 	cmd         [80]byte // Command-specific data for URING_CMD
+}
+
+// setCmdOp sets the cmd_op field in the union
+func (sqe *sqe128) setCmdOp(cmdOp uint32) {
+	*(*uint32)(unsafe.Pointer(&sqe.union0[0])) = cmdOp
+}
+
+// getCmdOp gets the cmd_op field from the union
+func (sqe *sqe128) getCmdOp() uint32 {
+	return *(*uint32)(unsafe.Pointer(&sqe.union0[0]))
 }
 
 // Minimal CQE (32-byte version)
@@ -173,6 +184,9 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	logger := logging.Default()
 	logger.Info("*** CRITICAL: SubmitCtrlCmd called", "cmd", cmd, "dev_id", ctrlCmd.DevID)
 	logger.Debug("preparing URING_CMD", "cmd", cmd, "dev_id", ctrlCmd.DevID)
+
+	// Log the actual command being used
+	logger.Debug("using command", "cmd", cmd)
 	
     // Create URING_CMD SQE for control operations
     sqe := &sqe128{
@@ -180,9 +194,8 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
         flags:       0,
         ioprio:      0,
         fd:          int32(r.controlFd), // Control device fd
-        off:         uint64(cmd),        // command opcode (caller may pass raw or ioctl-encoded)
-        addr:        0,                  // Not used for URING_CMD
-        len:         0,                  // Not used for URING_CMD  
+        addr:        ctrlCmd.Addr,       // buffer address from control command
+        len:         uint32(ctrlCmd.Len), // buffer length from control command
         opcodeFlags: 0,
         userData:    userData,
         bufIndex:    0,
@@ -191,10 +204,21 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 		addr3:       0,
 	}
 
-	// Copy the entire ublk command struct into the SQE128 cmd area (not via addr/len!)
-	cmdBytes := (*[80]byte)(unsafe.Pointer(&sqe.cmd[0]))
-    ctrlCmdBytes := (*[32]byte)(unsafe.Pointer(ctrlCmd))
-    copy(cmdBytes[:32], ctrlCmdBytes[:])
+	// Set cmd_op field properly for URING_CMD
+	sqe.setCmdOp(cmd)
+
+    // Marshal the control command properly to ensure correct layout
+    ctrlCmdBytes := uapi.Marshal(ctrlCmd)
+    if len(ctrlCmdBytes) != 32 {
+        return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
+    }
+
+    // Copy the marshaled control command (32 bytes) into the SQE128 cmd area
+    cmdBytes := (*[80]byte)(unsafe.Pointer(&sqe.cmd[0]))
+    copy(cmdBytes[:32], ctrlCmdBytes)
+
+    // Debug: log the exact control header bytes being sent to kernel
+    logger.Debug("control header bytes", "header_hex", fmt.Sprintf("%x", ctrlCmdBytes))
 	
 	logger.Debug("SQE prepared", "fd", sqe.fd, "cmd", cmd, "addr", sqe.addr)
 
@@ -227,7 +251,6 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
         flags:       0,
         ioprio:      0,
         fd:          int32(r.controlFd),
-        off:         uint64(cmd), // IO command opcode (caller may pass raw or ioctl-encoded)
         addr:        0,
         len:         0,
         opcodeFlags: 0,
@@ -238,6 +261,9 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
         addr3:       0,
     }
 
+    // Set cmd_op field properly for URING_CMD
+    sqe.setCmdOp(cmd)
+
     // Encode io_cmd in SQE cmd area
     cmdBytes := (*[80]byte)(unsafe.Pointer(&sqe.cmd[0]))
     ioCmdBytes := (*[16]byte)(unsafe.Pointer(ioCmd))
@@ -247,16 +273,48 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
     if err != nil {
         return nil, fmt.Errorf("failed to submit I/O command: %v", err)
     }
+    if result.Value() < 0 {
+        return result, fmt.Errorf("I/O command failed: %d", result.Value())
+    }
     return result, nil
 }
 
 func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
-	// This is a placeholder implementation - real completion processing would:
-	// 1. Wait for CQEs using io_uring_enter syscall
-	// 2. Process completion queue entries  
-	// 3. Return Results for each completion
-	// For now, return empty to prevent hanging
-	return []Result{}, nil
+    // Drain CQ if anything is already there
+    results := make([]Result, 0, 8)
+
+    drain := func() {
+        cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
+        cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
+        for *cqHead != *cqTail {
+            cqMask := r.params.cqEntries - 1
+            cqIndex := *cqHead & cqMask
+            cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
+            cqe := (*cqe32)(cqeSlot)
+            res := &minimalResult{userData: cqe.userData, value: cqe.res}
+            if cqe.res < 0 {
+                res.err = fmt.Errorf("operation failed with result: %d", cqe.res)
+            }
+            results = append(results, res)
+            *cqHead = *cqHead + 1
+        }
+    }
+
+    // First, non-blocking drain
+    drain()
+    if len(results) > 0 {
+        return results, nil
+    }
+
+    // Block for at least one completion
+    _, _, errno := r.submitAndWaitRing(0, 1)
+    if errno != 0 {
+        return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)
+    }
+
+    // Drain whatever arrived
+    drain()
+    return results, nil
 }
 
 func (r *minimalRing) NewBatch() Batch {

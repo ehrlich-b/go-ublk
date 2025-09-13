@@ -198,12 +198,13 @@ func (r *Runner) ioLoop() {
 
 // submitFetchReq submits a FETCH_REQ command
 func (r *Runner) submitFetchReq(tag uint16) error {
-	ioCmd := &uapi.UblksrvIOCmd{
-		QID:    r.queueID,
-		Tag:    tag,
-		Result: 0,
-		Addr:   0, // Will be filled by kernel
-	}
+    ioCmd := &uapi.UblksrvIOCmd{
+        QID:    r.queueID,
+        Tag:    tag,
+        Result: 0,
+        // Provide userspace buffer address for this tag
+        Addr:   uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
+    }
 
 	userData := uint64(r.queueID)<<16 | uint64(tag)
 	_, err := r.ring.SubmitIOCmd(uapi.UBLK_IO_FETCH_REQ, ioCmd, userData)
@@ -232,23 +233,39 @@ func (r *Runner) waitAndStartDataPlane() {
 		if err == nil {
 			logger.Info("character device appeared, starting data plane", "char_path", charPath)
 			
-			// Initialize the real data plane
-			err = r.initializeDataPlane(fd)
-			if err != nil {
-				logger.Error("failed to initialize data plane", "error", err)
-				syscall.Close(fd)
-				return
-			}
-			
-			// Start processing requests
-			go func() {
-				err := r.processRequests()
-				if err != nil {
-					logger.Error("data plane processing failed", "error", err)
-				}
-			}()
-			return
-		}
+            // Initialize the real data plane
+            err = r.initializeDataPlane(fd)
+            if err != nil {
+                logger.Error("failed to initialize data plane", "error", err)
+                syscall.Close(fd)
+                return
+            }
+            
+            // Submit initial FETCH_REQ commands to fill the queue
+            for tag := 0; tag < r.depth; tag++ {
+                if err := r.submitFetchReq(uint16(tag)); err != nil {
+                    logger.Error("failed to submit initial FETCH_REQ", "tag", tag, "error", err)
+                    return
+                }
+            }
+
+            // Main processing loop
+            go func() {
+                for {
+                    select {
+                    case <-r.ctx.Done():
+                        logger.Info("data plane loop stopped via context")
+                        return
+                    default:
+                        if err := r.processRequests(); err != nil {
+                            logger.Error("data plane processing failed", "error", err)
+                            return
+                        }
+                    }
+                }
+            }()
+            return
+        }
 		
 		if err != syscall.ENOENT {
 			logger.Error("failed to open character device", "error", err, "char_path", charPath)
@@ -398,12 +415,13 @@ func (r *Runner) commitAndFetch(tag uint16, ioErr error) error {
 		}
 	}
 	
-	ioCmd := &uapi.UblksrvIOCmd{
-		QID:    r.queueID,
-		Tag:    tag,
-		Result: result,
-		Addr:   0, // Will be filled by kernel for next request
-	}
+    ioCmd := &uapi.UblksrvIOCmd{
+        QID:    r.queueID,
+        Tag:    tag,
+        Result: result,
+        // Provide buffer for next request
+        Addr:   uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
+    }
 	
 	userData := uint64(r.queueID)<<16 | uint64(tag)
 	_, err := r.ring.SubmitIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ, ioCmd, userData)

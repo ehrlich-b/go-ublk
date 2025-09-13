@@ -238,8 +238,8 @@ func (e MarshalError) Error() string {
 
 // marshalCtrlDevInfo manually marshals UblksrvCtrlDevInfo
 func marshalCtrlDevInfo(info *UblksrvCtrlDevInfo) []byte {
-	buf := make([]byte, 80)
-	
+	buf := make([]byte, 64) // Now exactly 64 bytes to match kernel 6.6+
+
 	binary.LittleEndian.PutUint16(buf[0:2], info.NrHwQueues)
 	binary.LittleEndian.PutUint16(buf[2:4], info.QueueDepth)
 	binary.LittleEndian.PutUint16(buf[4:6], info.State)
@@ -254,33 +254,42 @@ func marshalCtrlDevInfo(info *UblksrvCtrlDevInfo) []byte {
 	binary.LittleEndian.PutUint32(buf[44:48], info.OwnerGID)
 	binary.LittleEndian.PutUint64(buf[48:56], info.Reserved1)
 	binary.LittleEndian.PutUint64(buf[56:64], info.Reserved2)
-	// Skip padding bytes 64-80
-	
+
 	return buf
 }
 
 // unmarshalCtrlDevInfo manually unmarshals UblksrvCtrlDevInfo
 func unmarshalCtrlDevInfo(data []byte, info *UblksrvCtrlDevInfo) error {
-	if len(data) < 80 {
-		return ErrInsufficientData
-	}
-	
-	info.NrHwQueues = binary.LittleEndian.Uint16(data[0:2])
-	info.QueueDepth = binary.LittleEndian.Uint16(data[2:4])
-	info.State = binary.LittleEndian.Uint16(data[4:6])
-	info.Pad0 = binary.LittleEndian.Uint16(data[6:8])
-	info.MaxIOBufBytes = binary.LittleEndian.Uint32(data[8:12])
-	info.DevID = binary.LittleEndian.Uint32(data[12:16])
-	info.UblksrvPID = int32(binary.LittleEndian.Uint32(data[16:20]))
-	info.Pad1 = binary.LittleEndian.Uint32(data[20:24])
-	info.Flags = binary.LittleEndian.Uint64(data[24:32])
-	info.UblksrvFlags = binary.LittleEndian.Uint64(data[32:40])
-	info.OwnerUID = binary.LittleEndian.Uint32(data[40:44])
-	info.OwnerGID = binary.LittleEndian.Uint32(data[44:48])
-	info.Reserved1 = binary.LittleEndian.Uint64(data[48:56])
-	info.Reserved2 = binary.LittleEndian.Uint64(data[56:64])
-	
-	return nil
+    // Support both 64-byte and 80-byte layouts seen across kernels.
+    if len(data) < 64 {
+        return ErrInsufficientData
+    }
+
+    info.NrHwQueues = binary.LittleEndian.Uint16(data[0:2])
+    info.QueueDepth = binary.LittleEndian.Uint16(data[2:4])
+    info.State = binary.LittleEndian.Uint16(data[4:6])
+    info.Pad0 = binary.LittleEndian.Uint16(data[6:8])
+    info.MaxIOBufBytes = binary.LittleEndian.Uint32(data[8:12])
+    info.DevID = binary.LittleEndian.Uint32(data[12:16])
+    info.UblksrvPID = int32(binary.LittleEndian.Uint32(data[16:20]))
+    info.Pad1 = binary.LittleEndian.Uint32(data[20:24])
+    info.Flags = binary.LittleEndian.Uint64(data[24:32])
+    info.UblksrvFlags = binary.LittleEndian.Uint64(data[32:40])
+
+    // The 64-byte layout ends here at reserved[2].
+    if len(data) >= 64 {
+        info.Reserved1 = binary.LittleEndian.Uint64(data[48:56])
+        info.Reserved2 = binary.LittleEndian.Uint64(data[56:64])
+    }
+
+    // Some kernels include owner uid/gid in a longer (80-byte) layout.
+    if len(data) >= 80 {
+        info.OwnerUID = binary.LittleEndian.Uint32(data[40:44])
+        info.OwnerGID = binary.LittleEndian.Uint32(data[44:48])
+        // bytes 64-80 may be padding
+    }
+
+    return nil
 }
 
 // MarshalCtrlDevInfo is a convenience function for external use

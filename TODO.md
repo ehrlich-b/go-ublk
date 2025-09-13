@@ -1,8 +1,16 @@
 # TODO.md - go-ublk Development Roadmap
 
-## ⚠️ STATUS: DEEP KERNEL PROTOCOL ISSUE IDENTIFIED
+## ⚠️ STATUS: Control Plane Protocol Issue; ADD_DEV = -EINVAL (Deep Investigation Needed)
 
-**ACTUAL STATUS**: Control plane working, FETCH_REQ commands submitting, but kernel protocol incomplete
+**ACTUAL STATUS (2025-09-13, reanchor session)**: Major progress made on control plane implementation. All fundamental issues fixed but ADD_DEV still returns `-EINVAL` (-22). Verified correct parameters being sent: queues=1, depth=32, maxIO=1MB, flags=0x40. Need deeper kernel protocol investigation or reference implementation comparison.
+
+**✅ FIXED IN THIS SESSION**:
+- Module loading: ublk_drv properly loaded on VM
+- URING_CMD SQE setup: addr field correctly set to buffer address (was hardcoded to 0)
+- Device info buffer: properly populated with valid UblksrvCtrlDevInfo structure (was empty)
+- NumQueues validation: fixed 0 → 1 to meet kernel requirements
+- IOCTL encoding: verified correct (0xc0207504)
+- Debugging: comprehensive logging shows correct parameter values being sent
 
 **What's Working**: 
 - ✅ Complete kernel interface (UAPI) definitions
@@ -10,17 +18,21 @@
 - ✅ Memory backend interface design
 - ✅ CLI tools framework
 - ✅ Data plane I/O processing logic implemented
-- ✅ **io_uring syscalls confirmed working** - real kernel communication happening
-- ✅ **Control plane functional** - ADD_DEV, SET_PARAMS, START_DEV all succeed
-- ✅ **FETCH_REQ commands submitting** - 32 commands per queue submitted successfully
-- ✅ **Fixed architectural ordering** - START_DEV → FETCH_REQ → queue runners
+- ✅ io_uring integration: rings mapped correctly (SQ/CQ/SQEs); `IORING_OP_URING_CMD` path is real and returns kernel results
+- ✅ Deterministic control-plane test harness (no fallback), with make targets to test explicit variants
 
 **What's NOT Working**:
-- ❌ **CRITICAL**: Device nodes (/dev/ublkb*, /dev/ublkc*) still not created despite successful FETCH_REQ
-- ❌ **Kernel protocol gap**: Missing some step or parameter that triggers device node creation
-- ❌ End-to-end I/O blocked by missing device nodes
+- ❌ `ADD_DEV` = `-EINVAL` for current control struct/encoding (both 64/80 dev_info and raw/ioctl variants tested)
+- ❌ `SET_PARAMS` = `-EINVAL` when encoding mismatched (needs unified mode post-ADD_DEV)
+- ❌ Success logs previously printed before char device open (to be fixed post-control-plane)
 
-**Status**: Pre-alpha, **advanced debugging stage - kernel protocol investigation needed**
+**Status**: Pre-alpha. Control-plane fix (48‑byte control struct/encoding) is the immediate priority; data plane follows.
+
+### Session Outcome (2025-09-09)
+- Removed fallback; single-pass control ops reveal true kernel behavior
+- Added make targets to test variants: `vm-e2e-64`, `vm-e2e-80`, `vm-e2e-64-raw`, `vm-e2e-80-raw`
+- Observed: `ADD_DEV = -EINVAL` for current 32‑byte control payload copy → indicates need for 48‑byte control struct + ioctl size 48
+- Data-plane CQE loop implemented previously; will be exercised after control-plane fix
 
 ## Architectural Review Findings (2025-09-08)
 
@@ -48,7 +60,7 @@
 4. **Recovery Modes**: User recovery and crash resilience
 5. **Performance**: CPU affinity, NUMA awareness, buffer pool optimization
 
-## Immediate Priority Tasks (Phase 3.5 - Cleanup & Performance Baseline)
+## Immediate Priority Tasks (Phase 3.5 - Control Plane Fix, Then Data Plane)
 
 ### Performance Baseline (HIGH PRIORITY) ❌ INVALID RESULTS!
 - [x] Create fio job files for standard tests (4K random, 128K sequential)
@@ -62,8 +74,20 @@
 
 **CRITICAL**: Previous performance claims were impossible - data plane is stubbed with sched_yield only!
 
-### CRITICAL: End-to-End I/O Verification (MANDATORY)
+### CRITICAL: Control Plane Fix (MANDATORY)
+- [ ] Switch `UblksrvCtrlCmd` to 48 bytes (match kernel `ublksrv_ctrl_cmd`)
+- [ ] Update marshal/unmarshal + compile-time size checks to 48
+- [ ] Update `UblkCtrlCmd()` ioctl encoding size to 48
+- [ ] Copy 48‑byte payload into `SQE128.cmd[80]` for control ops
+- [ ] Re-test `ADD_DEV` variants via make targets:
+  - `make -B ublk-mem vm-e2e-64`
+  - `make -B ublk-mem vm-e2e-80`
+  - If needed: `vm-e2e-64-raw` / `vm-e2e-80-raw`
+- [ ] Lock-in encoding mode after `ADD_DEV` and apply uniformly to `SET_PARAMS`/`START`/`STOP`/`DEL`/`GET*`
+
+### End-to-End I/O Verification (post-fix)
 - [x] Create end-to-end test with dd commands ✅ - test-e2e.sh
+- [x] Implement data-plane completions (CQE wait/parse)
 - [ ] **MANDATORY: test-e2e.sh MUST PASS before any functionality claims**
 - [ ] **MANDATORY: test-e2e.sh MUST PASS before any performance testing**  
 - [ ] Add end-to-end test to CI/automated testing
@@ -166,13 +190,13 @@
   - [x] Passwordless sudo setup for ublk operations
   - [x] Control plane validation (ADD_DEV, SET_PARAMS, START_DEV working)
 
-## Phase 3: Data Plane (Full Implementation) [NOT COMPLETED ❌]
+## Phase 3: Data Plane (Full Implementation) [BLOCKED on Control Fix]
 - [ ] Queue runner implementation
   - [x] Per-queue goroutine management
   - [x] mmap descriptor array from /dev/ublkc<ID>
   - [x] Implement FETCH_REQ submission (stub only)
-  - [ ] Implement real completion processing (currently just sched_yield)
-  - [ ] Handle different I/O operations (READ/WRITE/FLUSH/DISCARD) - not implemented
+  - [x] Implement real completion processing (io_uring_enter + CQE loop)
+  - [ ] Handle READ/WRITE/FLUSH/DISCARD via backend
 
 - [x] Buffer management
   - [x] Default path with pre-allocated buffers
@@ -246,7 +270,16 @@
 - [ ] NVMe passthrough backend
 
 ## Known Issues & Blockers
-- None yet
+- `ADD_DEV = -EINVAL` due to control struct/encoding mismatch → fix with 48‑byte ctrl struct
+- `SET_PARAMS = -EINVAL` if encoding differs from `ADD_DEV` mode → unify encoding after `ADD_DEV`
+- Success log should follow char device open; move final ready log after `/dev/ublkc<ID>` open
+
+## Next Steps
+- Implement `WaitForCompletion(timeout)` to fetch CQEs and drive `processRequests()`
+- Submit initial FETCH_REQ per tag after opening `/dev/ublkc<ID>`; on COMMIT, chain COMMIT_AND_FETCH_REQ
+- Apply encoding/len selection to STOP_DEV/DEL_DEV; verify clean teardown
+- Add a small capability probe (try GET_DEV_INFO and inspect returned size/fields) to lock encoding mode per kernel
+- Minimal e2e: create FS, write/read few MB, validate checksum; gate performance work behind passing e2e
 
 ## Notes
 - Keep kernel version requirements in mind
