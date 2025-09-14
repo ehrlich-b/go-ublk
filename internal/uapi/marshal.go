@@ -39,37 +39,38 @@ func Unmarshal(data []byte, v interface{}) error {
 	}
 }
 
-// marshalCtrlCmd manually marshals UblksrvCtrlCmd to ensure layout
+// marshalCtrlCmd manually marshals UblksrvCtrlCmd (48-byte variant)
 func marshalCtrlCmd(cmd *UblksrvCtrlCmd) []byte {
-    // 32-byte encoding matching kernel
-    buf := make([]byte, 32)
+    buf := make([]byte, 48)
 
-    binary.LittleEndian.PutUint32(buf[0:4], cmd.DevID)
-    binary.LittleEndian.PutUint16(buf[4:6], cmd.QueueID)
-    binary.LittleEndian.PutUint16(buf[6:8], cmd.Len)
+    binary.LittleEndian.PutUint32(buf[0:4], cmd.Cmd)
+    binary.LittleEndian.PutUint32(buf[4:8], cmd.Len)
     binary.LittleEndian.PutUint64(buf[8:16], cmd.Addr)
-    binary.LittleEndian.PutUint64(buf[16:24], cmd.Data)
-    binary.LittleEndian.PutUint16(buf[24:26], cmd.DevPathLen)
-    binary.LittleEndian.PutUint16(buf[26:28], cmd.Pad)
-    binary.LittleEndian.PutUint32(buf[28:32], cmd.Reserved)
+    binary.LittleEndian.PutUint64(buf[16:24], cmd.Data[0])
+    binary.LittleEndian.PutUint64(buf[24:32], cmd.Data[1])
+    binary.LittleEndian.PutUint32(buf[32:36], cmd.DevID)
+    binary.LittleEndian.PutUint16(buf[36:38], cmd.QueueID)
+    binary.LittleEndian.PutUint16(buf[38:40], cmd.Pad)
+    binary.LittleEndian.PutUint64(buf[40:48], cmd.Reserved)
 
     return buf
 }
 
-// unmarshalCtrlCmd manually unmarshals UblksrvCtrlCmd
+// unmarshalCtrlCmd manually unmarshals UblksrvCtrlCmd (48-byte variant)
 func unmarshalCtrlCmd(data []byte, cmd *UblksrvCtrlCmd) error {
-    if len(data) < 32 {
+    if len(data) < 48 {
         return ErrInsufficientData
     }
 
-    cmd.DevID = binary.LittleEndian.Uint32(data[0:4])
-    cmd.QueueID = binary.LittleEndian.Uint16(data[4:6])
-    cmd.Len = binary.LittleEndian.Uint16(data[6:8])
+    cmd.Cmd = binary.LittleEndian.Uint32(data[0:4])
+    cmd.Len = binary.LittleEndian.Uint32(data[4:8])
     cmd.Addr = binary.LittleEndian.Uint64(data[8:16])
-    cmd.Data = binary.LittleEndian.Uint64(data[16:24])
-    cmd.DevPathLen = binary.LittleEndian.Uint16(data[24:26])
-    cmd.Pad = binary.LittleEndian.Uint16(data[26:28])
-    cmd.Reserved = binary.LittleEndian.Uint32(data[28:32])
+    cmd.Data[0] = binary.LittleEndian.Uint64(data[16:24])
+    cmd.Data[1] = binary.LittleEndian.Uint64(data[24:32])
+    cmd.DevID = binary.LittleEndian.Uint32(data[32:36])
+    cmd.QueueID = binary.LittleEndian.Uint16(data[36:38])
+    cmd.Pad = binary.LittleEndian.Uint16(data[38:40])
+    cmd.Reserved = binary.LittleEndian.Uint64(data[40:48])
 
     return nil
 }

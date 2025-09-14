@@ -269,8 +269,8 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 
 	// Marshal the control command properly to ensure correct layout
     ctrlCmdBytes := uapi.Marshal(ctrlCmd)
-    if len(ctrlCmdBytes) != 32 {
-        return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
+    if len(ctrlCmdBytes) != 48 {
+        return nil, fmt.Errorf("control command marshal returned %d bytes, expected 48", len(ctrlCmdBytes))
     }
 
     // Debug: Log the control command fields before marshaling
@@ -279,10 +279,10 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
         "queue_id", ctrlCmd.QueueID,
         "len", ctrlCmd.Len,
         "addr", fmt.Sprintf("0x%x", ctrlCmd.Addr),
-        "data", ctrlCmd.Data,
-        "dev_path_len", ctrlCmd.DevPathLen)
+        "data0", ctrlCmd.Data[0],
+        "data1", ctrlCmd.Data[1])
 
-    // Copy the 32-byte ctrl header into the SQE128 inline cmd area (64..95)
+    // Copy the 48-byte ctrl header into the SQE128 inline cmd area (64..111)
     for i := range sqe.cmd {
         sqe.cmd[i] = 0
     }
@@ -301,22 +301,6 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
     }
 
     logger.Debug("URING_CMD completed", "result", result.Value(), "error", result.Error())
-
-    // If we got -EINVAL, try the alternate opcode (50 vs 51) once
-    if result.Value() == -22 {
-        alt := uint8(50)
-        if sqe.opcode == 50 {
-            alt = 51
-        }
-        logger.Warn("URING_CMD EINVAL; retrying with alternate opcode", "from", sqe.opcode, "to", alt)
-        sqe.opcode = alt
-        result2, err2 := r.submitAndWait(sqe)
-        if err2 == nil {
-            logger.Debug("alternate opcode URING_CMD completed", "result", result2.Value(), "error", result2.Error())
-            return result2, nil
-        }
-        logger.Error("alternate opcode submit failed", "error", err2)
-    }
     return result, nil
 }
 

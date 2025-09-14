@@ -19,6 +19,7 @@ const (
 type Controller struct {
     controlFd int
     ring      uring.Ring
+    useIoctl  bool
 }
 
 func NewController() (*Controller, error) {
@@ -70,7 +71,9 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
         MaxIOBufBytes:   uint32(params.MaxIOSize),
         DevID:           uint32(params.DeviceID),
         UblksrvPID:      int32(os.Getpid()),
-        UblksrvFlags:    0, // start conservative; feature negotiation via later params
+        // Negotiate features up front
+        Flags:           c.buildFeatureFlags(params),
+        UblksrvFlags:    0,
         OwnerUID:        uint32(os.Getuid()),
         OwnerGID:        uint32(os.Getgid()),
     }
@@ -94,37 +97,49 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
         }
     }
 
-    // Request features via inline data
-    // Request features via inline data (start with none; set via params later)
-    flags := uint64(0)
+    // Build control header (48-byte variant)
     cmd := &uapi.UblksrvCtrlCmd{
-        DevID:      devInfo.DevID, // Use device ID from device info structure, not params
-        QueueID:    0xFFFF,
-        Len:        uint16(len(infoBuf)),
-        Addr:       uint64(uintptr(unsafe.Pointer(&infoBuf[0]))),
-        Data:       flags,
-        DevPathLen: 0, // MUST be 0 for ADD_DEV unless appending a device path
-        Pad:        0,
-        Reserved:   0,
+        Cmd:     0,
+        Len:     uint32(len(infoBuf)),
+        Addr:    uint64(uintptr(unsafe.Pointer(&infoBuf[0]))),
+        Data:    [2]uint64{0, 0},
+        DevID:   devInfo.DevID,
+        QueueID: 0xFFFF,
+        Pad:     0,
+        Reserved: 0,
     }
 
     // Debug: log the control command being sent
-    fmt.Printf("*** DEBUG: ADD_DEV ctrl cmd: devID=%d, queueID=%d, len=%d, addr=0x%x, data=0x%x\n",
-        cmd.DevID, cmd.QueueID, cmd.Len, cmd.Addr, cmd.Data)
+    fmt.Printf("*** DEBUG: ADD_DEV ctrl cmd: devID=%d, queueID=%d, len=%d, addr=0x%x\n",
+        cmd.DevID, cmd.QueueID, cmd.Len, cmd.Addr)
 
     // Debug: dump the actual buffer bytes being sent
     fmt.Printf("*** DEBUG: Device info buffer (%d bytes): %x\n", len(infoBuf), infoBuf)
 
-    // Try ioctl-encoded first, then legacy raw code on -EINVAL
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV), cmd, 0)
+    // Choose encoding based on negotiated flags
+    c.useIoctl = (devInfo.Flags & uapi.UBLK_F_CMD_IOCTL_ENCODE) != 0
+    var op uint32 = uapi.UBLK_CMD_ADD_DEV
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return 0, fmt.Errorf("ADD_DEV submit failed: %v", err)
     }
-    if result.Value() == -22 {
-        fmt.Printf("*** WARN: ADD_DEV returned -EINVAL with ioctl-encoded cmd_op; retrying with raw code\n")
-        result, err = c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_ADD_DEV, cmd, 0)
-        if err != nil {
-            return 0, fmt.Errorf("ADD_DEV retry (raw) failed: %v", err)
+    // On explicit encoding rejection, try the other mode once
+    if result.Value() == -22 || result.Value() == -95 {
+        if c.useIoctl {
+            fmt.Printf("*** WARN: ioctl-encoded ADD_DEV failed (%d); retrying with raw code\n", result.Value())
+            c.useIoctl = false
+            result, err = c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_ADD_DEV, cmd, 0)
+            if err != nil {
+                return 0, fmt.Errorf("ADD_DEV retry (raw) failed: %v", err)
+            }
+        } else {
+            fmt.Printf("*** WARN: raw ADD_DEV failed (%d); retrying with ioctl-encoded code\n", result.Value())
+            c.useIoctl = true
+            result, err = c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV), cmd, 0)
+            if err != nil {
+                return 0, fmt.Errorf("ADD_DEV retry (ioctl) failed: %v", err)
+            }
         }
     }
     if result.Value() < 0 {
@@ -165,21 +180,19 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 		}
 	}
 
-	buf := uapi.Marshal(ublkParams)
-	ublkParams.Len = uint32(len(buf))
+    buf := uapi.Marshal(ublkParams)
+    ublkParams.Len = uint32(len(buf))
 
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
-		QueueID:    0xFFFF,
-		Len:        uint16(len(buf)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
+    cmd := &uapi.UblksrvCtrlCmd{
+        DevID:   devID,
+        QueueID: 0xFFFF,
+        Len:     uint32(len(buf)),
+        Addr:    uint64(uintptr(unsafe.Pointer(&buf[0]))),
+    }
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_SET_PARAMS), cmd, 0)
+    var op uint32 = uapi.UBLK_CMD_SET_PARAMS
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return fmt.Errorf("SET_PARAMS failed: %v", err)
     }
@@ -192,18 +205,10 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 }
 
 func (c *Controller) StartDevice(devID uint32) error {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV), cmd, 0)
+    cmd := &uapi.UblksrvCtrlCmd{ DevID: devID, QueueID: 0xFFFF }
+    var op uint32 = uapi.UBLK_CMD_START_DEV
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return fmt.Errorf("START_DEV failed: %v", err)
     }
@@ -234,18 +239,10 @@ func (c *Controller) StartDataPlane(devID uint32, numQueues, queueDepth int) err
 }
 
 func (c *Controller) StopDevice(devID uint32) error {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_STOP_DEV), cmd, 0)
+    cmd := &uapi.UblksrvCtrlCmd{ DevID: devID, QueueID: 0xFFFF }
+    var op uint32 = uapi.UBLK_CMD_STOP_DEV
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return fmt.Errorf("STOP_DEV failed: %v", err)
     }
@@ -258,18 +255,10 @@ func (c *Controller) StopDevice(devID uint32) error {
 }
 
 func (c *Controller) DeleteDevice(devID uint32) error {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_DEL_DEV), cmd, 0)
+    cmd := &uapi.UblksrvCtrlCmd{ DevID: devID, QueueID: 0xFFFF }
+    var op uint32 = uapi.UBLK_CMD_DEL_DEV
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return fmt.Errorf("DEL_DEV failed: %v", err)
     }
@@ -284,18 +273,16 @@ func (c *Controller) DeleteDevice(devID uint32) error {
 func (c *Controller) GetDeviceInfo(devID uint32) (*uapi.UblksrvCtrlDevInfo, error) {
 	buf := make([]byte, 80)
 
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
-		QueueID:    0xFFFF,
-		Len:        uint16(len(buf)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
+    cmd := &uapi.UblksrvCtrlCmd{
+        DevID:   devID,
+        QueueID: 0xFFFF,
+        Len:     uint32(len(buf)),
+        Addr:    uint64(uintptr(unsafe.Pointer(&buf[0]))),
+    }
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_DEV_INFO), cmd, 0)
+    var op uint32 = uapi.UBLK_CMD_GET_DEV_INFO
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return nil, fmt.Errorf("GET_DEV_INFO failed: %v", err)
     }
@@ -314,19 +301,15 @@ func (c *Controller) GetParams(devID uint32) (*uapi.UblkParams, error) {
     buf := make([]byte, 128)
 
     cmd := &uapi.UblksrvCtrlCmd{
-        DevID:      devID,
-        QueueID:    0xFFFF,
-        Len:        uint16(len(buf)),
-        Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
-        Data:       0,
-        DevPathLen: 0,
-        Pad:        0,
-        Reserved:   0,
+        DevID:   devID,
+        QueueID: 0xFFFF,
+        Len:     uint32(len(buf)),
+        Addr:    uint64(uintptr(unsafe.Pointer(&buf[0]))),
     }
 
-    // Try ioctl-encoded first, then raw if needed
-    // Honor encoding mode env for deterministic behavior
-    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_PARAMS), cmd, 0)
+    var op uint32 = uapi.UBLK_CMD_GET_PARAMS
+    if c.useIoctl { op = uapi.UblkCtrlCmd(op) }
+    result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
     if err != nil {
         return nil, fmt.Errorf("GET_PARAMS failed: %v", err)
     }

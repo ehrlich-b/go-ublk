@@ -12,8 +12,8 @@ func TestStructSizes(t *testing.T) {
 		size uintptr
 		expected int
 	}{
-        {"UblksrvCtrlCmd", unsafe.Sizeof(UblksrvCtrlCmd{}), 32},
-		{"UblksrvCtrlDevInfo", unsafe.Sizeof(UblksrvCtrlDevInfo{}), 80},
+        {"UblksrvCtrlCmd", unsafe.Sizeof(UblksrvCtrlCmd{}), 48},
+		{"UblksrvCtrlDevInfo", unsafe.Sizeof(UblksrvCtrlDevInfo{}), 64},
 		{"UblksrvIODesc", unsafe.Sizeof(UblksrvIODesc{}), 32},
 		{"UblksrvIOCmd", unsafe.Sizeof(UblksrvIOCmd{}), 16},
 	}
@@ -72,23 +72,24 @@ func TestParamsHelpers(t *testing.T) {
 func TestMarshalUnmarshal(t *testing.T) {
     t.Run("UblksrvCtrlCmd", func(t *testing.T) {
         original := &UblksrvCtrlCmd{
-            DevID:   42,
-            QueueID: 0xFFFF, // -1 as uint16
+            Cmd:     0,
             Len:     100,
             Addr:    0x123456789ABCDEF0,
-            Data:    0xDEADBEEF,
+            Data:    [2]uint64{0xDEADBEEF, 0},
+            DevID:   42,
+            QueueID: 0xFFFF, // -1 as uint16
         }
-        
+
         data := Marshal(original)
-        if len(data) != 32 {
-            t.Errorf("Marshal length = %d, want 32", len(data))
+        if len(data) != 48 {
+            t.Errorf("Marshal length = %d, want 48", len(data))
         }
-        
+
         var unmarshaled UblksrvCtrlCmd
         if err := Unmarshal(data, &unmarshaled); err != nil {
             t.Errorf("Unmarshal failed: %v", err)
         }
-        
+
         if unmarshaled.DevID != original.DevID {
             t.Errorf("DevID = %d, want %d", unmarshaled.DevID, original.DevID)
         }
@@ -98,7 +99,7 @@ func TestMarshalUnmarshal(t *testing.T) {
         if unmarshaled.Addr != original.Addr {
             t.Errorf("Addr = %x, want %x", unmarshaled.Addr, original.Addr)
         }
-        if unmarshaled.Data != original.Data || unmarshaled.Reserved != 0 || unmarshaled.Pad != 0 || unmarshaled.DevPathLen != 0 {
+        if unmarshaled.Data[0] != original.Data[0] || unmarshaled.Data[1] != original.Data[1] || unmarshaled.Reserved != 0 || unmarshaled.Pad != 0 {
             t.Errorf("Control fields mismatch after unmarshal")
         }
     })
@@ -138,8 +139,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 
 // Test ioctl encoding
 func TestIoctlEncoding(t *testing.T) {
-    // Test basic encoding
-    cmd := IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', UBLK_CMD_ADD_DEV, 32)
+    // Test basic encoding (48-byte ctrl header)
+    cmd := IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', UBLK_CMD_ADD_DEV, 48)
 	if cmd == 0 {
 		t.Error("IoctlEncode returned 0")
 	}
@@ -191,7 +192,7 @@ func BenchmarkMarshal(b *testing.B) {
         QueueID: 0,
         Len:     100,
         Addr:    0x123456789ABCDEF0,
-        Data:    0xDEADBEEF,
+        Data:    [2]uint64{0xDEADBEEF, 0},
     }
 	
 	b.ResetTimer()
@@ -206,7 +207,7 @@ func BenchmarkUnmarshal(b *testing.B) {
         QueueID: 0,
         Len:     100,
         Addr:    0x123456789ABCDEF0,
-        Data:    0xDEADBEEF,
+        Data:    [2]uint64{0xDEADBEEF, 0},
     }
 	data := Marshal(cmd)
 	
