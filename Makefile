@@ -3,6 +3,7 @@
 # Go parameters
 GOCMD=go
 GOBUILD=$(GOCMD) build
+TAGS?=
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
@@ -25,21 +26,21 @@ UNIT_FLAGS=-tags=!integration
 # Default target
 all: deps build test
 
-# Build all binaries
-build: $(BINARIES)
+# Build all binaries (FORCE ensures always rebuild)
+build: FORCE $(BINARIES)
 
-# Individual binary targets
-ublk-mem:
+# Individual binary targets (FORCE ensures always rebuild)
+ublk-mem: FORCE
 	@echo "Building ublk-mem..."
-	@$(GOBUILD) -o ublk-mem ./cmd/ublk-mem
+	@CGO_ENABLED=0 $(GOBUILD) $(if $(TAGS),-tags=$(TAGS),) -o ublk-mem ./cmd/ublk-mem
 
-ublk-file:
+ublk-file: FORCE
 	@echo "Building ublk-file (Phase 4)"
 
-ublk-null:
+ublk-null: FORCE
 	@echo "Building ublk-null (Phase 4)"
 
-ublk-zip:
+ublk-zip: FORCE
 	@echo "Building ublk-zip (Phase 4)"
 
 # Clean build artifacts
@@ -164,6 +165,55 @@ vm-run-env: ublk-mem vm-copy
 	@echo "🚀 Running ublk-mem on VM with custom env: $(ENV)"
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
 		"cd $(VM_DIR) && sudo env $(ENV) timeout 15 ./ublk-mem --size=16M -v || true; ls -la /dev/ublk* || true"
+
+.PHONY: vm-enable-logs vm-dump-logs
+vm-enable-logs:
+	@echo "🪵 Enabling maximal kernel logging on VM (io_uring + ublk + tracing)..."
+	@./vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
+
+vm-dump-logs:
+	@echo "📤 Dumping kernel logs and tracing buffers (last ~2k lines)..."
+	@./vm-ssh.sh 'bash -s' < scripts/vm-dump-logs.sh
+
+.PHONY: vm-debug vm-fetch-latest-logs
+vm-debug: ublk-mem vm-copy
+	@echo "🧪 Running deep debug on VM (strace + kernel tracing) ..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-debug-run.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
+	@./vm-ssh.sh 'bash -lc "cd ~/ublk-test && chmod +x ./vm-debug-run.sh && ./vm-debug-run.sh"'
+
+vm-fetch-latest-logs:
+	@echo "📥 Fetching latest ublk-debug archive from VM home..."
+	@./vm-ssh.sh 'bash -lc "ls -1t ~ | grep ^ublk-debug- | head -1"' > build/.last_log 2>/dev/null || true
+	@[ -s build/.last_log ] && echo "Latest: $$(cat build/.last_log)" || (echo "No log archives found" && exit 1)
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST):~/$$(cat build/.last_log) build/
+	@echo "✓ Logs downloaded to build/$$(cat build/.last_log)"
+
+.PHONY: vm-install-go
+vm-install-go:
+	@echo "🛠️  Installing Go toolchain and build deps on VM..."
+	@./vm-ssh.sh 'bash -lc "sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Check-Valid-Until=false -o Acquire::AllowInsecureRepositories=true update -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go build-essential linux-libc-dev"'
+	@./vm-ssh.sh 'bash -lc "go version || echo go not found"'
+	@echo "✓ VM Go installation step attempted"
+
+.PHONY: vm-fix-time
+vm-fix-time:
+	@echo "🕒 Attempting to sync VM time for apt validity..."
+	@./vm-ssh.sh 'bash -lc "sudo timedatectl set-ntp true || true; sudo systemctl restart systemd-timesyncd || true; sleep 3; timedatectl || true"'
+	@echo "✓ VM time sync attempted"
+
+.PHONY: vm-src-copy vm-build-e2e
+vm-src-copy:
+	@echo "📦 Archiving and copying source to VM..."
+	@mkdir -p build
+	@tar --exclude='./build' -czf build/ublk-src.tgz .
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no build/ublk-src.tgz $(VM_USER)@$(VM_HOST):~/
+	@./vm-ssh.sh 'bash -lc "rm -rf ~/ublk-src && mkdir -p ~/ublk-src && tar -xzf ~/ublk-src.tgz -C ~/ublk-src"'
+	@echo "✓ Source copied to VM"
+
+vm-build-e2e: vm-src-copy
+	@echo "🧰 Building on VM with cgo to use VM kernel headers..."
+	@./vm-ssh.sh 'bash -lc "cd ~/ublk-src && CGO_ENABLED=1 go build -o ublk-mem ./cmd/ublk-mem"'
+	@./vm-ssh.sh 'bash -lc "cd ~/ublk-src && chmod +x ./test-e2e.sh && sudo ./test-e2e.sh"'
 
 # Run benchmarks
 benchmark:
@@ -298,3 +348,12 @@ test-vm-io:
 		wait $$UBLK_PID 2>/dev/null || true
 		echo "=== Advanced test completed ==="
 	REMOTE_EOF
+minimal_test: minimal_test.c
+	gcc -o minimal_test minimal_test.c
+
+vm-minimal: minimal_test
+	sshpass -p "$$(cat /tmp/devvm_pwd.txt)" scp minimal_test behrlich@192.168.4.79:~/
+	./vm-ssh.sh "sudo ./minimal_test"
+
+# FORCE target to ensure rebuilds
+FORCE:

@@ -86,22 +86,28 @@ type Config struct {
 
 // NewRing creates a new Ring implementation
 func NewRing(config Config) (Ring, error) {
-	logger := logging.Default()
-	logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
-	
-	// Try to create a minimal io_uring for URING_CMD operations
-	minRing, err := NewMinimalRing(config.Entries, config.FD)
-	if err != nil {
-		// Log the actual failure reason
-		logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
-		logger.Warn("using stub ring - this breaks actual functionality")
-		
-		// Fallback to stub for development if real implementation fails
-		return &stubRing{config: config}, nil
-	}
-	
-	logger.Info("created real io_uring implementation", "entries", config.Entries)
-	return minRing, nil
+    logger := logging.Default()
+    logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
+
+    // Prefer full-featured io_uring via library (if available)
+    if ring, err := NewRealRing(config); err == nil {
+        logger.Info("created io_uring via library", "entries", config.Entries)
+        return ring, nil
+    } else {
+        logger.Warn("NewRealRing failed, trying minimal shim", "error", err)
+    }
+
+    // Fallback: minimal syscall-based shim (limited but real syscalls)
+    if minRing, err := NewMinimalRing(config.Entries, config.FD); err == nil {
+        logger.Info("created minimal io_uring implementation", "entries", config.Entries)
+        return minRing, nil
+    } else {
+        logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
+    }
+
+    // Last resort: stub (non-functional for real I/O)
+    logger.Warn("using stub ring - this breaks actual functionality")
+    return &stubRing{config: config}, nil
 }
 
 // Stub implementation for development/testing

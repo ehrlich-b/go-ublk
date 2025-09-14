@@ -121,6 +121,13 @@ Pure Go implementation of Linux ublk (userspace block driver) framework. No cgo 
 - Check Makefile for available targets before running commands
 - Example: Use `make test-unit` not `go test ./...`
 
+**CRITICAL: Testing Commands**
+- **NEVER run tests on local machine** - use VM only
+- Use `make vm-e2e` for end-to-end VM testing (NOT `make test-vm`)
+- Use `make test-unit` for unit tests (local machine OK)
+- Other VM test variants: `make vm-e2e-64`, `make vm-e2e-80`, etc.
+- Always build first: `make build` before VM testing
+
 ### Security Rules
 **NEVER EVER HARDCODE PASSWORDS OR CREDENTIALS IN ANY FILES**
 - Never put passwords in source code, scripts, or documentation

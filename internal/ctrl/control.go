@@ -5,6 +5,8 @@ import (
     "syscall"
     "unsafe"
     "os"
+    "runtime"
+    "strconv"
 
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
@@ -68,7 +70,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
         MaxIOBufBytes:   uint32(params.MaxIOSize),
         DevID:           uint32(params.DeviceID),
         UblksrvPID:      int32(os.Getpid()),
-        UblksrvFlags:    0x40, // Use exactly the flags from the report
+        UblksrvFlags:    0, // start conservative; feature negotiation via later params
         OwnerUID:        uint32(os.Getuid()),
         OwnerGID:        uint32(os.Getgid()),
     }
@@ -77,10 +79,24 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
     fmt.Printf("*** DEBUG: ADD_DEV device info: queues=%d, depth=%d, maxIO=%d, flags=0x%x, devID=%d\n",
         devInfo.NrHwQueues, devInfo.QueueDepth, devInfo.MaxIOBufBytes, devInfo.UblksrvFlags, devInfo.DevID)
 
+    // Marshal device info and optionally pad to requested length (64 or 80)
     infoBuf := uapi.Marshal(devInfo)
+    if v := os.Getenv("UBLK_DEVINFO_LEN"); v != "" {
+        if want, err := strconv.Atoi(v); err == nil {
+            if want == 80 && len(infoBuf) == 64 {
+                padded := make([]byte, 80)
+                copy(padded, infoBuf)
+                infoBuf = padded
+                fmt.Printf("*** DEBUG: Using 80-byte dev_info payload (padded)\n")
+            } else if want == 64 && len(infoBuf) != 64 {
+                // Not expected today; keep as-is
+            }
+        }
+    }
 
     // Request features via inline data
-    flags := devInfo.UblksrvFlags
+    // Request features via inline data (start with none; set via params later)
+    flags := uint64(0)
     cmd := &uapi.UblksrvCtrlCmd{
         DevID:      devInfo.DevID, // Use device ID from device info structure, not params
         QueueID:    0xFFFF,
@@ -99,14 +115,24 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
     // Debug: dump the actual buffer bytes being sent
     fmt.Printf("*** DEBUG: Device info buffer (%d bytes): %x\n", len(infoBuf), infoBuf)
 
-    // Use raw command only - no fallback confusion
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_ADD_DEV, cmd, 0)
+    // Try ioctl-encoded first, then legacy raw code on -EINVAL
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV), cmd, 0)
     if err != nil {
         return 0, fmt.Errorf("ADD_DEV submit failed: %v", err)
+    }
+    if result.Value() == -22 {
+        fmt.Printf("*** WARN: ADD_DEV returned -EINVAL with ioctl-encoded cmd_op; retrying with raw code\n")
+        result, err = c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_ADD_DEV, cmd, 0)
+        if err != nil {
+            return 0, fmt.Errorf("ADD_DEV retry (raw) failed: %v", err)
+        }
     }
     if result.Value() < 0 {
         return 0, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
     }
+
+    // Ensure device info buffer stays alive until after kernel copies it
+    runtime.KeepAlive(infoBuf)
 
     info := uapi.UnmarshalCtrlDevInfo(infoBuf)
     return info.DevID, nil
@@ -153,7 +179,7 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 		Reserved:   0,
 	}
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_SET_PARAMS, cmd, 0)
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_SET_PARAMS), cmd, 0)
     if err != nil {
         return fmt.Errorf("SET_PARAMS failed: %v", err)
     }
@@ -177,7 +203,7 @@ func (c *Controller) StartDevice(devID uint32) error {
 		Reserved:   0,
 	}
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_START_DEV, cmd, 0)
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV), cmd, 0)
     if err != nil {
         return fmt.Errorf("START_DEV failed: %v", err)
     }
@@ -219,7 +245,7 @@ func (c *Controller) StopDevice(devID uint32) error {
 		Reserved:   0,
 	}
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_STOP_DEV, cmd, 0)
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_STOP_DEV), cmd, 0)
     if err != nil {
         return fmt.Errorf("STOP_DEV failed: %v", err)
     }
@@ -243,7 +269,7 @@ func (c *Controller) DeleteDevice(devID uint32) error {
 		Reserved:   0,
 	}
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_DEL_DEV, cmd, 0)
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_DEL_DEV), cmd, 0)
     if err != nil {
         return fmt.Errorf("DEL_DEV failed: %v", err)
     }
@@ -269,7 +295,7 @@ func (c *Controller) GetDeviceInfo(devID uint32) (*uapi.UblksrvCtrlDevInfo, erro
 		Reserved:   0,
 	}
 
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_GET_DEV_INFO, cmd, 0)
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_DEV_INFO), cmd, 0)
     if err != nil {
         return nil, fmt.Errorf("GET_DEV_INFO failed: %v", err)
     }
@@ -300,7 +326,7 @@ func (c *Controller) GetParams(devID uint32) (*uapi.UblkParams, error) {
 
     // Try ioctl-encoded first, then raw if needed
     // Honor encoding mode env for deterministic behavior
-    result, err := c.ring.SubmitCtrlCmd(uapi.UBLK_CMD_GET_PARAMS, cmd, 0)
+    result, err := c.ring.SubmitCtrlCmd(uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_PARAMS), cmd, 0)
     if err != nil {
         return nil, fmt.Errorf("GET_PARAMS failed: %v", err)
     }
