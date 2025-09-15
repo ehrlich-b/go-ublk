@@ -148,8 +148,9 @@ func IoctlEncode(dir, typ, nr, size uint32) uint32 {
 
 // Helper function to create ublk ioctl commands
 func UblkCtrlCmd(cmd uint32) uint32 {
-    // sizeof(UblksrvCtrlCmd) = 48 bytes (variant used by this project)
-    return IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', cmd, 48)
+    // Use 32-byte control header size to match UblksrvCtrlCmd (32 bytes)
+    // This aligns with working references and our SQE layout.
+    return IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', cmd, 32)
 }
 
 func UblkIOCmd(cmd uint32) uint32 {

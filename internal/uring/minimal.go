@@ -228,11 +228,11 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	}
 
     // Create URING_CMD SQE for control operations
-    // For ADD_DEV and other control commands, the 32-byte ublksrv_ctrl_cmd
-    // must live inline in the SQE128 cmd area (bytes 64..95). The base SQE's
-    // addr/len describe the userspace payload (dev_info, or [path+info] for
-    // unprivileged flow).
+    // CRITICAL FIX: The 32-byte ublksrv_ctrl_cmd must be placed directly in the
+    // standard SQE cmd area (bytes 32-63), NOT in the SQE128 extension!
+    // This matches the working C implementation layout.
     sqe := &sqe128{}
+
     // Zero all fields first to ensure clean state
     for i := range sqe.union0 {
         sqe.union0[i] = 0
@@ -244,33 +244,33 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
         sqe.cmd[i] = 0
     }
 
-    // Now set the required fields
+    // Set the base SQE fields
     sqe.opcode = kernelUringCmdOpcode()
     sqe.flags = 0
     sqe.ioprio = 0
     sqe.fd = int32(r.controlFd)
-    // CRITICAL: For URING_CMD, the base SQE addr/len fields describe the userspace
-    // payload that the control header points to. They should match what's in the
-    // inline control header.
-    sqe.addr = ctrlCmd.Addr  // Must match the addr in the control header
-    sqe.len = uint32(ctrlCmd.Len)   // Must match the len in the control header
+
+    // CRITICAL: The addr field should be 0 for URING_CMD operations
+    // The control command data goes in bytes 32-63, not via an external buffer
+    sqe.addr = 0
+    sqe.len = uint32(ctrlCmd.Len)
     sqe.opcodeFlags = 0
     sqe.bufIndex = 0
     sqe.personality = 0
     sqe.spliceFdIn = 0
     sqe.fileIndex = 0
 
-	// Set cmd_op field properly for URING_CMD
+	// Set cmd_op field to ioctl-encoded value (like working C implementation)
 	sqe.setCmdOp(cmd)
 
-    // Note: For URING_CMD with SQE128, command data lives in the 64-byte
-    // extended area at offset 64 (sqe.cmd). user_data remains intact.
-    sqe.userData = userData
+    // Set userData to a non-zero value (C implementation uses pointer to cmd)
+    // This might be used by the kernel for validation
+    sqe.userData = 0x1234567890ABCDEF  // Non-zero placeholder value
 
-	// Marshal the control command properly to ensure correct layout
+    // Marshal the 32-byte control command
     ctrlCmdBytes := uapi.Marshal(ctrlCmd)
-    if len(ctrlCmdBytes) != 48 {
-        return nil, fmt.Errorf("control command marshal returned %d bytes, expected 48", len(ctrlCmdBytes))
+    if len(ctrlCmdBytes) != 32 {
+        return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
     }
 
     // Debug: Log the control command fields before marshaling
@@ -279,14 +279,15 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
         "queue_id", ctrlCmd.QueueID,
         "len", ctrlCmd.Len,
         "addr", fmt.Sprintf("0x%x", ctrlCmd.Addr),
-        "data0", ctrlCmd.Data[0],
-        "data1", ctrlCmd.Data[1])
+        "data", ctrlCmd.Data)
 
-    // Copy the 48-byte ctrl header into the SQE128 inline cmd area (64..111)
-    for i := range sqe.cmd {
-        sqe.cmd[i] = 0
-    }
-    copy(sqe.cmd[:], ctrlCmdBytes)
+    // CRITICAL FIX: Based on working C bytes, control command starts at byte 48!
+    // Working C shows ffffffffffff4000 at bytes 48-55 (dev_id, queue_id, len)
+    // So the 32-byte control command goes at bytes 48-79
+    controlCmdArea := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
+    copy(controlCmdArea[:], ctrlCmdBytes)
+
+    // DO NOT also copy to sqe.cmd (bytes 64+) - that's the wrong location!
 
 	// Debug: log the exact control header bytes being sent to kernel
     logger.Debug("control header bytes", "header_hex", fmt.Sprintf("%x", ctrlCmdBytes))
@@ -460,6 +461,16 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 
 	// Copy our SQE to the SQEs array
 	*(*sqe128)(sqeSlot) = *sqe
+
+	// CRITICAL: For URING_CMD, write control command directly to sqeSlot at byte 48
+	// This must be done AFTER the struct copy to avoid being overwritten
+	if sqe.opcode == kernelUringCmdOpcode() {
+		// The control command needs to be at bytes 48-79 (starting at addr3)
+		// Extract the control command from the original sqe memory
+		srcCmd := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
+		dstCmd := (*[32]byte)(unsafe.Pointer(uintptr(sqeSlot) + 48))
+		copy(dstCmd[:], srcCmd[:])
+	}
 
 	// Debug: Log the entire SQE as bytes to verify layout
 	sqeBytes := (*[128]byte)(unsafe.Pointer(sqeSlot))

@@ -20,6 +20,7 @@ func main() {
 	var (
 		sizeStr = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
 		verbose = flag.Bool("v", false, "Verbose output")
+		minimal = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
 	)
 	flag.Parse()
 
@@ -35,8 +36,20 @@ func main() {
 
 	// Create device parameters
 	params := ublk.DefaultParams(memBackend)
-	params.QueueDepth = 32
-	params.NumQueues = 1
+	if *minimal {
+		// Use absolute minimal parameters to avoid memory allocation issues
+		fmt.Printf("*** Using MINIMAL parameters for debugging memory allocation\n")
+		params.QueueDepth = 1     // Absolute minimum
+		params.NumQueues = 1      // Single queue
+		params.MaxIOSize = 4096   // 4KB instead of 1MB
+	} else {
+		params.QueueDepth = 32
+		params.NumQueues = 1
+	}
+
+	// Critical for kernel 6.11+: use ioctl-encoded control commands
+	// This sets UBLK_F_CMD_IOCTL_ENCODE in the feature flags sent at ADD_DEV.
+	params.EnableIoctlEncode = true
 
 	// Set up logging
 	logConfig := logging.DefaultConfig()

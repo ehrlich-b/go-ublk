@@ -355,5 +355,29 @@ vm-minimal: minimal_test
 	sshpass -p "$$(cat /tmp/devvm_pwd.txt)" scp minimal_test behrlich@192.168.4.79:~/
 	./vm-ssh.sh "sudo ./minimal_test"
 
+# Copy entire repo to VM (excluding .git, build artifacts, etc.)
+vm-scp-all:
+	@echo "📦 Copying entire repo to VM..."
+	@echo "Excluding: .git, build artifacts, IDE files, etc."
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p ~/go-ublk"
+	@sshpass -p "$(VM_PASS)" rsync -avz \
+		--exclude='.git' \
+		--exclude='*.o' \
+		--exclude='*.so' \
+		--exclude='*.exe' \
+		--exclude='ublk-mem' \
+		--exclude='ublk-file' \
+		--exclude='ublk-null' \
+		--exclude='ublk-zip' \
+		--exclude='build/' \
+		--exclude='.vscode/' \
+		--exclude='.idea/' \
+		--exclude='*.log' \
+		--exclude='*.tmp' \
+		-e "sshpass -p '$(VM_PASS)' ssh -o StrictHostKeyChecking=no" \
+		./ $(VM_USER)@$(VM_HOST):~/go-ublk/
+	@echo "✓ Repo copied to ~/go-ublk on VM"
+	@echo "💡 Run: ./vm-ssh.sh \"cd go-ublk && make build\" to build on VM"
+
 # FORCE target to ensure rebuilds
 FORCE:

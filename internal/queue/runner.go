@@ -42,28 +42,27 @@ type Config struct {
 
 // NewRunner creates a new queue runner
 func NewRunner(ctx context.Context, config Config) (*Runner, error) {
-	// The character device (/dev/ublkcN) gets created by the kernel AFTER
-	// we start submitting FETCH_REQ commands. So we need to retry opening it.
-	charPath := uapi.UblkDevicePath(config.DevID)
-	
-	// Try to open the character device with retries
-	var fd int
-	var err error
-	maxRetries := 10
-	for i := 0; i < maxRetries; i++ {
-		fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
-		if err == nil {
-			break
-		}
-		
-		if err == syscall.ENOENT {
-			// Device doesn't exist yet - this is expected initially
-			// Return a special "waiting" runner that will start the data plane
-			return NewWaitingRunner(ctx, config), nil
-		} else {
-			return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
-		}
-	}
+    // The character device (/dev/ublkcN) should exist after ADD_DEV.
+    // We may need to retry briefly until udev creates the node.
+    charPath := uapi.UblkDevicePath(config.DevID)
+    var fd int
+    var err error
+    const maxRetries = 50 // up to ~5s with 100ms sleep
+    for i := 0; i < maxRetries; i++ {
+        fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
+        if err == nil {
+            break
+        }
+        if err != syscall.ENOENT {
+            return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+        }
+        // Sleep 100ms and retry
+        ts := syscall.Timespec{Sec: 0, Nsec: 100 * 1_000_000}
+        syscall.Nanosleep(&ts, nil)
+    }
+    if err != nil {
+        return nil, fmt.Errorf("character device did not appear: %s", charPath)
+    }
 
 	// Create io_uring for this queue
 	ringConfig := uring.Config{
@@ -72,7 +71,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		Flags:   0,
 	}
 
-	ring, err := uring.NewRing(ringConfig)
+    ring, err := uring.NewRing(ringConfig)
 	if err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to create io_uring: %v", err)
@@ -102,7 +101,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		logger:  config.Logger,
 	}
 
-	return runner, nil
+    return runner, nil
 }
 
 // Start begins processing I/O requests
@@ -112,8 +111,22 @@ func (r *Runner) Start() error {
 	}
 
 	// Start the I/O loop in a goroutine
-	go r.ioLoop()
-	return nil
+    go r.ioLoop()
+    return nil
+}
+
+// Prime submits initial FETCH_REQ commands to fill the queue.
+// Must be called after NewRunner successfully initialized the ring.
+func (r *Runner) Prime() error {
+    if r.charFd < 0 || r.ring == nil {
+        return fmt.Errorf("runner not initialized")
+    }
+    for tag := 0; tag < r.depth; tag++ {
+        if err := r.submitFetchReq(uint16(tag)); err != nil {
+            return fmt.Errorf("submit initial FETCH_REQ[%d]: %w", tag, err)
+        }
+    }
+    return nil
 }
 
 // Stop stops the runner
@@ -165,16 +178,7 @@ func (r *Runner) ioLoop() {
 		return
 	}
 
-	// Submit initial FETCH_REQ commands to fill the queue
-	for tag := 0; tag < r.depth; tag++ {
-		err := r.submitFetchReq(uint16(tag))
-		if err != nil {
-			if r.logger != nil {
-				r.logger.Printf("Queue %d: Failed to submit initial FETCH_REQ[%d]: %v", r.queueID, tag, err)
-			}
-			return
-		}
-	}
+    // Queue was primed before START_DEV; nothing to do here.
 
 	// Main processing loop
 	for {
@@ -218,8 +222,8 @@ func (r *Runner) waitAndStartDataPlane() {
 	
 	charPath := uapi.UblkDevicePath(r.devID)
 	
-	// Wait for the character device to appear with longer timeout
-	maxWait := 30 // 30 seconds
+    // Wait for the character device to appear with longer timeout
+    maxWait := 30 // 30 seconds
 	for i := 0; i < maxWait; i++ {
 		select {
 		case <-r.ctx.Done():
@@ -239,14 +243,6 @@ func (r *Runner) waitAndStartDataPlane() {
                 logger.Error("failed to initialize data plane", "error", err)
                 syscall.Close(fd)
                 return
-            }
-            
-            // Submit initial FETCH_REQ commands to fill the queue
-            for tag := 0; tag < r.depth; tag++ {
-                if err := r.submitFetchReq(uint16(tag)); err != nil {
-                    logger.Error("failed to submit initial FETCH_REQ", "tag", tag, "error", err)
-                    return
-                }
             }
 
             // Main processing loop

@@ -194,55 +194,70 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		numQueues = 1 // Single queue for minimal implementation
 	}
 
-    // STEP 1: Start device first
+    // STEP 1: Initialize queue runners and prime FETCH_REQ before START_DEV
+    // This matches ublksrv behavior: open /dev/ublkcN, create rings, mmap,
+    // post FETCH_REQ for each tag, then START_DEV to begin scheduling.
+    device.runners = make([]*queue.Runner, numQueues)
+    for i := 0; i < numQueues; i++ {
+        runnerConfig := queue.Config{
+            DevID:   devID,
+            QueueID: uint16(i),
+            Depth:   params.QueueDepth,
+            Backend: params.Backend,
+            Logger:  options.Logger,
+        }
+
+        runner, err := queue.NewRunner(device.ctx, runnerConfig)
+        if err != nil {
+            // Cleanup already created runners
+            for j := 0; j < i; j++ {
+                if device.runners[j] != nil {
+                    device.runners[j].Close()
+                }
+            }
+            ctrl.DeleteDevice(devID)
+            return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
+        }
+
+        // Prime the queue with initial FETCH_REQs so kernel has slots
+        if err := runner.Prime(); err != nil {
+            for j := 0; j <= i; j++ {
+                if device.runners[j] != nil {
+                    device.runners[j].Close()
+                }
+            }
+            ctrl.DeleteDevice(devID)
+            return nil, fmt.Errorf("failed to prime queue runner %d: %v", i, err)
+        }
+
+        device.runners[i] = runner
+    }
+
+    // STEP 2: Now start device, after queues are primed
     err = ctrl.StartDevice(devID)
     if err != nil {
+        for j := 0; j < len(device.runners); j++ {
+            if device.runners[j] != nil {
+                device.runners[j].Close()
+            }
+        }
         ctrl.DeleteDevice(devID)
         return nil, fmt.Errorf("failed to start device: %v", err)
     }
 
-    // STEP 2: Proceed to queue runners - kernel should create device nodes
-
-    // STEP 3: Now start queue runners - device nodes should exist
-	device.runners = make([]*queue.Runner, numQueues)
-	for i := 0; i < numQueues; i++ {
-		runnerConfig := queue.Config{
-			DevID:   devID,
-			QueueID: uint16(i),
-			Depth:   params.QueueDepth,
-			Backend: params.Backend,
-			Logger:  options.Logger,
-		}
-
-		runner, err := queue.NewRunner(device.ctx, runnerConfig)
-		if err != nil {
-			// Cleanup already created runners
-			for j := 0; j < i; j++ {
-				if device.runners[j] != nil {
-					device.runners[j].Close()
-				}
-			}
-			ctrl.StopDevice(devID)
-			ctrl.DeleteDevice(devID)
-			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
-		}
-
-		device.runners[i] = runner
-
-		// Start the runner
-		err = runner.Start()
-		if err != nil {
-			// Cleanup
-			for j := 0; j <= i; j++ {
-				if device.runners[j] != nil {
-					device.runners[j].Close()
-				}
-			}
-			ctrl.StopDevice(devID)
-			ctrl.DeleteDevice(devID)
-			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
-		}
-	}
+    // STEP 3: Start background I/O loops now that device is live
+    for i := 0; i < numQueues; i++ {
+        if err := device.runners[i].Start(); err != nil {
+            for j := 0; j < len(device.runners); j++ {
+                if device.runners[j] != nil {
+                    device.runners[j].Close()
+                }
+            }
+            ctrl.StopDevice(devID)
+            ctrl.DeleteDevice(devID)
+            return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
+        }
+    }
 
 	device.started = true
 

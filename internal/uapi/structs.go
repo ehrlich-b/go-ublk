@@ -5,33 +5,32 @@ import (
     "unsafe"
 )
 
-// UblksrvCtrlCmd must match kernel struct (48 bytes variant):
-// This layout corresponds to the control header copied into the SQE128 cmd area
-// for URING_CMD and to the ioctl structure size for encoded cmd_op.
+// UblksrvCtrlCmd must match kernel struct exactly (32 bytes):
+// This structure gets placed directly in the SQE cmd area (bytes 32-63)
 //
 // struct ublksrv_ctrl_cmd {
-//   __u32 cmd;       // optional, not used for URING_CMD path
-//   __u32 len;       // data length for buffer at addr
-//   __u64 addr;      // userspace buffer address (IN/OUT depending on op)
-//   __u64 data[2];   // inline payload (op-specific)
-//   __u32 dev_id;    // device id (0xFFFFFFFF for new device)
-//   __u16 queue_id;  // 0xFFFF for control ops
-//   __u16 pad;       // reserved/padding
-//   __u64 reserved;  // must be zero
+//   __u32 dev_id;        // device id (0xFFFFFFFF for new device)
+//   __u16 queue_id;      // 0xFFFF for control ops
+//   __u16 len;           // data length for buffer at addr
+//   __u64 addr;          // userspace buffer address (IN/OUT depending on op)
+//   __u64 data[1];       // inline payload (op-specific)
+//   __u16 dev_path_len;  // for unprivileged mode only
+//   __u16 pad;           // reserved/padding
+//   __u32 reserved;      // must be zero
 // };
 type UblksrvCtrlCmd struct {
-    Cmd     uint32
-    Len     uint32
-    Addr    uint64
-    Data    [2]uint64
-    DevID   uint32
-    QueueID uint16
-    Pad     uint16
-    Reserved uint64
+    DevID      uint32    // device id (0xFFFFFFFF for new device)
+    QueueID    uint16    // 0xFFFF for control ops
+    Len        uint16    // data length for buffer at addr
+    Addr       uint64    // userspace buffer address
+    Data       uint64    // inline payload (single uint64)
+    DevPathLen uint16    // for unprivileged mode
+    Pad        uint16    // padding
+    Reserved   uint32    // must be zero
 }
 
-// Compile-time size check - must be exactly 48 bytes
-var _ [48]byte = [unsafe.Sizeof(UblksrvCtrlCmd{})]byte{}
+// Compile-time size check - must be exactly 32 bytes to fit in SQE cmd area
+var _ [32]byte = [unsafe.Sizeof(UblksrvCtrlCmd{})]byte{}
 
 // UblksrvCtrlDevInfo contains device information
 type UblksrvCtrlDevInfo struct {
