@@ -430,12 +430,13 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
 	bufSize := depth * 64 * 1024 // 64KB per request buffer
 
-	// Map descriptor array
+	// Map descriptor array. Kernel exposes descriptors read-only; matching
+	// ublksrv, request PROT_READ to avoid EPERM when the VM hardens writes.
 	descPtr, _, errno := syscall.Syscall6(
 		syscall.SYS_MMAP,
 		0, // addr
 		uintptr(descSize), // length
-		syscall.PROT_READ|syscall.PROT_WRITE, // prot
+		syscall.PROT_READ, // prot
 		syscall.MAP_SHARED, // flags
 		uintptr(fd), // fd
 		0, // offset
