@@ -1,34 +1,24 @@
-# go-ublk
+# go-ublk (BROKEN - DO NOT USE)
 
-Pure Go implementation of Linux ublk (userspace block driver) - create high-performance block devices in userspace without kernel modules.
+⚠️ **THIS PROJECT DOES NOT WORK. START_DEV HANGS FOREVER.**
 
-## What is ublk?
+Pure Go implementation of Linux ublk (userspace block driver).
 
-ublk is a Linux kernel framework (introduced in 6.1) that allows userspace programs to implement block devices. Unlike NBD or FUSE, ublk uses io_uring for high-performance async I/O, making it suitable for production storage systems.
+## Current Status
 
-## Features
+- ❌ **BROKEN**: START_DEV command hangs indefinitely
+- ❌ **No block device**: /dev/ublkb0 never created
+- ❌ **Data plane**: Never tested (blocked by START_DEV)
+- ✅ ADD_DEV works (creates /dev/ublkc0)
+- ✅ SET_PARAMS works
 
-- **Pure Go** - No cgo dependencies
-- **High Performance** - Uses io_uring for zero-copy I/O operations
-- **Multiple Backends** - RAM, file, null, and read-only zip backends included
-- **Production Ready** - Proper error handling, graceful shutdown, signal handling
-- **Flexible** - Simple Backend interface for custom implementations
+## The Problem
 
-## Requirements
+The START_DEV ioctl hangs forever in io_uring_enter syscall. Until this is fixed, nothing works.
 
-- Linux kernel ≥ 6.1 (ublk support)
-- Linux kernel ≥ 5.19 recommended (better io_uring features)
-- Root privileges (or CAP_SYS_ADMIN) for device creation
-- io_uring support in kernel
-
-## Status
-
-**⚠️ CRITICAL CORRECTION: Data plane not implemented**
-
-- ✅ **Phase 1-2 Complete**: Foundation and Control Plane implemented
-- ❌ **Phase 3 Incomplete**: Data plane I/O processing is stubbed (not functional)
-- ✅ **Control Plane Working**: Device creation/deletion works on Linux 6.11
-- ⚠️ **Pre-Alpha Status**: Core I/O functionality not yet implemented
+See:
+- `SIMPLE.md` - What actually works
+- `TODO.md` - The one bug to fix
 
 ## Installation
 

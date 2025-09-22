@@ -32,7 +32,7 @@ build: FORCE $(BINARIES)
 # Individual binary targets (FORCE ensures always rebuild)
 ublk-mem: FORCE
 	@echo "Building ublk-mem..."
-	@CGO_ENABLED=0 $(GOBUILD) $(if $(TAGS),-tags=$(TAGS),) -o ublk-mem ./cmd/ublk-mem
+	@CGO_ENABLED=0 $(GOBUILD) -o ublk-mem ./cmd/ublk-mem
 
 ublk-file: FORCE
 	@echo "Building ublk-file (Phase 4)"

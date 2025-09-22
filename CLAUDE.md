@@ -1,34 +1,20 @@
 # CLAUDE.md - Project-Specific Guidance for go-ublk
 
-## Project Overview
-Pure Go implementation of Linux ublk (userspace block driver) framework. No cgo dependencies.
+## ⚠️ PROJECT STATUS: BROKEN
 
-## 🚀 CURRENT STATUS: FOUNDATION COMPLETE & VALIDATED!
+**START_DEV hangs forever. Nothing works until this is fixed.**
 
-**Phase 1-3 COMPLETE**: Core ublk implementation working on real kernels!
+### What Actually Works:
+- ADD_DEV command (creates /dev/ublkc0)
+- SET_PARAMS command
 
-### Architectural State (2025-09-08) ✅
-- **Solid Foundation**: Clean 3-layer architecture (API → Internal → Kernel)
-- **Complete Control Plane**: Full device lifecycle management working
-- **Full Data Plane**: Real I/O processing with io_uring URING_CMD operations  
-- **Kernel Integration**: Successfully creates `/dev/ublkb0` devices on Linux 6.11
-- **Memory Management**: Fixed - proper mmap/munmap of descriptor arrays
-- **Testing Infrastructure**: Unit tests + VM validation framework
-- **Production Patterns**: Resource cleanup, graceful shutdown, error handling
+### What's Broken:
+- START_DEV hangs forever
+- No block device created
+- Data plane never tested
 
-### What's Production-Ready ✅
-- Device creation and deletion lifecycle
-- I/O request processing (READ/WRITE/FLUSH/DISCARD)
-- Queue runner management with goroutines  
-- Memory-mapped descriptor array handling
-- Signal handling and graceful shutdown
-- Memory backend implementation
-- CLI tool (ublk-mem) with proper UX
-
-### Technical Debt Addressed ✅
-- Fixed memory unmapping in queue/runner.go
-- Updated Makefile for ublk-mem build target
-- Documented architectural findings in TODO.md
+### The One Bug:
+START_DEV command submitted but kernel never completes it. See TODO.md.
 
 ## Core Design Principles
 

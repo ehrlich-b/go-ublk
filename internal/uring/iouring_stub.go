@@ -1,3 +1,6 @@
+//go:build !giouring
+// +build !giouring
+
 package uring
 
 import "fmt"

@@ -14,6 +14,9 @@ type Ring interface {
 	// SubmitCtrlCmd submits a control command and returns the result
 	SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error)
 
+	// SubmitCtrlCmdAsync submits a control command without waiting for completion
+	SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error)
+
 	// SubmitIOCmd submits an I/O command and returns the result  
 	SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error)
 
@@ -158,6 +161,14 @@ func (b *stubBatch) Len() int {
 
 func (r *stubRing) Close() error {
 	return nil
+}
+
+func (r *stubRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error) {
+	// For stub, just return a handle that immediately completes
+	return &AsyncHandle{
+		userData: userData,
+		ring:     nil, // stub doesn't have a real ring
+	}, nil
 }
 
 func (r *stubRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {

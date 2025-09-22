@@ -4,6 +4,8 @@ package ublk
 import (
     "context"
     "fmt"
+    "os"
+    "time"
 
     "github.com/ehrlich-b/go-ublk/internal/ctrl"
     "github.com/ehrlich-b/go-ublk/internal/interfaces"
@@ -194,11 +196,15 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		numQueues = 1 // Single queue for minimal implementation
 	}
 
-    // STEP 1: Initialize queue runners and prime FETCH_REQ before START_DEV
-    // This matches ublksrv behavior: open /dev/ublkcN, create rings, mmap,
-    // post FETCH_REQ for each tag, then START_DEV to begin scheduling.
+    // CRITICAL FIX: Queue runners must be started BEFORE START_DEV
+    // The kernel waits for initial FETCH_REQ commands from all queues
+    // before completing START_DEV. This matches the C implementation.
+
+    // STEP 1: Initialize queue runners
+    fmt.Printf("*** DEBUG: Creating %d queue runners\n", numQueues)
     device.runners = make([]*queue.Runner, numQueues)
     for i := 0; i < numQueues; i++ {
+        fmt.Printf("*** DEBUG: Creating queue runner %d\n", i)
         runnerConfig := queue.Config{
             DevID:   devID,
             QueueID: uint16(i),
@@ -218,23 +224,35 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
             ctrl.DeleteDevice(devID)
             return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
         }
+        fmt.Printf("*** DEBUG: Queue runner %d created successfully\n", i)
+        device.runners[i] = runner
+    }
 
-        // Prime the queue with initial FETCH_REQs so kernel has slots
-        if err := runner.Prime(); err != nil {
-            for j := 0; j <= i; j++ {
+    // STEP 2: Start queue runner goroutines BEFORE START_DEV
+    // The goroutines will just wait initially, similar to C threads
+    fmt.Printf("*** DEBUG: Starting queue runner goroutines BEFORE START_DEV\n")
+    for i := 0; i < numQueues; i++ {
+        // Start the goroutine for this queue (it will wait for work)
+        if err := device.runners[i].Start(); err != nil {
+            for j := 0; j < len(device.runners); j++ {
                 if device.runners[j] != nil {
                     device.runners[j].Close()
                 }
             }
             ctrl.DeleteDevice(devID)
-            return nil, fmt.Errorf("failed to prime queue runner %d: %v", i, err)
+            return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
         }
-
-        device.runners[i] = runner
+        fmt.Printf("*** DEBUG: Queue runner %d goroutine started\n", i)
     }
 
-    // STEP 2: Now start device, after queues are primed
-    err = ctrl.StartDevice(devID)
+    // CRITICAL: Give queue runners time to enter their wait state
+    // The kernel needs to see the queue io_urings waiting before START_DEV
+    fmt.Printf("*** DEBUG: Waiting for queue runners to enter wait state\n")
+    time.Sleep(200 * time.Millisecond)
+
+    // STEP 3: Submit START_DEV asynchronously
+    fmt.Printf("*** ASYNC: Submitting START_DEV asynchronously\n")
+    _, err = ctrl.StartDeviceAsync(devID)
     if err != nil {
         for j := 0; j < len(device.runners); j++ {
             if device.runners[j] != nil {
@@ -242,21 +260,24 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
             }
         }
         ctrl.DeleteDevice(devID)
-        return nil, fmt.Errorf("failed to start device: %v", err)
+        return nil, fmt.Errorf("failed to submit START_DEV: %v", err)
     }
 
-    // STEP 3: Start background I/O loops now that device is live
-    for i := 0; i < numQueues; i++ {
-        if err := device.runners[i].Start(); err != nil {
-            for j := 0; j < len(device.runners); j++ {
-                if device.runners[j] != nil {
-                    device.runners[j].Close()
-                }
-            }
-            ctrl.StopDevice(devID)
-            ctrl.DeleteDevice(devID)
-            return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
-        }
+    // STEP 4: Fire-and-forget START_DEV
+    // The queue runners will keep retrying FETCH_REQ until they succeed
+    // Once all queues have FETCH_REQ submitted, START_DEV will complete automatically
+    fmt.Printf("*** FIRE-AND-FORGET: START_DEV submitted, queue runners will handle the rest\n")
+
+    // Give the system time to settle
+    // The queue runners are now retrying FETCH_REQ in the background
+    time.Sleep(2 * time.Second)
+
+    // Check if the device appears
+    devicePath := fmt.Sprintf("/dev/ublkb%d", devID)
+    if _, err := os.Stat(devicePath); err == nil {
+        fmt.Printf("*** SUCCESS: Device %s created!\n", devicePath)
+    } else {
+        fmt.Printf("*** WARNING: Device %s not yet created, queue runners still working\n", devicePath)
     }
 
 	device.started = true

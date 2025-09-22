@@ -4,6 +4,7 @@ import (
     "encoding/binary"
     "fmt"
     "syscall"
+    "time"
     "unsafe"
     "os"
     "runtime"
@@ -246,6 +247,56 @@ func (c *Controller) StartDevice(devID uint32) error {
 	}
 
 	return nil
+}
+
+// AsyncStartHandle wraps the async START_DEV operation
+type AsyncStartHandle struct {
+	handle *uring.AsyncHandle
+	devID  uint32
+}
+
+// Wait waits for START_DEV completion
+func (h *AsyncStartHandle) Wait(timeout time.Duration) error {
+	result, err := h.handle.Wait(timeout)
+	if err != nil {
+		return fmt.Errorf("START_DEV timeout for device %d: %v", h.devID, err)
+	}
+
+	if result.Value() < 0 {
+		return fmt.Errorf("START_DEV failed with error: %d", result.Value())
+	}
+
+	return nil
+}
+
+// StartDeviceAsync initiates START_DEV without blocking
+func (c *Controller) StartDeviceAsync(devID uint32) (*AsyncStartHandle, error) {
+	cmd := &uapi.UblksrvCtrlCmd{
+		DevID:      devID,
+		QueueID:    0xFFFF,
+		Len:        0,
+		Addr:       0,
+		Data:       uint64(os.Getpid()),
+		DevPathLen: 0,
+		Pad:        0,
+		Reserved:   0,
+	}
+
+	var op uint32 = uapi.UBLK_CMD_START_DEV
+	if c.useIoctl {
+		op = uapi.UblkCtrlCmd(op)
+	}
+
+	// Submit asynchronously
+	handle, err := c.ring.SubmitCtrlCmdAsync(op, cmd, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to submit START_DEV: %v", err)
+	}
+
+	return &AsyncStartHandle{
+		handle: handle,
+		devID:  devID,
+	}, nil
 }
 
 // StartDataPlane is removed - FETCH_REQ must be done by per-queue runners

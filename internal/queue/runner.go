@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
@@ -42,15 +43,20 @@ type Config struct {
 
 // NewRunner creates a new queue runner
 func NewRunner(ctx context.Context, config Config) (*Runner, error) {
+    fmt.Printf("*** DEBUG: NewRunner called for dev %d queue %d\n", config.DevID, config.QueueID)
+
     // The character device (/dev/ublkcN) should exist after ADD_DEV.
     // We may need to retry briefly until udev creates the node.
     charPath := uapi.UblkDevicePath(config.DevID)
+    fmt.Printf("*** DEBUG: Opening character device %s\n", charPath)
+
     var fd int
     var err error
     const maxRetries = 50 // up to ~5s with 100ms sleep
     for i := 0; i < maxRetries; i++ {
         fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
         if err == nil {
+            fmt.Printf("*** DEBUG: Opened %s successfully, fd=%d\n", charPath, fd)
             break
         }
         if err != syscall.ENOENT {
@@ -71,19 +77,24 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		Flags:   0,
 	}
 
+    fmt.Printf("*** DEBUG: Creating io_uring for queue with fd=%d\n", fd)
     ring, err := uring.NewRing(ringConfig)
 	if err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to create io_uring: %v", err)
 	}
+    fmt.Printf("*** DEBUG: io_uring created successfully for queue\n")
 
 	// Memory map the descriptor array and I/O buffers
+	fmt.Printf("*** DEBUG: About to call mmapQueues for fd=%d\n", fd)
 	descPtr, bufPtr, err := mmapQueues(fd, config.QueueID, config.Depth)
 	if err != nil {
+		fmt.Printf("*** DEBUG: mmapQueues failed: %v\n", err)
 		ring.Close()
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to mmap queues: %v", err)
 	}
+	fmt.Printf("*** DEBUG: mmapQueues succeeded\n")
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -116,17 +127,32 @@ func (r *Runner) Start() error {
 }
 
 // Prime submits initial FETCH_REQ commands to fill the queue.
-// Must be called after NewRunner successfully initialized the ring.
+// Can now handle START_DEV in progress by checking for EOPNOTSUPP.
 func (r *Runner) Prime() error {
-    if r.charFd < 0 || r.ring == nil {
-        return fmt.Errorf("runner not initialized")
-    }
-    for tag := 0; tag < r.depth; tag++ {
-        if err := r.submitFetchReq(uint16(tag)); err != nil {
-            return fmt.Errorf("submit initial FETCH_REQ[%d]: %w", tag, err)
-        }
-    }
-    return nil
+	if r.charFd < 0 || r.ring == nil {
+		return fmt.Errorf("runner not initialized")
+	}
+
+	fmt.Printf("*** QUEUE %d: Prime() starting - will submit %d FETCH_REQs\n", r.queueID, r.depth)
+
+	// Submit FETCH_REQ for each tag
+	successCount := 0
+	for tag := 0; tag < r.depth; tag++ {
+		if err := r.submitFetchReq(uint16(tag)); err != nil {
+			// If we get EOPNOTSUPP, START_DEV might not be ready yet
+			if errno, ok := err.(syscall.Errno); ok && errno == syscall.EOPNOTSUPP {
+				// This is expected if START_DEV hasn't been processed yet
+				// The queue runner loop will retry
+				fmt.Printf("*** QUEUE %d: FETCH_REQ[%d] got EOPNOTSUPP - START_DEV pending\n", r.queueID, tag)
+				return fmt.Errorf("device not ready (START_DEV pending): %w", err)
+			}
+			fmt.Printf("*** QUEUE %d: ERROR Failed to submit FETCH_REQ[%d]: %v\n", r.queueID, tag, err)
+			return fmt.Errorf("submit initial FETCH_REQ[%d]: %w", tag, err)
+		}
+		successCount++
+	}
+	fmt.Printf("*** QUEUE %d: Prime() successful - submitted %d/%d FETCH_REQs\n", r.queueID, successCount, r.depth)
+	return nil
 }
 
 // Stop stops the runner
@@ -168,19 +194,64 @@ func (r *Runner) Close() error {
 
 // ioLoop is the main I/O processing loop
 func (r *Runner) ioLoop() {
+	fmt.Printf("*** QUEUE %d: ioLoop goroutine started\n", r.queueID)
 	if r.logger != nil {
 		r.logger.Debugf("Queue %d: Starting I/O loop", r.queueID)
 	}
 
 	// Check if we're in stub mode
 	if r.charFd == -1 || r.ring == nil {
+		fmt.Printf("*** QUEUE %d: In stub mode\n", r.queueID)
 		r.stubLoop()
 		return
 	}
 
-    // Queue was primed before START_DEV; nothing to do here.
+    // CRITICAL: Queue is ready - the io_uring exists and is associated with the char device
+    // The kernel can now see this queue exists
+    fmt.Printf("*** QUEUE %d: Queue io_uring ready, waiting for START_DEV\n", r.queueID)
+    if r.logger != nil {
+        r.logger.Printf("Queue %d: Queue io_uring ready", r.queueID)
+    }
 
-	// Main processing loop
+    // Wait for START_DEV to be submitted
+    fmt.Printf("*** QUEUE %d: Waiting for START_DEV to be submitted\n", r.queueID)
+    time.Sleep(300 * time.Millisecond) // Give time for START_DEV to be submitted
+
+    // Add retry logic for initial priming
+    primed := false
+    retryCount := 0
+    fmt.Printf("*** QUEUE %d: Starting Prime() retry loop\n", r.queueID)
+
+    for !primed && retryCount < 200 { // Try for up to 20 seconds
+        if err := r.Prime(); err != nil {
+            fmt.Printf("*** QUEUE %d: Prime() error: %v\n", r.queueID, err)
+            // Keep retrying on any error - START_DEV might still be processing
+            time.Sleep(100 * time.Millisecond)
+            retryCount++
+            // Log progress every 10 retries (1 second)
+            if retryCount%10 == 0 {
+                fmt.Printf("*** QUEUE %d: Still waiting for START_DEV (retry %d)\n", r.queueID, retryCount)
+                if r.logger != nil {
+                    r.logger.Printf("Queue %d: Still waiting for START_DEV (retry %d)", r.queueID, retryCount)
+                }
+            }
+            continue
+        }
+        primed = true
+    }
+
+    if !primed {
+        if r.logger != nil {
+            r.logger.Printf("Queue %d: Failed to prime queue after %d retries", r.queueID, retryCount)
+        }
+        return
+    }
+
+    if r.logger != nil {
+        r.logger.Printf("Queue %d: Successfully primed after %d retries", r.queueID, retryCount)
+    }
+
+    // Continue with normal I/O processing loop
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -211,7 +282,9 @@ func (r *Runner) submitFetchReq(tag uint16) error {
     }
 
 	userData := uint64(r.queueID)<<16 | uint64(tag)
-	_, err := r.ring.SubmitIOCmd(uapi.UBLK_IO_FETCH_REQ, ioCmd, userData)
+	// Use IOCTL-encoded command to avoid -EOPNOTSUPP
+	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)
+	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	return err
 }
 
@@ -317,48 +390,65 @@ func (r *Runner) processRequests() error {
 	if err != nil {
 		return fmt.Errorf("failed to wait for completions: %w", err)
 	}
-	
+
+	// Debug: Log number of completions
+	if len(completions) > 0 {
+		fmt.Printf("*** QUEUE %d: Got %d completions\n", r.queueID, len(completions))
+	}
+
 	// Process each completion event
-	for _, completion := range completions {
+	for i, completion := range completions {
 		// Extract tag from user data
 		userData := completion.UserData()
 		tag := uint16(userData & 0xFFFF)
-		
+		qid := uint16((userData >> 16) & 0xFFFF)
+
+		fmt.Printf("*** QUEUE %d: Completion[%d]: userData=0x%x qid=%d tag=%d result=%d\n",
+			r.queueID, i, userData, qid, tag, completion.Value())
+
 		if r.logger != nil && completion.Value() != 0 {
-			r.logger.Printf("Queue %d: Completion for tag %d: result=%d", 
+			r.logger.Printf("Queue %d: Completion for tag %d: result=%d",
 				r.queueID, tag, completion.Value())
 		}
-		
+
 		// For FETCH_REQ completions, we get new I/O requests to process
 		if completion.Value() == 0 { // Success
 			// Get descriptor for this tag
 			if tag >= uint16(r.depth) {
+				fmt.Printf("*** QUEUE %d: ERROR Invalid tag %d (depth=%d)\n", r.queueID, tag, r.depth)
 				if r.logger != nil {
 					r.logger.Printf("Queue %d: Invalid tag %d (depth=%d)", r.queueID, tag, r.depth)
 				}
 				continue
 			}
-			
+
 			// Access memory-mapped descriptor array
 			descSize := int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
 			descPtr := unsafe.Pointer(r.descPtr + uintptr(int(tag)*descSize))
 			desc := (*uapi.UblksrvIODesc)(descPtr)
-			
+
+			// Debug: Log the descriptor contents
+			fmt.Printf("*** QUEUE %d: Descriptor[tag=%d]: op=0x%x sector=%d nr=%d flags=0x%x\n",
+				r.queueID, tag, desc.OpFlags, desc.StartSector, desc.NrSectors, desc.OpFlags)
+
 			// Process the I/O request
 			if err := r.handleIORequest(tag, desc); err != nil {
+				fmt.Printf("*** QUEUE %d: ERROR Failed to handle I/O for tag %d: %v\n", r.queueID, tag, err)
 				if r.logger != nil {
 					r.logger.Printf("Queue %d: Failed to handle I/O for tag %d: %v", r.queueID, tag, err)
 				}
 				// Continue processing other requests even if one fails
 			}
+		} else {
+			fmt.Printf("*** QUEUE %d: Completion failed with error %d\n", r.queueID, completion.Value())
 		}
 	}
-	
+
 	// If no completions, yield briefly to avoid busy looping
 	if len(completions) == 0 {
 		syscall.Syscall(syscall.SYS_SCHED_YIELD, 0, 0, 0)
 	}
-	
+
 	return nil
 }
 
@@ -368,34 +458,48 @@ func (r *Runner) handleIORequest(tag uint16, desc *uapi.UblksrvIODesc) error {
 	op := desc.GetOp() // Use the provided method to get operation
 	offset := desc.StartSector * 512 // Convert sectors to bytes (assuming 512-byte sectors)
 	length := desc.NrSectors * 512   // Convert sectors to bytes
-	
+
+	fmt.Printf("*** QUEUE %d: Processing I/O request tag=%d op=%d offset=%d len=%d\n",
+		r.queueID, tag, op, offset, length)
+
 	if r.logger != nil {
-		r.logger.Debugf("Queue %d: Handling I/O op=%d offset=%d len=%d tag=%d", 
+		r.logger.Debugf("Queue %d: Handling I/O op=%d offset=%d len=%d tag=%d",
 			r.queueID, op, offset, length, tag)
 	}
-	
+
 	// Calculate buffer pointer for this tag
 	bufOffset := int(tag) * 64 * 1024 // 64KB per buffer
 	bufPtr := unsafe.Pointer(r.bufPtr + uintptr(bufOffset))
 	buffer := (*[64 * 1024]byte)(bufPtr)[:length:length]
-	
+
 	var err error
 	switch op {
 	case uapi.UBLK_IO_OP_READ:
+		fmt.Printf("*** QUEUE %d: Executing READ at offset %d, len %d\n", r.queueID, offset, length)
 		_, err = r.backend.ReadAt(buffer, int64(offset))
 	case uapi.UBLK_IO_OP_WRITE:
+		fmt.Printf("*** QUEUE %d: Executing WRITE at offset %d, len %d\n", r.queueID, offset, length)
 		_, err = r.backend.WriteAt(buffer, int64(offset))
 	case uapi.UBLK_IO_OP_FLUSH:
+		fmt.Printf("*** QUEUE %d: Executing FLUSH\n", r.queueID)
 		err = r.backend.Flush()
 	case uapi.UBLK_IO_OP_DISCARD:
+		fmt.Printf("*** QUEUE %d: Executing DISCARD at offset %d, len %d\n", r.queueID, offset, length)
 		// Handle discard if backend supports it
 		if discardBackend, ok := r.backend.(interfaces.DiscardBackend); ok {
 			err = discardBackend.Discard(int64(offset), int64(length))
 		}
 	default:
+		fmt.Printf("*** QUEUE %d: ERROR unsupported operation: %d\n", r.queueID, op)
 		err = fmt.Errorf("unsupported operation: %d", op)
 	}
-	
+
+	if err != nil {
+		fmt.Printf("*** QUEUE %d: I/O operation failed: %v\n", r.queueID, err)
+	} else {
+		fmt.Printf("*** QUEUE %d: I/O operation succeeded\n", r.queueID)
+	}
+
 	// Submit COMMIT_AND_FETCH_REQ with result
 	return r.commitAndFetch(tag, err)
 }
@@ -410,21 +514,30 @@ func (r *Runner) commitAndFetch(tag uint16, ioErr error) error {
 			r.logger.Printf("Queue %d: I/O error for tag %d: %v", r.queueID, tag, ioErr)
 		}
 	}
-	
-    ioCmd := &uapi.UblksrvIOCmd{
-        QID:    r.queueID,
-        Tag:    tag,
-        Result: result,
-        // Provide buffer for next request
-        Addr:   uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
-    }
-	
+
+	fmt.Printf("*** QUEUE %d: Submitting COMMIT_AND_FETCH_REQ tag=%d result=%d\n", r.queueID, tag, result)
+
+	ioCmd := &uapi.UblksrvIOCmd{
+		QID:    r.queueID,
+		Tag:    tag,
+		Result: result,
+		// Provide buffer for next request
+		Addr:   uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
+	}
+
 	userData := uint64(r.queueID)<<16 | uint64(tag)
-	_, err := r.ring.SubmitIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ, ioCmd, userData)
+	// Use IOCTL-encoded command to avoid -EOPNOTSUPP
+	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ)
+	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
+	if err != nil {
+		fmt.Printf("*** QUEUE %d: ERROR Failed to submit COMMIT_AND_FETCH_REQ: %v\n", r.queueID, err)
+	} else {
+		fmt.Printf("*** QUEUE %d: Successfully submitted COMMIT_AND_FETCH_REQ\n", r.queueID)
+	}
 	return err
 }
 
-// mmapQueues maps the descriptor array and I/O buffers
+// mmapQueues maps the descriptor array and allocates I/O buffers
 func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 	// Calculate sizes
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
@@ -445,18 +558,20 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 		return 0, 0, fmt.Errorf("failed to mmap descriptor array: %v", errno)
 	}
 
-	// Map I/O buffers
+	// Allocate I/O buffers in userspace memory (NOT mapped from device)
+	// The kernel doesn't expose I/O buffers via mmap; we manage them ourselves
 	bufPtr, _, errno := syscall.Syscall6(
 		syscall.SYS_MMAP,
 		0, // addr
 		uintptr(bufSize), // length
 		syscall.PROT_READ|syscall.PROT_WRITE, // prot
-		syscall.MAP_SHARED, // flags
-		uintptr(fd), // fd
-		uapi.UBLKSRV_IO_BUF_OFFSET, // offset
+		syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS, // flags - anonymous memory
+		^uintptr(0), // fd = -1 for anonymous
+		0, // offset
 	)
 	if errno != 0 {
-		return 0, 0, fmt.Errorf("failed to mmap I/O buffers: %v", errno)
+		syscall.Syscall(syscall.SYS_MUNMAP, descPtr, uintptr(descSize), 0)
+		return 0, 0, fmt.Errorf("failed to allocate I/O buffers: %v", errno)
 	}
 
 	return descPtr, bufPtr, nil

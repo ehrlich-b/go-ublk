@@ -4,6 +4,9 @@ package uring
 
 /*
 #include <linux/io_uring.h>
+#ifndef IORING_OP_URING_CMD
+#define IORING_OP_URING_CMD 46
+#endif
 static unsigned char get_uring_cmd_opcode() {
     return (unsigned char)IORING_OP_URING_CMD;
 }
