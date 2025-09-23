@@ -1,14 +1,14 @@
 # TODO.md - Current Status
 
-## MAJOR BREAKTHROUGH: Device Creation Works!
+## Device Creation Works, But I/O Processing Broken
 
 Current status:
 - ✅ ADD_DEV works (returns device ID)
 - ✅ SET_PARAMS works (returns 0)
 - ✅ START_DEV completes successfully (async implementation working)
 - ✅ Block device `/dev/ublkb*` is created
-- ✅ Basic I/O operations work (can write/read small amounts)
-- ❌ Large I/O operations fail (need proper handling of I/O > 64KB)
+- ❌ **I/O operations hang** - kernel not sending I/O requests to our queues
+- ❌ Queue runners stuck in infinite loop re-submitting FETCH_REQs
 
 ## What Was Fixed:
 
@@ -24,17 +24,30 @@ Current status:
 
 ## Current Issues:
 
-### 1. Initial 0-length I/O Operations
-- After FETCH_REQ completes, we get descriptors with 0 sectors
-- These are just initial completions, not real I/O
-- Currently handled by returning success immediately
+### CRITICAL: I/O Processing Flow Broken
 
-### 2. Large I/O Handling
-- Kernel sometimes sends I/O requests larger than our 64KB buffer
-- Need to either:
-  - Increase buffer size to match max_sectors setting
-  - Properly handle multi-buffer I/O operations
-  - Or ensure kernel respects our max_sectors limit
+**Deep dive findings (2025-09-23):**
+
+1. **Polling mechanism works!**
+   - Successfully finding I/O via descriptor polling
+   - Kernel DOES write descriptors when I/O arrives
+   - We can detect new I/O (NrSectors=8 for 4KB writes)
+
+2. **COMMIT_AND_FETCH_REQ issue**
+   - We submit COMMIT_AND_FETCH but descriptor stays populated
+   - This causes infinite loop processing same I/O
+   - Fixed by tracking descriptor changes
+
+3. **But I/O still hangs**
+   - Even though we find and process I/O, dd still hangs
+   - Possibly COMMIT_AND_FETCH_REQ not actually completing the I/O
+   - Or we're not handling the flow correctly
+
+### Root Cause (Hypothesis):
+- The kernel might be expecting a different flow or setup
+- Possible missing step in queue initialization
+- May need to wait for kernel to be ready before submitting FETCH_REQs
+- Or the descriptor mmap might not be set up correctly
 
 ## Implementation Tasks:
 

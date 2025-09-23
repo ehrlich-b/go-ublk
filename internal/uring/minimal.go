@@ -611,8 +611,8 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	// The C ublksrv sets len to 0 for queue ops; follow the same pattern.
 	sqe.len = 0
 
-	// Fire-and-forget submission: START_DEV completion depends on these FETCH_REQs
-	// being in flight, so we must not block here.
+	// Submit the command and flush to kernel
+	// submitOnlyCmd handles both queueing the SQE and calling io_uring_enter
 	if _, err := r.submitOnlyCmd(sqe); err != nil {
 		return nil, fmt.Errorf("failed to submit I/O command: %w", err)
 	}

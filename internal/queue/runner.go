@@ -3,6 +3,8 @@ package queue
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -13,19 +15,37 @@ import (
 	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
 
+// TagState represents the state of a tag in the ublk state machine
+type TagState int
+
+const (
+	TagStateInFlightFetch  TagState = iota // Kernel owns; FETCH_REQ in flight
+	TagStateOwned                          // User owns; descriptor is readable
+	TagStateInFlightCommit                 // Kernel owns; COMMIT_AND_FETCH_REQ in flight
+)
+
+// User data encoding: high bit indicates operation type
+const (
+	udOpFetch  uint64 = 0 << 63 // FETCH_REQ completion
+	udOpCommit uint64 = 1 << 63 // COMMIT_AND_FETCH_REQ completion
+)
+
 // Runner handles I/O for a single ublk queue
 type Runner struct {
-	devID   uint32
-	queueID uint16
-	depth   int
-	backend interfaces.Backend
-	charFd  int
-	ring    uring.Ring
-	descPtr uintptr // mmap'd descriptor array
-	bufPtr  uintptr // I/O buffer base
-	ctx     context.Context
-	cancel  context.CancelFunc
-	logger  Logger
+	devID      uint32
+	queueID    uint16
+	depth      int
+	backend    interfaces.Backend
+	charFd     int
+	ring       uring.Ring
+	descPtr    uintptr // mmap'd descriptor array
+	bufPtr     uintptr // I/O buffer base
+	ctx        context.Context
+	cancel     context.CancelFunc
+	logger     Logger
+	// Per-tag state tracking for proper serialization
+	tagStates  []TagState
+	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
 }
 
 type Logger interface {
@@ -99,17 +119,19 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	runner := &Runner{
-		devID:   config.DevID,
-		queueID: config.QueueID,
-		depth:   config.Depth,
-		backend: config.Backend,
-		charFd:  fd,
-		ring:    ring,
-		descPtr: descPtr,
-		bufPtr:  bufPtr,
-		ctx:     ctx,
-		cancel:  cancel,
-		logger:  config.Logger,
+		devID:      config.DevID,
+		queueID:    config.QueueID,
+		depth:      config.Depth,
+		backend:    config.Backend,
+		charFd:     fd,
+		ring:       ring,
+		descPtr:    descPtr,
+		bufPtr:     bufPtr,
+		ctx:        ctx,
+		cancel:     cancel,
+		logger:     config.Logger,
+		tagStates:  make([]TagState, config.Depth),
+		tagMutexes: make([]sync.Mutex, config.Depth),
 	}
 
 	return runner, nil
@@ -133,9 +155,9 @@ func (r *Runner) Prime() error {
 		return fmt.Errorf("runner not initialized")
 	}
 
-	// Submit FETCH_REQ for each tag
+	// Submit initial FETCH_REQ for each tag (ONLY ONCE at startup)
 	for tag := 0; tag < r.depth; tag++ {
-		if err := r.submitFetchReq(uint16(tag)); err != nil {
+		if err := r.submitInitialFetchReq(uint16(tag)); err != nil {
 			// If we get EOPNOTSUPP, START_DEV might not be ready yet
 			if errno, ok := err.(syscall.Errno); ok && errno == syscall.EOPNOTSUPP {
 				// This is expected if START_DEV hasn't been processed yet
@@ -144,6 +166,8 @@ func (r *Runner) Prime() error {
 			}
 			return fmt.Errorf("submit initial FETCH_REQ[%d]: %w", tag, err)
 		}
+		// Set initial state: FETCH_REQ is now in flight
+		r.tagStates[tag] = TagStateInFlightFetch
 	}
 	return nil
 }
@@ -187,8 +211,14 @@ func (r *Runner) Close() error {
 
 // ioLoop is the main I/O processing loop
 func (r *Runner) ioLoop() {
+	// CRITICAL: Pin to OS thread for ublk thread affinity requirement
+	// ublk_drv records one ubq_daemon (Linux thread) per queue and rejects
+	// any URING_CMD from different threads with -EINVAL
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	if r.logger != nil {
-		r.logger.Debugf("Queue %d: Starting I/O loop", r.queueID)
+		r.logger.Debugf("Queue %d: Starting I/O loop (pinned to OS thread)", r.queueID)
 	}
 
 	// Check if we're in stub mode
@@ -257,8 +287,16 @@ func (r *Runner) ioLoop() {
 	}
 }
 
-// submitFetchReq submits a FETCH_REQ command
-func (r *Runner) submitFetchReq(tag uint16) error {
+// submitInitialFetchReq submits the initial FETCH_REQ command (ONLY at startup)
+func (r *Runner) submitInitialFetchReq(tag uint16) error {
+	// Guard against double submission
+	r.tagMutexes[tag].Lock()
+	defer r.tagMutexes[tag].Unlock()
+
+	if r.tagStates[tag] != TagState(0) { // Should be uninitialized
+		return fmt.Errorf("tag %d already initialized (state=%d)", tag, r.tagStates[tag])
+	}
+
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
@@ -267,11 +305,20 @@ func (r *Runner) submitFetchReq(tag uint16) error {
 		Addr: uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
 	}
 
-	userData := uint64(r.queueID)<<16 | uint64(tag)
+	// Encode FETCH operation in userData
+	userData := udOpFetch | (uint64(r.queueID)<<16) | uint64(tag)
 	// Use IOCTL-encoded command to avoid -EOPNOTSUPP
 	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Log initial FETCH_REQ submission
+	if r.logger != nil {
+		r.logger.Debugf("Queue %d: Initial FETCH_REQ submitted for tag %d", r.queueID, tag)
+	}
+	return nil
 }
 
 // waitAndStartDataPlane waits for the character device to appear and starts the data plane
@@ -363,44 +410,30 @@ func (r *Runner) initializeDataPlane(fd int) error {
 	r.ring = ring
 	r.descPtr = descPtr
 	r.bufPtr = bufPtr
+	// Initialize per-tag state tracking
+	r.tagStates = make([]TagState, r.depth)
+	r.tagMutexes = make([]sync.Mutex, r.depth)
 
 	logger.Info("data plane initialized successfully")
 	return nil
 }
 
-// processRequests processes completed I/O requests
+// processRequests processes completed I/O requests using proper per-tag state machine
 func (r *Runner) processRequests() error {
-	// Wait for completion events from io_uring
-	// Use a short timeout to avoid blocking forever
-	completions, err := r.ring.WaitForCompletion(100) // 100ms timeout
+	// Wait for completion events from io_uring - this blocks until events arrive
+	completions, err := r.ring.WaitForCompletion(0) // 0 = block until at least 1 completion
 	if err != nil {
 		return fmt.Errorf("failed to wait for completions: %w", err)
 	}
 
-	// Process each completion event
+	// Process each completion event using per-tag state machine
 	for _, completion := range completions {
 		userData := completion.UserData()
 		tag := uint16(userData & 0xFFFF)
+		isCommit := (userData & udOpCommit) != 0
 		result := completion.Value()
 
-		switch result {
-		case uapi.UBLK_IO_RES_NEED_GET_DATA:
-			if err := r.handleNeedGetData(tag); err != nil {
-				if r.logger != nil {
-					r.logger.Printf("Queue %d: NEED_GET_DATA failed for tag %d: %v", r.queueID, tag, err)
-				}
-			}
-			continue
-		case 0:
-			// fall through to descriptor processing below
-		default:
-			if r.logger != nil {
-				r.logger.Printf("Queue %d: Completion for tag %d: result=%d", r.queueID, tag, result)
-			}
-			continue
-		}
-
-		// Get descriptor for this tag
+		// Validate tag range
 		if tag >= uint16(r.depth) {
 			if r.logger != nil {
 				r.logger.Printf("Queue %d: Invalid tag %d (depth=%d)", r.queueID, tag, r.depth)
@@ -408,61 +441,95 @@ func (r *Runner) processRequests() error {
 			continue
 		}
 
-		descSize := int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
-		descPtr := unsafe.Pointer(r.descPtr + uintptr(int(tag)*descSize))
-		desc := *(*uapi.UblksrvIODesc)(descPtr)
-
-		// Check if descriptor is valid
-		// Note: When we get a completion with result=0, it might be:
-		// 1. Initial FETCH_REQ ACK with empty descriptor (all zeros)
-		// 2. Real I/O with populated descriptor
-		// 3. Corrupted/uninitialized memory (partial data)
-
-		if desc.OpFlags == 0 && desc.NrSectors == 0 && desc.StartSector == 0 && desc.Addr == 0 {
-			// All zeros - this is an initial FETCH_REQ ACK with no I/O yet
+		// Process completion based on per-tag state machine
+		if err := r.handleCompletion(tag, isCommit, result); err != nil {
 			if r.logger != nil {
-				r.logger.Debugf("Queue %d: Tag %d initial ACK (no I/O yet)", r.queueID, tag)
+				r.logger.Printf("Queue %d: Failed to handle completion for tag %d: %v", r.queueID, tag, err)
 			}
-			// The FETCH_REQ is still active, kernel will send another completion when I/O arrives
-			continue
-		}
-
-		// Debug output for non-zero descriptors
-		if desc.OpFlags != 0 || desc.NrSectors != 0 {
-			rawBytes := (*[32]byte)(descPtr)
-			fmt.Printf("  RAW DESC[%d]: %x\n", tag, rawBytes)
-			fmt.Printf("    Interpreted: OpFlags=0x%08x NrSectors=%d (0x%08x) StartSector=%d Addr=0x%x\n",
-				desc.OpFlags, desc.NrSectors, desc.NrSectors, desc.StartSector, desc.Addr)
-
-			// Sanity check - if NrSectors is way too large, it might be corrupted
-			if desc.NrSectors > 256 { // More than 128KB (256 * 512)
-				fmt.Printf("    WARNING: Suspiciously large request (%d sectors = %d bytes)\n",
-					desc.NrSectors, desc.NrSectors*512)
-				// Check if it might be uninitialized memory or corruption
-				if desc.NrSectors > 1000000 {
-					fmt.Printf("    CRITICAL: Likely corrupted descriptor, skipping\n")
-					// Re-submit FETCH_REQ for this tag
-					if err := r.submitFetchReq(tag); err != nil {
-						if r.logger != nil {
-							r.logger.Printf("Queue %d: Failed to re-submit FETCH_REQ for corrupted tag %d: %v",
-								r.queueID, tag, err)
-						}
-					}
-					continue
-				}
-			}
-		}
-
-		if err := r.handleIORequest(tag, desc); err != nil {
-			if r.logger != nil {
-				r.logger.Printf("Queue %d: Failed to handle I/O for tag %d: %v", r.queueID, tag, err)
-			}
+			return err
 		}
 	}
 
-	// If no completions, yield briefly to avoid busy looping
-	if len(completions) == 0 {
-		syscall.Syscall(syscall.SYS_SCHED_YIELD, 0, 0, 0)
+	return nil
+}
+
+// handleCompletion processes a single CQE using the per-tag state machine
+func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error {
+	// Guard this tag to prevent concurrent state changes
+	r.tagMutexes[tag].Lock()
+	defer r.tagMutexes[tag].Unlock()
+
+	currentState := r.tagStates[tag]
+	opType := "FETCH"
+	if isCommit {
+		opType = "COMMIT"
+	}
+
+	fmt.Printf("Queue %d: Tag %d %s completion, result=%d, state=%d\n", r.queueID, tag, opType, result, currentState)
+
+	// State machine transitions
+	switch currentState {
+	case TagStateInFlightFetch:
+		// CQE from FETCH_REQ - handoff back to us
+		r.tagStates[tag] = TagStateOwned
+		if result == 0 {
+			// UBLK_IO_RES_OK: I/O request available - process it immediately!
+			fmt.Printf("Queue %d: Tag %d I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
+			return r.processIOAndCommit(tag)
+		} else if result == 1 {
+			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path (not implemented yet)
+			fmt.Printf("Queue %d: Tag %d NEED_GET_DATA (result=1) - not implemented\n", r.queueID, tag)
+			return fmt.Errorf("NEED_GET_DATA not implemented")
+		} else {
+			// Unexpected result code
+			fmt.Printf("Queue %d: Tag %d unexpected result=%d\n", r.queueID, tag, result)
+			return fmt.Errorf("unexpected FETCH result: %d", result)
+		}
+
+	case TagStateInFlightCommit:
+		// CQE from COMMIT_AND_FETCH_REQ - notification for next request
+		r.tagStates[tag] = TagStateOwned
+		if result == 0 {
+			// UBLK_IO_RES_OK: Next I/O request available - process it immediately
+			fmt.Printf("Queue %d: Tag %d next I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
+			return r.processIOAndCommit(tag)
+		} else if result == 1 {
+			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path (not implemented yet)
+			fmt.Printf("Queue %d: Tag %d next NEED_GET_DATA (result=1) - not implemented\n", r.queueID, tag)
+			return fmt.Errorf("NEED_GET_DATA not implemented")
+		} else {
+			// Unexpected result code
+			fmt.Printf("Queue %d: Tag %d unexpected next result=%d\n", r.queueID, tag, result)
+			return fmt.Errorf("unexpected COMMIT result: %d", result)
+		}
+
+	case TagStateOwned:
+		// This shouldn't happen - we only submit when transitioning from Owned
+		return fmt.Errorf("unexpected completion for tag %d in Owned state", tag)
+
+	default:
+		return fmt.Errorf("invalid state %d for tag %d", currentState, tag)
+	}
+}
+
+// processIOAndCommit reads descriptor, processes I/O, and submits COMMIT_AND_FETCH_REQ
+func (r *Runner) processIOAndCommit(tag uint16) error {
+	// Read descriptor for this tag
+	descSize := int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
+	descPtr := unsafe.Pointer(r.descPtr + uintptr(int(tag)*descSize))
+	desc := *(*uapi.UblksrvIODesc)(descPtr)
+
+	// Handle empty descriptor (keep-alive)
+	if desc.OpFlags == 0 && desc.NrSectors == 0 {
+		if r.logger != nil {
+			r.logger.Debugf("Queue %d: Tag %d noop completion (empty descriptor)", r.queueID, tag)
+		}
+		return r.submitCommitAndFetch(tag, nil, desc)
+	}
+
+	// Process real I/O request
+	if err := r.handleIORequest(tag, desc); err != nil {
+		return err
 	}
 
 	return nil
@@ -497,7 +564,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 		if r.logger != nil {
 			r.logger.Debugf("Queue %d: Tag %d noop completion (descriptor empty)", r.queueID, tag)
 		}
-		return r.commitAndFetch(tag, nil)
+		return r.submitCommitAndFetch(tag, nil, desc)
 	}
 
 	// Extract I/O parameters from descriptor
@@ -554,7 +621,9 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	var err error
 	switch op {
 	case uapi.UBLK_IO_OP_READ:
+		fmt.Printf("[DEBUG] About to call ReadAt: offset=%d, buflen=%d\n", offset, len(buffer))
 		_, err = r.backend.ReadAt(buffer, int64(offset))
+		fmt.Printf("[DEBUG] ReadAt completed: err=%v\n", err)
 	case uapi.UBLK_IO_OP_WRITE:
 		_, err = r.backend.WriteAt(buffer, int64(offset))
 	case uapi.UBLK_IO_OP_FLUSH:
@@ -569,13 +638,17 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	// Submit COMMIT_AND_FETCH_REQ with result
-	return r.commitAndFetch(tag, err)
+	fmt.Printf("[DEBUG] About to call submitCommitAndFetch: tag=%d, err=%v\n", tag, err)
+	submitErr := r.submitCommitAndFetch(tag, err, desc)
+	fmt.Printf("[DEBUG] submitCommitAndFetch completed: err=%v\n", submitErr)
+	return submitErr
 }
 
-// commitAndFetch submits result and fetches next request
-func (r *Runner) commitAndFetch(tag uint16, ioErr error) error {
-	// Prepare result
-	result := int32(0) // Success
+// submitCommitAndFetch submits COMMIT_AND_FETCH_REQ with proper state tracking
+func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
+	// Calculate result: bytes processed for success, negative errno for error
+	bytesHandled := int32(desc.NrSectors) * 512
+	result := bytesHandled // Success: return bytes processed
 	if ioErr != nil {
 		result = -5 // -EIO
 		if r.logger != nil {
@@ -583,19 +656,38 @@ func (r *Runner) commitAndFetch(tag uint16, ioErr error) error {
 		}
 	}
 
+	// Guard against double submission
+	r.tagMutexes[tag].Lock()
+	defer r.tagMutexes[tag].Unlock()
+
+	// Only submit if we're in Owned state
+	if r.tagStates[tag] != TagStateOwned {
+		return fmt.Errorf("cannot submit COMMIT for tag %d in state %d (not Owned)", tag, r.tagStates[tag])
+	}
+
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: result,
-		// Provide buffer for next request
+		// Provide buffer for next request (piggyback FETCH)
 		Addr: uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
 	}
 
-	userData := uint64(r.queueID)<<16 | uint64(tag)
-	// Use IOCTL-encoded command to avoid -EOPNOTSUPP
+	// Encode COMMIT operation in userData
+	userData := udOpCommit | (uint64(r.queueID)<<16) | uint64(tag)
 	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ)
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
-	return err
+	if err != nil {
+		return fmt.Errorf("COMMIT_AND_FETCH_REQ failed: %w", err)
+	}
+
+	// Update state: COMMIT_AND_FETCH_REQ is now in flight
+	r.tagStates[tag] = TagStateInFlightCommit
+
+	fmt.Printf("Queue %d: COMMIT_AND_FETCH_REQ submitted for tag %d with result=%d bytes\n",
+		r.queueID, tag, result)
+
+	return nil
 }
 
 // mmapQueues maps the descriptor array and allocates I/O buffers
@@ -644,17 +736,19 @@ func NewWaitingRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 
 	runner := &Runner{
-		devID:   config.DevID,
-		queueID: config.QueueID,
-		depth:   config.Depth,
-		backend: config.Backend,
-		charFd:  -1,  // No device yet
-		ring:    nil, // No ring yet
-		descPtr: 0,   // No mmap yet
-		bufPtr:  0,   // No buffers yet
-		ctx:     ctx,
-		cancel:  cancel,
-		logger:  config.Logger,
+		devID:      config.DevID,
+		queueID:    config.QueueID,
+		depth:      config.Depth,
+		backend:    config.Backend,
+		charFd:     -1,  // No device yet
+		ring:       nil, // No ring yet
+		descPtr:    0,   // No mmap yet
+		bufPtr:     0,   // No buffers yet
+		ctx:        ctx,
+		cancel:     cancel,
+		logger:     config.Logger,
+		tagStates:  make([]TagState, config.Depth),
+		tagMutexes: make([]sync.Mutex, config.Depth),
 	}
 
 	// Start a goroutine that will initialize the real data plane once the device appears
@@ -667,17 +761,19 @@ func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Runner{
-		devID:   config.DevID,
-		queueID: config.QueueID,
-		depth:   config.Depth,
-		backend: config.Backend,
-		charFd:  -1,  // No real device
-		ring:    nil, // No real ring
-		descPtr: 0,
-		bufPtr:  0,
-		ctx:     ctx,
-		cancel:  cancel,
-		logger:  config.Logger,
+		devID:      config.DevID,
+		queueID:    config.QueueID,
+		depth:      config.Depth,
+		backend:    config.Backend,
+		charFd:     -1,  // No real device
+		ring:       nil, // No real ring
+		descPtr:    0,
+		bufPtr:     0,
+		ctx:        ctx,
+		cancel:     cancel,
+		logger:     config.Logger,
+		tagStates:  make([]TagState, config.Depth),
+		tagMutexes: make([]sync.Mutex, config.Depth),
 	}
 }
 
