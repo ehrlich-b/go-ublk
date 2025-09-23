@@ -487,19 +487,26 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		}
 
 	case TagStateInFlightCommit:
-		// CQE from COMMIT_AND_FETCH_REQ - notification for next request
-		r.tagStates[tag] = TagStateOwned
+		// CQE from COMMIT_AND_FETCH_REQ - ALWAYS means next I/O is ready
+		// There is NO "commit done but no next I/O" state - the CQE only arrives
+		// when the next request is ready (or on abort/error)
 		if result == 0 {
-			// UBLK_IO_RES_OK: Next I/O request available - process it immediately
+			// UBLK_IO_RES_OK: Next I/O request available
+			r.tagStates[tag] = TagStateOwned
 			fmt.Printf("Queue %d: Tag %d next I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
 			return r.processIOAndCommit(tag)
 		} else if result == 1 {
-			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path (not implemented yet)
+			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path
+			r.tagStates[tag] = TagStateOwned
 			fmt.Printf("Queue %d: Tag %d next NEED_GET_DATA (result=1) - not implemented\n", r.queueID, tag)
 			return fmt.Errorf("NEED_GET_DATA not implemented")
+		} else if result < 0 {
+			// Error/abort path
+			fmt.Printf("Queue %d: Tag %d COMMIT error/abort: result=%d\n", r.queueID, tag, result)
+			r.tagStates[tag] = TagStateOwned // Tag can be reused after error
+			return fmt.Errorf("COMMIT_AND_FETCH error: %d", result)
 		} else {
-			// Unexpected result code
-			fmt.Printf("Queue %d: Tag %d unexpected next result=%d\n", r.queueID, tag, result)
+			// Should never happen
 			return fmt.Errorf("unexpected COMMIT result: %d", result)
 		}
 
@@ -516,8 +523,12 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 func (r *Runner) processIOAndCommit(tag uint16) error {
 	// Read descriptor for this tag
 	descSize := int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
-	descPtr := unsafe.Pointer(r.descPtr + uintptr(int(tag)*descSize))
+	descPtr := unsafe.Add(unsafe.Pointer(r.descPtr), uintptr(tag)*uintptr(descSize))
 	desc := *(*uapi.UblksrvIODesc)(descPtr)
+
+	// Debug: Log what we read from descriptor
+	fmt.Printf("[DEBUG] processIOAndCommit: tag=%d, OpFlags=0x%x, NrSectors=%d, StartSector=%d, Addr=0x%x\n",
+		tag, desc.OpFlags, desc.NrSectors, desc.StartSector, desc.Addr)
 
 	// Handle empty descriptor (keep-alive)
 	if desc.OpFlags == 0 && desc.NrSectors == 0 {
@@ -646,6 +657,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 // submitCommitAndFetch submits COMMIT_AND_FETCH_REQ with proper state tracking
 func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
+	fmt.Printf("[DEBUG] submitCommitAndFetch: Starting for tag=%d\n", tag)
 	// Calculate result: bytes processed for success, negative errno for error
 	bytesHandled := int32(desc.NrSectors) * 512
 	result := bytesHandled // Success: return bytes processed
@@ -655,6 +667,7 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 			r.logger.Printf("Queue %d: I/O error for tag %d: %v", r.queueID, tag, ioErr)
 		}
 	}
+	fmt.Printf("[DEBUG] submitCommitAndFetch: Calculated result=%d\n", result)
 
 	// Guard against double submission
 	r.tagMutexes[tag].Lock()
