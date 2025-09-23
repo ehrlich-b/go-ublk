@@ -25,22 +25,22 @@ const (
 
 // I/O Result Codes
 const (
-	UBLK_IO_RES_OK           = 0
+	UBLK_IO_RES_OK            = 0
 	UBLK_IO_RES_NEED_GET_DATA = 1
-	UBLK_IO_RES_ABORT        = -19 // -ENODEV
+	UBLK_IO_RES_ABORT         = -19 // -ENODEV
 )
 
 // Feature Flags (64-bit)
 const (
-	UBLK_F_SUPPORT_ZERO_COPY      = 1 << 0  // Zero copy with 4k blocks
-	UBLK_F_URING_CMD_COMP_IN_TASK = 1 << 1  // Force task_work completion
-	UBLK_F_NEED_GET_DATA          = 1 << 2  // Two-phase write support
-	UBLK_F_USER_RECOVERY          = 1 << 3  // User recovery support
-	UBLK_F_USER_RECOVERY_REISSUE  = 1 << 4  // Reissue on recovery
-	UBLK_F_UNPRIVILEGED_DEV       = 1 << 5  // Unprivileged device creation
-	UBLK_F_CMD_IOCTL_ENCODE       = 1 << 6  // Use ioctl encoding
-	UBLK_F_USER_COPY              = 1 << 7  // pread/pwrite for data
-	UBLK_F_ZONED                  = 1 << 8  // Zoned storage support
+	UBLK_F_SUPPORT_ZERO_COPY      = 1 << 0 // Zero copy with 4k blocks
+	UBLK_F_URING_CMD_COMP_IN_TASK = 1 << 1 // Force task_work completion
+	UBLK_F_NEED_GET_DATA          = 1 << 2 // Two-phase write support
+	UBLK_F_USER_RECOVERY          = 1 << 3 // User recovery support
+	UBLK_F_USER_RECOVERY_REISSUE  = 1 << 4 // Reissue on recovery
+	UBLK_F_UNPRIVILEGED_DEV       = 1 << 5 // Unprivileged device creation
+	UBLK_F_CMD_IOCTL_ENCODE       = 1 << 6 // Use ioctl encoding
+	UBLK_F_USER_COPY              = 1 << 7 // pread/pwrite for data
+	UBLK_F_ZONED                  = 1 << 8 // Zoned storage support
 )
 
 // Device States
@@ -52,19 +52,19 @@ const (
 
 // I/O Operations
 const (
-	UBLK_IO_OP_READ          = 0
-	UBLK_IO_OP_WRITE         = 1
-	UBLK_IO_OP_FLUSH         = 2
-	UBLK_IO_OP_DISCARD       = 3
-	UBLK_IO_OP_WRITE_SAME    = 4
-	UBLK_IO_OP_WRITE_ZEROES  = 5
-	UBLK_IO_OP_ZONE_OPEN     = 10
-	UBLK_IO_OP_ZONE_CLOSE    = 11
-	UBLK_IO_OP_ZONE_FINISH   = 12
-	UBLK_IO_OP_ZONE_APPEND   = 13
+	UBLK_IO_OP_READ           = 0
+	UBLK_IO_OP_WRITE          = 1
+	UBLK_IO_OP_FLUSH          = 2
+	UBLK_IO_OP_DISCARD        = 3
+	UBLK_IO_OP_WRITE_SAME     = 4
+	UBLK_IO_OP_WRITE_ZEROES   = 5
+	UBLK_IO_OP_ZONE_OPEN      = 10
+	UBLK_IO_OP_ZONE_CLOSE     = 11
+	UBLK_IO_OP_ZONE_FINISH    = 12
+	UBLK_IO_OP_ZONE_APPEND    = 13
 	UBLK_IO_OP_ZONE_RESET_ALL = 14
-	UBLK_IO_OP_ZONE_RESET    = 15
-	UBLK_IO_OP_REPORT_ZONES  = 18
+	UBLK_IO_OP_ZONE_RESET     = 15
+	UBLK_IO_OP_REPORT_ZONES   = 18
 )
 
 // I/O Flags
@@ -148,9 +148,9 @@ func IoctlEncode(dir, typ, nr, size uint32) uint32 {
 
 // Helper function to create ublk ioctl commands
 func UblkCtrlCmd(cmd uint32) uint32 {
-    // Use 32-byte control header size to match UblksrvCtrlCmd (32 bytes)
-    // This aligns with working references and our SQE layout.
-    return IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', cmd, 32)
+	// Use 32-byte control header size to match UblksrvCtrlCmd (32 bytes)
+	// This aligns with working references and our SQE layout.
+	return IoctlEncode(_IOC_READ|_IOC_WRITE, 'u', cmd, 32)
 }
 
 func UblkIOCmd(cmd uint32) uint32 {

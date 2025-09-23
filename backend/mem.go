@@ -70,7 +70,7 @@ func (m *Memory) Size() int64 {
 func (m *Memory) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Clear the data to help with GC
 	m.data = nil
 	return nil
@@ -115,7 +115,7 @@ func (m *Memory) Sync() error {
 	return nil
 }
 
-// SyncRange implements the SyncBackend interface  
+// SyncRange implements the SyncBackend interface
 func (m *Memory) SyncRange(offset, length int64) error {
 	// Memory backend doesn't need syncing
 	return nil
@@ -127,17 +127,17 @@ func (m *Memory) Stats() map[string]interface{} {
 	defer m.mu.RUnlock()
 
 	return map[string]interface{}{
-		"type":   "memory",
-		"size":   m.size,
+		"type":      "memory",
+		"size":      m.size,
 		"allocated": len(m.data),
 	}
 }
 
 // Compile-time interface checks
 var (
-	_ interfaces.Backend           = (*Memory)(nil)
-	_ interfaces.DiscardBackend    = (*Memory)(nil)
+	_ interfaces.Backend            = (*Memory)(nil)
+	_ interfaces.DiscardBackend     = (*Memory)(nil)
 	_ interfaces.WriteZeroesBackend = (*Memory)(nil)
-	_ interfaces.SyncBackend       = (*Memory)(nil)
-	_ interfaces.StatBackend       = (*Memory)(nil)
+	_ interfaces.SyncBackend        = (*Memory)(nil)
+	_ interfaces.StatBackend        = (*Memory)(nil)
 )

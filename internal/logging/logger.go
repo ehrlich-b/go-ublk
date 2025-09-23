@@ -54,7 +54,7 @@ func NewLogger(config *Config) *Logger {
 
 	var handler slog.Handler
 	opts := &slog.HandlerOptions{
-		Level: slog.Level(config.Level),
+		Level:     slog.Level(config.Level),
 		AddSource: config.Level <= LevelDebug,
 	}
 
@@ -78,7 +78,7 @@ func Default() *Logger {
 		return defaultLogger
 	}
 	mu.RUnlock()
-	
+
 	mu.Lock()
 	defer mu.Unlock()
 	if defaultLogger == nil {

@@ -650,7 +650,15 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 		return results, nil
 	}
 
-	// Block for at least one completion
+	// If timeout is specified, don't block forever
+	if timeout > 0 {
+		// Don't wait for any completions, just check if there are any
+		_, _, _ = r.submitAndWaitRing(0, 0)
+		drain()
+		return results, nil
+	}
+
+	// Block for at least one completion (only if no timeout)
 	_, _, errno := r.submitAndWaitRing(0, 1)
 	if errno != 0 {
 		return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)

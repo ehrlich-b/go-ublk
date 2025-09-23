@@ -1,32 +1,32 @@
 package uapi
 
 import (
-    "fmt"
-    "unsafe"
+	"fmt"
+	"unsafe"
 )
 
 // UblksrvCtrlCmd must match kernel struct exactly (32 bytes):
 // This structure gets placed directly in the SQE cmd area (bytes 32-63)
 //
-// struct ublksrv_ctrl_cmd {
-//   __u32 dev_id;        // device id (0xFFFFFFFF for new device)
-//   __u16 queue_id;      // 0xFFFF for control ops
-//   __u16 len;           // data length for buffer at addr
-//   __u64 addr;          // userspace buffer address (IN/OUT depending on op)
-//   __u64 data[1];       // inline payload (op-specific)
-//   __u16 dev_path_len;  // for unprivileged mode only
-//   __u16 pad;           // reserved/padding
-//   __u32 reserved;      // must be zero
-// };
+//	struct ublksrv_ctrl_cmd {
+//	  __u32 dev_id;        // device id (0xFFFFFFFF for new device)
+//	  __u16 queue_id;      // 0xFFFF for control ops
+//	  __u16 len;           // data length for buffer at addr
+//	  __u64 addr;          // userspace buffer address (IN/OUT depending on op)
+//	  __u64 data[1];       // inline payload (op-specific)
+//	  __u16 dev_path_len;  // for unprivileged mode only
+//	  __u16 pad;           // reserved/padding
+//	  __u32 reserved;      // must be zero
+//	};
 type UblksrvCtrlCmd struct {
-    DevID      uint32    // device id (0xFFFFFFFF for new device)
-    QueueID    uint16    // 0xFFFF for control ops
-    Len        uint16    // data length for buffer at addr
-    Addr       uint64    // userspace buffer address
-    Data       uint64    // inline payload (single uint64)
-    DevPathLen uint16    // for unprivileged mode
-    Pad        uint16    // padding
-    Reserved   uint32    // must be zero
+	DevID      uint32 // device id (0xFFFFFFFF for new device)
+	QueueID    uint16 // 0xFFFF for control ops
+	Len        uint16 // data length for buffer at addr
+	Addr       uint64 // userspace buffer address
+	Data       uint64 // inline payload (single uint64)
+	DevPathLen uint16 // for unprivileged mode
+	Pad        uint16 // padding
+	Reserved   uint32 // must be zero
 }
 
 // Compile-time size check - must be exactly 32 bytes to fit in SQE cmd area
@@ -34,20 +34,20 @@ var _ [32]byte = [unsafe.Sizeof(UblksrvCtrlCmd{})]byte{}
 
 // UblksrvCtrlDevInfo contains device information
 type UblksrvCtrlDevInfo struct {
-	NrHwQueues      uint16 // number of hardware queues
-	QueueDepth      uint16 // depth per queue
-	State           uint16 // device state (UBLK_S_*)
-	Pad0            uint16 // padding
-	MaxIOBufBytes   uint32 // max I/O buffer size
-	DevID           uint32 // device ID
-	UblksrvPID      int32  // server process ID
-	Pad1            uint32 // padding
-	Flags           uint64 // feature flags
-	UblksrvFlags    uint64 // server-internal flags (invisible to driver)
-	OwnerUID        uint32 // owner UID (set by kernel)
-	OwnerGID        uint32 // owner GID (set by kernel)
-	Reserved1       uint64 // reserved
-	Reserved2       uint64 // reserved
+	NrHwQueues    uint16 // number of hardware queues
+	QueueDepth    uint16 // depth per queue
+	State         uint16 // device state (UBLK_S_*)
+	Pad0          uint16 // padding
+	MaxIOBufBytes uint32 // max I/O buffer size
+	DevID         uint32 // device ID
+	UblksrvPID    int32  // server process ID
+	Pad1          uint32 // padding
+	Flags         uint64 // feature flags
+	UblksrvFlags  uint64 // server-internal flags (invisible to driver)
+	OwnerUID      uint32 // owner UID (set by kernel)
+	OwnerGID      uint32 // owner GID (set by kernel)
+	Reserved1     uint64 // reserved
+	Reserved2     uint64 // reserved
 }
 
 // Compile-time size check - 64 bytes as per kernel 6.6+
@@ -55,14 +55,14 @@ var _ [64]byte = [unsafe.Sizeof(UblksrvCtrlDevInfo{})]byte{}
 
 // UblksrvIODesc describes each I/O operation (stored in shared memory)
 type UblksrvIODesc struct {
-	OpFlags     uint32 // op: bits 0-7, flags: bits 8-31
-	NrSectors   uint32 // number of sectors (or nr_zones for REPORT_ZONES)
-	StartSector uint64 // starting sector
-	Addr        uint64 // buffer address in userspace
+	OpFlags     uint32  // op: bits 0-7, flags: bits 8-31
+	NrSectors   uint32  // number of sectors (or nr_zones for REPORT_ZONES)
+	StartSector uint64  // starting sector
+	Addr        uint64  // buffer address in userspace
 	_           [8]byte // padding to reach 32 bytes
 }
 
-// Compile-time size check  
+// Compile-time size check
 var _ [32]byte = [unsafe.Sizeof(UblksrvIODesc{})]byte{}
 
 // GetOp extracts the operation code from OpFlags
@@ -101,15 +101,15 @@ func (c *UblksrvIOCmd) GetZoneAppendLBA() uint64 {
 
 // UblkParamBasic contains basic device parameters
 type UblkParamBasic struct {
-	Attrs              uint32 // attribute flags (UBLK_ATTR_*)
-	LogicalBSShift     uint8  // logical block size shift
-	PhysicalBSShift    uint8  // physical block size shift
-	IOOptShift         uint8  // optimal I/O size shift
-	IOMinShift         uint8  // minimum I/O size shift
-	MaxSectors         uint32 // max sectors per request
-	ChunkSectors       uint32 // chunk size in sectors
-	DevSectors         uint64 // device size in sectors
-	VirtBoundaryMask   uint64 // virtual boundary mask
+	Attrs            uint32 // attribute flags (UBLK_ATTR_*)
+	LogicalBSShift   uint8  // logical block size shift
+	PhysicalBSShift  uint8  // physical block size shift
+	IOOptShift       uint8  // optimal I/O size shift
+	IOMinShift       uint8  // minimum I/O size shift
+	MaxSectors       uint32 // max sectors per request
+	ChunkSectors     uint32 // chunk size in sectors
+	DevSectors       uint64 // device size in sectors
+	VirtBoundaryMask uint64 // virtual boundary mask
 }
 
 // UblkParamDiscard contains discard-related parameters
@@ -140,12 +140,12 @@ type UblkParamZoned struct {
 
 // UblkParams contains all device parameters
 type UblkParams struct {
-	Len     uint32             // total length of parameters
-	Types   uint32             // types of parameters included (UBLK_PARAM_TYPE_*)
-	Basic   UblkParamBasic     // basic parameters
-	Discard UblkParamDiscard   // discard parameters
-	Devt    UblkParamDevt      // device numbers (read-only)
-	Zoned   UblkParamZoned     // zoned device parameters
+	Len     uint32           // total length of parameters
+	Types   uint32           // types of parameters included (UBLK_PARAM_TYPE_*)
+	Basic   UblkParamBasic   // basic parameters
+	Discard UblkParamDiscard // discard parameters
+	Devt    UblkParamDevt    // device numbers (read-only)
+	Zoned   UblkParamZoned   // zoned device parameters
 }
 
 // Helper methods for UblkParams

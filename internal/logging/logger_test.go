@@ -55,23 +55,23 @@ func TestLoggerWithContext(t *testing.T) {
 		Format: "text",
 		Output: &buf,
 	}
-	
+
 	logger := NewLogger(config)
-	
+
 	// Test device context
 	deviceLogger := logger.WithDevice(42)
 	deviceLogger.Info("test message")
-	
+
 	output := buf.String()
 	if !strings.Contains(output, "device_id=42") {
 		t.Errorf("Expected device_id=42 in output, got: %s", output)
 	}
-	
+
 	// Test queue context
 	buf.Reset()
 	queueLogger := deviceLogger.WithQueue(1)
 	queueLogger.Info("queue message")
-	
+
 	output = buf.String()
 	if !strings.Contains(output, "device_id=42") {
 		t.Errorf("Expected device_id=42 in queue logger output, got: %s", output)
@@ -88,11 +88,11 @@ func TestLoggerWithRequest(t *testing.T) {
 		Format: "text",
 		Output: &buf,
 	}
-	
+
 	logger := NewLogger(config)
 	requestLogger := logger.WithRequest(123, "READ")
 	requestLogger.Debug("processing request")
-	
+
 	output := buf.String()
 	if !strings.Contains(output, "tag=123") {
 		t.Errorf("Expected tag=123 in output, got: %s", output)
@@ -109,12 +109,12 @@ func TestLoggerWithError(t *testing.T) {
 		Format: "text",
 		Output: &buf,
 	}
-	
+
 	logger := NewLogger(config)
 	testErr := errors.New("test error")
 	errorLogger := logger.WithError(testErr)
 	errorLogger.Error("operation failed")
-	
+
 	output := buf.String()
 	if !strings.Contains(output, "test error") {
 		t.Errorf("Expected 'test error' in output, got: %s", output)
@@ -128,9 +128,9 @@ func TestControlPlaneLogging(t *testing.T) {
 		Format: "text",
 		Output: &buf,
 	}
-	
+
 	logger := NewLogger(config)
-	
+
 	// Test control start
 	logger.ControlStart("ADD_DEV")
 	output := buf.String()
@@ -140,7 +140,7 @@ func TestControlPlaneLogging(t *testing.T) {
 	if !strings.Contains(output, "operation=ADD_DEV") {
 		t.Errorf("Expected operation=ADD_DEV, got: %s", output)
 	}
-	
+
 	// Test control success
 	buf.Reset()
 	logger.ControlSuccess("ADD_DEV")
@@ -148,7 +148,7 @@ func TestControlPlaneLogging(t *testing.T) {
 	if !strings.Contains(output, "control operation succeeded") {
 		t.Errorf("Expected control success message, got: %s", output)
 	}
-	
+
 	// Test control error
 	buf.Reset()
 	testErr := errors.New("device exists")
@@ -169,9 +169,9 @@ func TestIOLogging(t *testing.T) {
 		Format: "text",
 		Output: &buf,
 	}
-	
+
 	logger := NewLogger(config)
-	
+
 	// Test I/O start
 	logger.IOStart("READ", 4096, 512)
 	output := buf.String()
@@ -187,7 +187,7 @@ func TestIOLogging(t *testing.T) {
 	if !strings.Contains(output, "length=512") {
 		t.Errorf("Expected length=512, got: %s", output)
 	}
-	
+
 	// Test I/O complete
 	buf.Reset()
 	logger.IOComplete("READ", 4096, 512, 150)
@@ -198,7 +198,7 @@ func TestIOLogging(t *testing.T) {
 	if !strings.Contains(output, "latency_us=150") {
 		t.Errorf("Expected latency_us=150, got: %s", output)
 	}
-	
+
 	// Test I/O error
 	buf.Reset()
 	testErr := errors.New("read failed")
@@ -219,9 +219,9 @@ func TestGlobalLoggerFunctions(t *testing.T) {
 		Format: "text",
 		Output: &buf,
 	}
-	
+
 	SetDefault(NewLogger(config))
-	
+
 	// Test debug message (should appear since we set LevelDebug)
 	Debug("debug message", "key", "value")
 	output := buf.String()
@@ -231,7 +231,7 @@ func TestGlobalLoggerFunctions(t *testing.T) {
 	if !strings.Contains(output, "key=value") {
 		t.Errorf("Expected key=value, got: %s", output)
 	}
-	
+
 	// Test info message
 	buf.Reset()
 	Info("info message")
@@ -239,7 +239,7 @@ func TestGlobalLoggerFunctions(t *testing.T) {
 	if !strings.Contains(output, "info message") {
 		t.Errorf("Expected info message, got: %s", output)
 	}
-	
+
 	// Test warn message
 	buf.Reset()
 	Warn("warning message")
@@ -247,10 +247,10 @@ func TestGlobalLoggerFunctions(t *testing.T) {
 	if !strings.Contains(output, "warning message") {
 		t.Errorf("Expected warning message, got: %s", output)
 	}
-	
+
 	// Test error message
 	buf.Reset()
-	Error("error message") 
+	Error("error message")
 	output = buf.String()
 	if !strings.Contains(output, "error message") {
 		t.Errorf("Expected error message, got: %s", output)

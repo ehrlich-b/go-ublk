@@ -7,4 +7,3 @@ package uring
 // If this is wrong for the build host, prefer building on the target VM
 // with cgo enabled so we can read the correct value from kernel headers.
 func kernelUringCmdOpcode() uint8 { return 46 }
-

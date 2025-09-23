@@ -1,38 +1,40 @@
-# TODO.md - Fix START_DEV Hang
+# TODO.md - Current Status
 
-## THE ONE PROBLEM: START_DEV hangs forever
+## MAJOR BREAKTHROUGH: Device Creation Works!
 
 Current status:
-- ADD_DEV works (returns device ID)
-- SET_PARAMS works (returns 0)
-- START_DEV hangs in io_uring_enter syscall (never completes)
+- ✅ ADD_DEV works (returns device ID)
+- ✅ SET_PARAMS works (returns 0)
+- ✅ START_DEV completes successfully (async implementation working)
+- ✅ Block device `/dev/ublkb*` is created
+- ✅ Basic I/O operations work (can write/read small amounts)
+- ❌ Large I/O operations fail (need proper handling of I/O > 64KB)
 
-## Root Cause Analysis:
+## What Was Fixed:
 
-**The kernel waits for queue FETCH_REQ commands before completing START_DEV**
+### The START_DEV Hang Issue (SOLVED)
+- **Root cause**: Kernel waits for FETCH_REQs before completing START_DEV
+- **Solution**: Implemented async START_DEV with fire-and-forget submission
+- **Result**: Device creation now works reliably
 
-This creates a chicken-and-egg problem:
-1. We can't wait for START_DEV completion - it hangs waiting for queue FETCH_REQs
-2. We can't submit FETCH_REQs before START_DEV - kernel returns -95 (EOPNOTSUPP)
-3. Fire-and-forget START_DEV doesn't hang but doesn't complete either
+### The IOCTL Encoding Issue (SOLVED)
+- **Root cause**: Modern kernels require IOCTL-encoded commands for ublk
+- **Solution**: Added proper IOCTL encoding for all queue commands
+- **Result**: FETCH_REQ commands now accepted by kernel
 
-## Progress Made:
-- ✅ File registration added to queue io_urings (matches C code)
-- ✅ Fire-and-forget START_DEV prevents hanging
-- ✅ Queue runners start goroutines before START_DEV
-- ❌ Block device still not created (START_DEV not actually completing)
+## Current Issues:
 
-## Solution Required:
+### 1. Initial 0-length I/O Operations
+- After FETCH_REQ completes, we get descriptors with 0 sectors
+- These are just initial completions, not real I/O
+- Currently handled by returning success immediately
 
-**See [async_refactor.md](./async_refactor.md) for complete design**
-
-Need to implement async START_DEV flow:
-1. Submit START_DEV without waiting (fire-and-forget)
-2. Prime all queues with initial FETCH_REQ commands
-3. Poll for START_DEV completion in CQ
-4. Only then will /dev/ublkb<N> be created
-
-This requires refactoring the control flow to handle START_DEV asynchronously.
+### 2. Large I/O Handling
+- Kernel sometimes sends I/O requests larger than our 64KB buffer
+- Need to either:
+  - Increase buffer size to match max_sectors setting
+  - Properly handle multi-buffer I/O operations
+  - Or ensure kernel respects our max_sectors limit
 
 ## Implementation Tasks:
 

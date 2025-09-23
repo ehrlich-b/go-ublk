@@ -39,12 +39,13 @@ func main() {
 	if *minimal {
 		// Use absolute minimal parameters to avoid memory allocation issues
 		fmt.Printf("*** Using MINIMAL parameters for debugging memory allocation\n")
-		params.QueueDepth = 1     // Absolute minimum
-		params.NumQueues = 1      // Single queue
-		params.MaxIOSize = 4096   // 4KB instead of 1MB
+		params.QueueDepth = 1        // Absolute minimum
+		params.NumQueues = 1         // Single queue
+		params.MaxIOSize = 64 * 1024 // 64KB to match our buffer size
 	} else {
 		params.QueueDepth = 32
 		params.NumQueues = 1
+		params.MaxIOSize = 64 * 1024 // 64KB to match our buffer size
 	}
 
 	// Critical for kernel 6.11+: use ioctl-encoded control commands
@@ -104,7 +105,6 @@ func main() {
 
 	logger.Info("received shutdown signal")
 }
-
 
 // parseSize parses a size string like "64M", "1G", "512K"
 func parseSize(s string) (int64, error) {

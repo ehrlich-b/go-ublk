@@ -17,7 +17,7 @@ type Ring interface {
 	// SubmitCtrlCmdAsync submits a control command without waiting for completion
 	SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error)
 
-	// SubmitIOCmd submits an I/O command and returns the result  
+	// SubmitIOCmd submits an I/O command and returns the result
 	SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error)
 
 	// WaitForCompletion waits for completion events and returns them
@@ -56,10 +56,10 @@ type Result interface {
 
 // Features describes available io_uring features
 type Features struct {
-	SQE128    bool // 128-byte SQEs supported
-	CQE32     bool // 32-byte CQEs supported  
-	UringCmd  bool // URING_CMD operation supported
-	SQPOLL    bool // Kernel-side polling supported
+	SQE128   bool // 128-byte SQEs supported
+	CQE32    bool // 32-byte CQEs supported
+	UringCmd bool // URING_CMD operation supported
+	SQPOLL   bool // Kernel-side polling supported
 }
 
 // SupportsFeatures checks if the kernel supports required features for ublk
@@ -89,28 +89,28 @@ type Config struct {
 
 // NewRing creates a new Ring implementation
 func NewRing(config Config) (Ring, error) {
-    logger := logging.Default()
-    logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
+	logger := logging.Default()
+	logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
 
-    // Prefer full-featured io_uring via library (if available)
-    if ring, err := NewRealRing(config); err == nil {
-        logger.Info("created io_uring via library", "entries", config.Entries)
-        return ring, nil
-    } else {
-        logger.Warn("NewRealRing failed, trying minimal shim", "error", err)
-    }
+	// Prefer full-featured io_uring via library (if available)
+	if ring, err := NewRealRing(config); err == nil {
+		logger.Info("created io_uring via library", "entries", config.Entries)
+		return ring, nil
+	} else {
+		logger.Warn("NewRealRing failed, trying minimal shim", "error", err)
+	}
 
-    // Fallback: minimal syscall-based shim (limited but real syscalls)
-    if minRing, err := NewMinimalRing(config.Entries, config.FD); err == nil {
-        logger.Info("created minimal io_uring implementation", "entries", config.Entries)
-        return minRing, nil
-    } else {
-        logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
-    }
+	// Fallback: minimal syscall-based shim (limited but real syscalls)
+	if minRing, err := NewMinimalRing(config.Entries, config.FD); err == nil {
+		logger.Info("created minimal io_uring implementation", "entries", config.Entries)
+		return minRing, nil
+	} else {
+		logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
+	}
 
-    // Last resort: stub (non-functional for real I/O)
-    logger.Warn("using stub ring - this breaks actual functionality")
-    return &stubRing{config: config}, nil
+	// Last resort: stub (non-functional for real I/O)
+	logger.Warn("using stub ring - this breaks actual functionality")
+	return &stubRing{config: config}, nil
 }
 
 // Stub implementation for development/testing
@@ -174,7 +174,7 @@ func (r *stubRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, 
 func (r *stubRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
 	// Enhanced stub that simulates successful control operations for development testing
 	// This allows us to test the complete control plane flow
-	
+
 	switch cmd {
 	case uapi.UBLK_CMD_ADD_DEV:
 		// Return a device ID (simulate kernel assigning device ID)
@@ -239,13 +239,13 @@ func (r *stubRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData ui
 func (r *stubRing) WaitForCompletion(timeout int) ([]Result, error) {
 	// Enhanced stub that simulates I/O request completions for development testing
 	// This allows the data plane to actually process simulated I/O requests
-	
+
 	// TODO: In a real implementation, this would wait for actual kernel completions
 	// For now, simulate receiving an I/O request completion every few calls
-	
+
 	// Return empty most of the time to simulate waiting
 	// Occasionally return a simulated I/O completion for testing
-	
+
 	return []Result{}, nil // Still returning empty for now - needs more complex simulation
 }
 

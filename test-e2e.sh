@@ -91,8 +91,10 @@ capture_existing_devices
 
 # Start ublk device in background
 echo "Starting ublk memory device (16MB for testing)..."
+echo "Command: sudo ./ublk-mem --size=16M -v"
 sudo env UBLK_DEVINFO_LEN=${UBLK_DEVINFO_LEN:-} ./ublk-mem --size=16M -v > /tmp/ublk_mem.log 2>&1 &
 UBLK_PID=$!
+echo "Started ublk-mem with PID $UBLK_PID"
 sleep 0.2
 TAIL_PID=""
 
@@ -137,20 +139,22 @@ echo "✅ Created 64KB of random test data"
 # CRITICAL TEST 1: Write data to device
 echo ""
 echo "=== CRITICAL TEST 1: Write Test ==="
-echo "Writing test data to ublk device..."
-if ! sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=1024 count=64 2>/dev/null; then
+echo "Writing 64KB test data to ublk device..."
+echo "Command: dd if=/tmp/test_data of=$DEVICE_BDEV bs=1024 count=64 status=progress"
+if ! sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=1024 count=64 status=progress 2>&1; then
     echo "❌ CRITICAL FAILURE: Could not write to device"
     echo "Data plane I/O is NOT working!"
     exit 1
 fi
 echo "✅ Write completed successfully"
 
-# CRITICAL TEST 2: Read data back from device  
+# CRITICAL TEST 2: Read data back from device
 echo ""
 echo "=== CRITICAL TEST 2: Read Test ==="
-echo "Reading data back from ublk device..."
-if ! sudo dd if="$DEVICE_BDEV" of=/tmp/read_back bs=1024 count=64 2>/dev/null; then
-    echo "❌ CRITICAL FAILURE: Could not read from device"  
+echo "Reading 64KB data back from ublk device..."
+echo "Command: dd if=$DEVICE_BDEV of=/tmp/read_back bs=1024 count=64 status=progress"
+if ! sudo dd if="$DEVICE_BDEV" of=/tmp/read_back bs=1024 count=64 status=progress 2>&1; then
+    echo "❌ CRITICAL FAILURE: Could not read from device"
     echo "Data plane I/O is NOT working!"
     exit 1
 fi

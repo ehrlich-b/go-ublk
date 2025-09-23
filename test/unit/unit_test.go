@@ -1,3 +1,4 @@
+//go:build !integration
 // +build !integration
 
 package unit
@@ -35,7 +36,7 @@ func TestBackendInterface(t *testing.T) {
 
 	// Test basic backend interface compliance
 	var _ ublk.Backend = backend
-	
+
 	// Test optional interfaces
 	var _ ublk.DiscardBackend = backend
 	var _ ublk.WriteZeroesBackend = backend
@@ -135,7 +136,7 @@ func TestFeatureFlags(t *testing.T) {
 	}
 
 	if uapi.UBLK_F_NEED_GET_DATA != (1 << 2) {
-		t.Error("UBLK_F_NEED_GET_DATA has wrong value") 
+		t.Error("UBLK_F_NEED_GET_DATA has wrong value")
 	}
 
 	if uapi.UBLK_F_UNPRIVILEGED_DEV != (1 << 5) {
@@ -228,7 +229,7 @@ func (m *mockBackend) SyncRange(offset, length int64) error {
 
 func (m *mockBackend) Stats() map[string]interface{} {
 	return map[string]interface{}{
-		"size": m.size,
+		"size":     m.size,
 		"data_len": len(m.data),
 	}
 }
