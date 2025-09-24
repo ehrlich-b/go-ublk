@@ -114,6 +114,12 @@ START_DEV command submitted but kernel never completes it. See TODO.md.
 - Other VM test variants: `make vm-e2e-64`, `make vm-e2e-80`, etc.
 - Always build first: `make build` before VM testing
 
+**Enhanced Debug Workflow**
+- `make vm-reset` - Hard reset VM, remodprobe ublk, setup kernel tracing
+- `make kernel-trace` - Read last 50 lines of kernel trace buffer
+- `make vm-simple-e2e` - Simple single read/write test with max verbosity
+- Always use vm-reset between test runs to ensure clean state
+
 ### Security Rules
 **NEVER EVER HARDCODE PASSWORDS OR CREDENTIALS IN ANY FILES**
 - Never put passwords in source code, scripts, or documentation

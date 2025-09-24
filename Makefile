@@ -21,7 +21,7 @@ TEST_FLAGS=-v
 INTEGRATION_FLAGS=-tags=integration
 UNIT_FLAGS=-tags=!integration
 
-.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help
+.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e
 
 # Default target
 all: deps build test
@@ -314,6 +314,12 @@ help:
 	@echo "  check           - Full check (fmt, vet, lint, test)"
 	@echo "  coverage        - Generate test coverage report"
 	@echo "  test-race       - Run tests with race detector"
+	@echo ""
+	@echo "Enhanced Debug Workflow:"
+	@echo "  vm-reset        - Hard reset VM and setup clean environment"
+	@echo "  kernel-trace    - Read kernel trace buffer (last 50 lines)"
+	@echo "  vm-simple-e2e   - Simple single I/O test with max verbosity"
+	@echo ""
 	@echo "  help            - Show this help"
 # Advanced I/O test
 test-vm-io:
@@ -378,6 +384,52 @@ vm-scp-all:
 		./ $(VM_USER)@$(VM_HOST):~/go-ublk/
 	@echo "✓ Repo copied to ~/go-ublk on VM"
 	@echo "💡 Run: ./vm-ssh.sh \"cd go-ublk && make build\" to build on VM"
+
+# --- Enhanced Debug Workflow ---
+.PHONY: vm-reset kernel-trace vm-simple-e2e
+
+# Hard reset VM and prepare clean environment
+vm-reset:
+	@echo "🔄 Performing hard VM reset and clean environment setup..."
+	@echo "Step 1: Hard reset via sysrq..."
+	@timeout 3 ./vm-ssh.sh 'echo "Triggering hard reset..." && sudo bash -c "echo 1 > /proc/sys/kernel/sysrq && echo b > /proc/sysrq-trigger"' || echo "Reset triggered (expected timeout)"
+	@echo "Step 2: Waiting for VM to restart..."
+	@for i in $$(seq 1 30); do \
+		sleep 2; \
+		if ./vm-ssh.sh 'echo "VM is up"' >/dev/null 2>&1; then \
+			echo "✓ VM responsive after $$((i*2)) seconds"; \
+			break; \
+		fi; \
+		echo "  ($$i/30) polling..."; \
+	done
+	@echo "Step 3: Waiting for system to fully initialize..."
+	@sleep 5
+	@echo "Step 4: Cleaning up any existing ublk devices..."
+	@./vm-ssh.sh 'sudo pkill -9 ublk-mem 2>/dev/null || true; sudo rm -f /dev/ublkb* /dev/ublkc* 2>/dev/null || true'
+	@echo "Step 5: Reloading ublk module..."
+	@./vm-ssh.sh 'sudo modprobe -r ublk_drv 2>/dev/null || true; sudo modprobe ublk_drv'
+	@echo "Step 6: Setting up enhanced kernel tracing..."
+	@./vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
+	@echo "Step 7: Verifying trace setup..."
+	@./vm-ssh.sh 'echo "Active ftrace filter:"; sudo cat /sys/kernel/debug/tracing/set_ftrace_filter | head -10 || echo "No filters set"'
+	@echo "✅ VM reset and tracing setup complete"
+
+# Read kernel trace buffer
+kernel-trace:
+	@echo "📋 Reading kernel trace buffer..."
+	@./vm-ssh.sh 'sudo cat /sys/kernel/debug/tracing/trace' | tail -n 50
+
+# Simple single read/write test with maximum verbosity
+vm-simple-e2e: ublk-mem vm-copy
+	@echo "🧪 Running simple single I/O test with maximum verbosity..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
+	@echo "Test will timeout after 60 seconds if hanging..."
+	@timeout 60 ./vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh' || \
+	 (echo "❌ Overall test timed out - checking VM state..." && \
+	  echo "=== FINAL KERNEL TRACE ===" && \
+	  make kernel-trace && \
+	  echo "=== FINAL DMESG ===" && \
+	  ./vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
 
 # FORCE target to ensure rebuilds
 FORCE:

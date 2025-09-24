@@ -470,14 +470,15 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 	// State machine transitions
 	switch currentState {
 	case TagStateInFlightFetch:
-		// CQE from FETCH_REQ - handoff back to us
-		r.tagStates[tag] = TagStateOwned
+		// CQE from FETCH_REQ - this means I/O is ready
 		if result == 0 {
-			// UBLK_IO_RES_OK: I/O request available - process it immediately!
+			// UBLK_IO_RES_OK: I/O request available - transition to Owned and process
+			r.tagStates[tag] = TagStateOwned
 			fmt.Printf("Queue %d: Tag %d I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
 			return r.processIOAndCommit(tag)
 		} else if result == 1 {
 			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path (not implemented yet)
+			r.tagStates[tag] = TagStateOwned
 			fmt.Printf("Queue %d: Tag %d NEED_GET_DATA (result=1) - not implemented\n", r.queueID, tag)
 			return fmt.Errorf("NEED_GET_DATA not implemented")
 		} else {
@@ -491,7 +492,7 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		// There is NO "commit done but no next I/O" state - the CQE only arrives
 		// when the next request is ready (or on abort/error)
 		if result == 0 {
-			// UBLK_IO_RES_OK: Next I/O request available
+			// UBLK_IO_RES_OK: Next I/O request available - transition to Owned and process immediately
 			r.tagStates[tag] = TagStateOwned
 			fmt.Printf("Queue %d: Tag %d next I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
 			return r.processIOAndCommit(tag)
@@ -659,8 +660,8 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
 	fmt.Printf("[DEBUG] submitCommitAndFetch: Starting for tag=%d\n", tag)
 	// Calculate result: bytes processed for success, negative errno for error
-	bytesHandled := int32(desc.NrSectors) * 512
-	result := bytesHandled // Success: return bytes processed
+	// Always set result = nr_sectors << 9 (nr_sectors * 512) as per expert guidance
+	result := int32(desc.NrSectors) << 9 // Success: return bytes processed
 	if ioErr != nil {
 		result = -5 // -EIO
 		if r.logger != nil {

@@ -1,193 +1,227 @@
-# UBLK Userspace Block Device - I/O Request Routing Issue
+# UBLK Userspace Block Device - I/O Routing Issue
 
-## Current Status: Block Requests Issued But Never Reach Userspace
+## Problem Summary
 
-**Device creation works perfectly. Block layer issues I/O requests to ublk driver successfully. But requests never reach our userspace process.**
+**Go-based ublk implementation successfully creates devices but I/O operations hang indefinitely.**
 
-## The Problem (After Proper Kernel Tracing)
+- Device creation works: ADD_DEV, SET_PARAMS, START_DEV all succeed
+- Block device appears: `/dev/ublkbN` exists with correct major number (259)
+- But any I/O operation (like `dd`) hangs in D state forever
+- No kernel trace events generated for I/O operations
 
-1. **Device Creation**: ✅ Working perfectly
-   - ADD_DEV, SET_PARAMS, START_DEV all work
-   - `/dev/ublkbN` appears correctly
-   - Block device has correct major/minor numbers (259,N)
+## What Actually Works ✅
 
-2. **Block Layer**: ✅ Working correctly
-   - dd command successfully submits I/O to block layer
-   - Kernel trace shows: `block_rq_issue: 259,12 R 4096 () 0 + 8`
-   - READ request for 4096 bytes at sector 0 is issued
+1. **Device Creation**: Perfect
+   - ADD_DEV → Device ID assigned (returns 0)
+   - SET_PARAMS → Parameters set (returns 0)
+   - START_DEV → Block device `/dev/ublkbN` appears
+   - Character device `/dev/ublkcN` accessible
 
-3. **ublk Driver**: ❌ **REQUEST ROUTING BROKEN**
-   - Block requests reach ublk driver but **never get routed to userspace**
-   - **No corresponding `block_rq_complete` in trace** - requests hang forever
-   - dd process enters D state waiting for I/O completion
-   - Our userspace process never receives any CQE completions
+2. **Queue Infrastructure**: Working
+   - All 32 FETCH_REQ commands submitted successfully
+   - io_uring operations complete successfully
+   - Queue runners active and processing completions
 
-4. **Userspace Process**: ❌ Never sees the I/O
-   - WaitForCompletion() blocks forever
-   - No calls to processIOAndCommit for real I/O
-   - Only sees spurious empty descriptors during startup
+3. **Control Communication**: Working
+   - io_uring_enter syscalls return success
+   - Control commands reach completion
+   - Application logs show all operations succeeding
 
-## Kernel Trace Evidence
+## What's Broken ❌
 
-**Block request issued successfully:**
-```
-iou-wrk-4887-4895    [000] .....  1494.679415: block_rq_issue: 259,12 R 4096 () 0 + 8 none,0,0 [iou-wrk-4887]
-```
+**Block I/O routing completely fails:**
 
-**No completion (this should appear but doesn't):**
-```
-# Should see: block_rq_complete: 259,12 R () 0 + 8 [0]
-# But never appears - request hangs in ublk driver
-```
+- `dd if=/dev/zero of=/dev/ublkbN` hangs immediately in D state
+- No kernel trace events generated despite comprehensive tracing setup
+- Process enters uninterruptible sleep and cannot be killed
+- Zero block layer activity recorded
 
-## Process State Evidence
+## Core Issue: Kernel Tracing Shows Nothing
 
+**We cannot debug the I/O routing failure because our kernel tracing filters are wrong.**
+
+Current tracing setup shows `0/0 entries` even for operations that work (like device creation). This means we're filtering out all kernel activity by using incorrect function names.
+
+**Wrong function names we're currently trying to trace:**
+- `ublk_ctrl_ioctl` ❌ (doesn't exist)
+- `ublk_ctrl_add_dev` ❌ (doesn't exist)
+- `ublk_ctrl_set_params` ❌ (doesn't exist)
+- `ublk_queue_rq` ❌ (might not exist)
+
+## What We Need Help With
+
+### Critical Missing Information
+
+**We need the actual function names from the Linux ublk driver (`drivers/block/ublk_drv.c`) to fix our kernel tracing:**
+
+1. **Control path functions** (handle ioctls from `/dev/ublk-control`):
+   ```c
+   ???_ioctl()       // Handles ADD_DEV, SET_PARAMS, START_DEV commands
+   ???_add_dev()     // ADD_DEV implementation
+   ???_set_params()  // SET_PARAMS implementation
+   ???_start_dev()   // START_DEV implementation
+   ```
+
+2. **Data path functions** (handle io_uring URING_CMD from `/dev/ublkcN`):
+   ```c
+   ???_uring_cmd()   // Main URING_CMD handler for FETCH_REQ operations
+   ???_queue_rq()    // Block layer request queue handler
+   ```
+
+3. **Block device functions** (handle I/O to `/dev/ublkbN`):
+   ```c
+   ???_submit_bio()  // Block layer entry point
+   ???_make_request() // Request processing
+   ```
+
+### How to Find These Function Names
+
+**Option 1: Kernel source examination**
+- Browse: https://github.com/torvalds/linux/blob/master/drivers/block/ublk_drv.c
+- Search for ioctl handlers and function definitions
+
+**Option 2: Runtime discovery on our VM**
 ```bash
-# dd process stuck in uninterruptible sleep:
-root    1234    D    dd if=/dev/zero of=/dev/ublkb12 bs=512 count=1
+# List all ublk kernel symbols:
+grep ublk /proc/kallsyms
 
-# Our ublk-mem process running but idle:
-root    1235    S    ./ublk-mem --size=16M
-# WaitForCompletion() never returns - no CQEs arrive
+# Function names from kernel module:
+nm /lib/modules/$(uname -r)/kernel/drivers/block/ublk_drv.ko
 ```
 
-## Code Flow Analysis
+**Option 3: Function name patterns to search for**
+- Functions calling `misc_register()` (for `/dev/ublk-control`)
+- Functions calling `add_disk()` (for block device registration)
+- Functions with `uring_cmd` in name (io_uring passthrough)
+- Functions processing `UBLK_CMD_*` constants
 
-### What Works ✅
-```go
-// Device creation sequence:
-controller.AddDevice()    // ✅ Device ID assigned
-controller.SetParams()   // ✅ Queue config set
-controller.StartDevice() // ✅ Block device appears
+### Specific Question for Kernel Experts
 
-// Queue initialization:
-runner.Prime()           // ✅ FETCH_REQ submitted for all tags
-// All 32 tags submit FETCH_REQ via io_uring
-```
+**"What are the actual function names in the Linux ublk driver for:**
 
-### What's Broken ❌
-```go
-// I/O flow should be:
-// 1. dd writes to /dev/ublkbN                    ✅ Works
-// 2. Block layer issues request to ublk driver   ✅ Works (trace shows block_rq_issue)
-// 3. ublk driver routes to userspace io_uring    ❌ BROKEN - never happens
-// 4. Our WaitForCompletion() gets CQE            ❌ Never happens
-// 5. processIOAndCommit() processes I/O          ❌ Never called
-// 6. submitCommitAndFetch() completes I/O        ❌ Never happens
-// 7. Block layer gets completion                 ❌ No block_rq_complete in trace
-```
+1. **ioctl handler** that processes ADD_DEV, SET_PARAMS, START_DEV from `/dev/ublk-control`?
+2. **URING_CMD handler** that processes FETCH_REQ operations from `/dev/ublkcN`?
+3. **Block request handler** that processes I/O requests to `/dev/ublkbN`?
 
-## The Core Question
+**Context:** Our Go ublk implementation succeeds at syscall level (io_uring_enter returns success) but we can't trace kernel execution because we're using wrong function names in ftrace filters. We need correct names to debug why block I/O hangs."
 
-**Why doesn't the ublk driver route block requests to our userspace io_uring?**
+## Technical Environment
 
-The block layer successfully issues requests to the ublk driver (we see `block_rq_issue` traces), but these requests never generate CQE completions for our userspace process. The ublk driver has the I/O but doesn't deliver it to us.
-
-## Areas to Investigate
-
-1. **FETCH_REQ State** - Are our FETCH_REQ submissions correct? Does ublk driver see them?
-2. **io_uring Association** - Is character device properly linked to our io_uring instance?
-3. **Queue State** - Is the ublk driver queue in the correct state to route I/O?
-4. **Thread Binding** - Are we missing required thread/CPU affinity?
-5. **Command Format** - Are our FETCH_REQ commands properly formatted?
-6. **Timing Issues** - Do we need to wait longer after START_DEV before submitting FETCH_REQ?
-
-## Debug Evidence
-
-### Successful Startup Log
-```
-*** SUCCESS: Device /dev/ublkb12 created!
-Device created: /dev/ublkb12
-Character device: /dev/ublkc12
-Size: 16.0 MB (16777216 bytes)
-```
-
-### When dd Runs (Kernel Trace)
-```
-# Block request issued:
-block_rq_issue: 259,12 R 4096 () 0 + 8 none,0,0
-
-# Our process logs: NO ACTIVITY
-# WaitForCompletion() never returns
-# No CQE completions arrive
-# processIOAndCommit() never called
-```
-
-### Key Files for Debugging
-
-**I/O Command Submission** (`internal/uring/minimal.go:595-610`):
-```go
-// FETCH_REQ submission at startup
-func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) {
-    payload := uapi.Marshal(ioCmd)
-    cmdArea := (*[16]byte)(unsafe.Add(unsafe.Pointer(sqe), 48))
-    copy(cmdArea[:], payload)
-    // Are these FETCH_REQ commands reaching ublk driver correctly?
-}
-```
-
-**Queue Initialization** (`internal/queue/runner.go:290-322`):
-```go
-// Initial FETCH_REQ for each tag
-func (r *Runner) submitInitialFetchReq(tag uint16) error {
-    ioCmd := &uapi.UblksrvIOCmd{
-        QID:  r.queueID,
-        Tag:  tag,
-        Addr: uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
-    }
-    cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)
-    _, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
-    // Do these reach the ublk driver? Are they properly formed?
-}
-```
-
-## Environment
 - **Kernel**: 6.11.0-24-generic (Ubuntu VM)
-- **Go**: 1.23.1
-- **Architecture**: x86_64
-- **ublk module**: Loaded successfully
+- **ublk Module**: Loaded and functional for device creation
+- **Go Implementation**: Pure Go using io_uring URING_CMD
+- **Test VM**: Accessible for kernel debugging
 
-## Request for Help
+## Expected Outcome
 
-**What could cause the ublk driver to receive block requests but not route them to userspace io_uring?**
+Once we have correct function names:
+1. **Trace control operations** to verify they reach ublk driver
+2. **Trace FETCH_REQ operations** to see if they reach ublk driver
+3. **Trace block I/O operations** to find where routing fails
+4. **Identify exact failure point** in I/O processing pipeline
 
-The gap is specifically between the ublk driver receiving block I/O (confirmed by kernel traces) and generating CQE completions for our userspace process (which never happens).
+## Critical Logic Error: I Am Clearly Doing Something Wrong With Tracing
 
-## Additional Debug Steps Needed
+**Wait, this makes no sense at all:**
 
-**What else can be done to debug this routing issue?**
+If our URING_CMD submissions aren't reaching the ublk driver (0/0 trace entries), then **how are block devices appearing?**
 
-Current tracing is probably still too basic. Need better visibility into:
+- `/dev/ublkb0` gets created successfully ✅
+- ADD_DEV returns success and assigns device ID 0 ✅
+- SET_PARAMS returns success ✅
+- START_DEV succeeds and block device appears ✅
+- **But kernel traces show 0/0 entries for ublk functions** ❌
 
-1. **ublk Driver Internal State**
-   - Are FETCH_REQ commands actually received by ublk driver?
-   - What's the state of the ublk queue when block I/O arrives?
-   - Is the driver trying to route I/O but failing?
+**This is logically impossible.** Block devices can't appear without the ublk driver being involved.
 
-2. **io_uring Command Flow**
-   - Add ublk-specific tracepoints if available
-   - Trace io_uring command submissions and completions
-   - Verify FETCH_REQ vs actual I/O command routing
+### Deep Questions About My Tracing Setup Failures
 
-3. **Missing Kernel Events**
-   - Are there ublk-specific trace events we should enable?
-   - Function-level tracing of ublk driver functions during I/O
-   - io_uring event tracing to see if commands are reaching the ring
+**I am clearly doing something wrong with tracing. Here are the fundamental questions I need to answer:**
 
-4. **Process/Thread State**
-   - Verify our io_uring thread is actually blocked in the right syscall
-   - Check if there are pending CQEs that we're not processing
-   - Validate thread affinity requirements
+1. **Am I tracing the wrong phase?**
+   - Are control commands (ADD_DEV, SET_PARAMS, START_DEV) handled by different functions than what I'm tracing?
+   - Maybe `ublk_ctrl_uring_cmd` is the dispatcher, but actual work happens in untraced subfunctions?
 
-5. **Command Validation**
-   - Dump the exact bytes of FETCH_REQ commands we're sending
-   - Compare with working reference implementation
-   - Verify SQE structure and command encoding
+2. **Am I missing trace activation?**
+   - Does ftrace require additional activation steps I'm missing?
+   - Are the function filters applied but tracing not actually enabled for those functions?
+   - Is there a difference between "function in filter" vs "function being traced"?
 
-**Suggested kernel tracing improvements:**
-- Enable specific ublk driver function tracing
-- Add io_uring submit/complete event tracing
-- Monitor ublk queue state changes
-- Trace the path from block_rq_issue to attempted userspace delivery
+3. **Are the function names still wrong?**
+   - The `.isra.0` suffixes suggest inlined functions - are these the actual callable functions?
+   - Should I be tracing the base functions without `.isra.0`?
+   - Are there wrapper functions that call these internal functions?
 
-The current block-layer tracing shows I/O arrives but we need deeper visibility into the ublk driver's attempt to route it to userspace.
+4. **Is ftrace the wrong tool?**
+   - Should I be using `perf trace` instead of ftrace?
+   - Are URING_CMD operations handled by a different tracing subsystem?
+   - Do I need to trace at the io_uring level rather than ublk driver level?
+
+5. **Am I tracing at the wrong time?**
+   - Do I need to enable tracing BEFORE starting ublk-mem?
+   - Are the operations completing so fast they're not captured?
+   - Is there a race condition in trace buffer updates?
+
+6. **What am I fundamentally misunderstanding about ublk architecture?**
+   - Are control commands handled by a different code path than what I think?
+   - Is there a userspace ublk daemon that handles some operations?
+   - Are some operations handled entirely in userspace without kernel involvement?
+
+### Specific Debugging Questions
+
+**To fix my obviously broken tracing setup:**
+
+1. **How do I verify ftrace is actually working?**
+   ```bash
+   # Does this generate ANY trace entries for basic operations?
+   echo '*sys_write*' > /sys/kernel/debug/tracing/set_ftrace_filter
+   echo 'test' > /tmp/test
+   cat /sys/kernel/debug/tracing/trace
+   ```
+
+2. **How do I trace io_uring operations specifically?**
+   - What functions handle URING_CMD operations in the kernel?
+   - Should I be tracing `io_uring_enter` and related functions instead?
+
+3. **How do I verify the ublk driver is actually loaded and functioning?**
+   ```bash
+   # Are these operations actually reaching the driver?
+   lsmod | grep ublk
+   cat /sys/module/ublk_drv/sections/.text  # Driver loaded?
+   cat /proc/modules | grep ublk            # Module state?
+   ```
+
+4. **What's the actual call chain I should be tracing?**
+   - User calls io_uring_enter() → ??? → ublk driver functions
+   - What are the intermediate steps I'm missing?
+
+### The Core Question
+
+**If control commands succeed but generate zero kernel traces, either:**
+
+1. **I'm tracing wrong** - The operations ARE reaching the kernel but I'm not capturing them
+2. **Something is very broken** - Operations appear to succeed but don't actually reach the kernel
+3. **I misunderstand the architecture** - Control operations work differently than I think
+
+**The fact that block devices actually appear proves the kernel is involved somehow. My tracing setup is fundamentally flawed.**
+
+### What I Need to Figure Out
+
+Before I can debug the I/O hanging issue, I need to fix my obviously broken tracing setup by understanding:
+
+- **How to actually capture ublk driver function calls in ftrace**
+- **What the real call chain is from io_uring_enter to ublk driver**
+- **Why successful kernel operations generate zero trace entries**
+- **Whether I'm using the right tracing approach at all**
+
+**I clearly don't understand something basic about Linux kernel tracing or ublk architecture.**
+
+## Code Architecture (Working Parts)
+
+**Pure Go implementation using:**
+- `/dev/ublk-control` for device management (ADD_DEV/SET_PARAMS/START_DEV) ✅
+- `/dev/ublkcN` character devices with io_uring URING_CMD ✅
+- Custom io_uring wrapper at `internal/uring/minimal.go` ✅
+- Queue runners at `internal/queue/runner.go` ✅
+
+**All userspace code works correctly - the issue is in kernel I/O routing that we cannot trace due to wrong function names.**
