@@ -35,21 +35,30 @@ echo "Setting up KPROBES for ublk functions (function tracing doesn't work for m
 echo nop | sudo tee /sys/kernel/tracing/current_tracer >/dev/null
 
 # Clear any existing kprobes first
-sudo bash -c 'echo > /sys/kernel/tracing/kprobe_events' || true
+sudo bash -c 'echo > /sys/kernel/tracing/kprobe_events' 2>/dev/null || true
 
 echo "Adding CONFIRMED STABLE kprobes for ublk (6.1→6.11)..."
 
 # Control path - URING_CMD on /dev/ublk-control
-echo 'p:probe_ublk_ctrl ublk_ctrl_uring_cmd' | sudo tee -a /sys/kernel/tracing/kprobe_events >/dev/null
-echo "  ✓ Added ublk_ctrl_uring_cmd (control path)"
+if echo 'p:probe_ublk_ctrl ublk_ctrl_uring_cmd' | sudo tee /sys/kernel/tracing/kprobe_events >/dev/null 2>&1; then
+  echo "  ✓ Added ublk_ctrl_uring_cmd (control path)"
+else
+  echo "  ⚠ Could not add ublk_ctrl_uring_cmd"
+fi
 
 # Channel path - URING_CMD on /dev/ublkcN (FETCH_REQ/COMMIT)
-echo 'p:probe_ublk_ch ublk_ch_uring_cmd' | sudo tee -a /sys/kernel/tracing/kprobe_events >/dev/null
-echo "  ✓ Added ublk_ch_uring_cmd (FETCH_REQ/COMMIT path)"
+if echo 'p:probe_ublk_ch ublk_ch_uring_cmd' | sudo tee -a /sys/kernel/tracing/kprobe_events >/dev/null 2>&1; then
+  echo "  ✓ Added ublk_ch_uring_cmd (FETCH_REQ/COMMIT path)"
+else
+  echo "  ⚠ Could not add ublk_ch_uring_cmd"
+fi
 
 # Block-MQ path - THE CRITICAL ONE for dd I/O
-echo 'p:probe_ublk_qrq ublk_queue_rq' | sudo tee -a /sys/kernel/tracing/kprobe_events >/dev/null
-echo "  ✓ Added ublk_queue_rq (blk-mq I/O path - CRITICAL!)"
+if echo 'p:probe_ublk_qrq ublk_queue_rq' | sudo tee -a /sys/kernel/tracing/kprobe_events >/dev/null 2>&1; then
+  echo "  ✓ Added ublk_queue_rq (blk-mq I/O path - CRITICAL!)"
+else
+  echo "  ⚠ Could not add ublk_queue_rq"
+fi
 
 # Enable all kprobes
 for probe in probe_ublk_ctrl probe_ublk_ch probe_ublk_qrq; do

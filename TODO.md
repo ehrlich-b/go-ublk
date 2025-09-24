@@ -2,13 +2,14 @@
 
 ## Device Creation Works, But I/O Processing Broken
 
-Current status:
+Current status (2025-09-24):
 - ✅ ADD_DEV works (returns device ID)
 - ✅ SET_PARAMS works (returns 0)
-- ✅ START_DEV completes successfully (async implementation working)
-- ✅ Block device `/dev/ublkb*` is created
-- ❌ **I/O operations hang** - kernel not sending I/O requests to our queues
-- ❌ Queue runners stuck in infinite loop re-submitting FETCH_REQs
+- ✅ START_DEV completes successfully
+- ✅ Block device `/dev/ublkb0` is created
+- ❌ **FETCH_REQ operations don't reach kernel** - `ublk_ch_uring_cmd` never called
+- ❌ **I/O operations hang** - dd enters D state forever
+- ❌ Queue runners receive empty FETCH completions (NrSectors=0)
 
 ## What Was Fixed:
 
@@ -43,41 +44,31 @@ Current status:
    - Possibly COMMIT_AND_FETCH_REQ not actually completing the I/O
    - Or we're not handling the flow correctly
 
-### Root Cause (Hypothesis):
-- The kernel might be expecting a different flow or setup
-- Possible missing step in queue initialization
-- May need to wait for kernel to be ready before submitting FETCH_REQs
-- Or the descriptor mmap might not be set up correctly
+### Root Cause (Confirmed by Testing):
+- **FETCH_REQ operations are not reaching the kernel's ublk driver**
+- Control operations work (`ublk_ctrl_uring_cmd` traced successfully)
+- But I/O operations fail (`ublk_ch_uring_cmd` never called)
+- This means our FETCH_REQ SQE format is likely incorrect
+- See `einval_issue.md` for comprehensive analysis and code
 
-## Implementation Tasks:
+## Next Steps to Fix:
 
-### Phase 1: Core Async Support
-- [ ] Add `SubmitCtrlCmdAsync` to minimalRing
-- [ ] Add `AsyncHandle` type for pending operations
-- [ ] Implement `tryGetCompletion` for polling CQ
-- [ ] Add timeout support to async wait
+### 1. Debug why FETCH_REQ doesn't reach kernel
+- [ ] Compare our SQE format with ublksrv C implementation
+- [ ] Check if we need to pass a header struct in sqe.Addr for FETCH_REQ
+- [ ] Verify the IOCTL encoding (0xc0107520) is correct
+- [ ] Test if we need to register the `/dev/ublkcN` fd with io_uring
 
-### Phase 2: Controller Changes
-- [ ] Create `StartDeviceAsync` method
-- [ ] Return `AsyncStartHandle` instead of blocking
-- [ ] Keep synchronous version for other commands
+### 2. Alternative approaches to test
+- [ ] Try using the non-encoded command value (just 0x20)
+- [ ] Test with sqe.Addr pointing to a header struct
+- [ ] Try different sqe.OpFlags values
+- [ ] Check if queue_id/tag should be in sqe.Addr instead of UserData
 
-### Phase 3: Backend Orchestration
-- [ ] Submit START_DEV asynchronously
-- [ ] Prime queues while START_DEV pending
-- [ ] Wait for START_DEV completion with timeout
-- [ ] Handle partial failures gracefully
-
-### Phase 4: Queue Runner Updates
-- [ ] Add retry logic for EOPNOTSUPP errors
-- [ ] Handle START_DEV-in-progress state
-- [ ] Ensure proper synchronization
-
-## Files to modify:
-- `/internal/uring/minimal.go` - Add async primitives
-- `/internal/ctrl/control.go` - Add StartDeviceAsync
-- `/backend.go` - Orchestrate async flow
-- `/internal/queue/runner.go` - Add retry logic
+### 3. Kernel investigation needed
+- [ ] Why can't we trace `ublk_ch_uring_cmd` with kprobes?
+- [ ] What's the exact SQE format the kernel expects for FETCH_REQ?
+- [ ] Is there a state machine we're not following correctly?
 
 ## Testing:
 ```bash

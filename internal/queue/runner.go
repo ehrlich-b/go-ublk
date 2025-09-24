@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"syscall"
@@ -297,12 +298,16 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 		return fmt.Errorf("tag %d already initialized (state=%d)", tag, r.tagStates[tag])
 	}
 
+	// CRITICAL FIX: Addr must point to the descriptor for this tag in the mmapped array
+	// The kernel will write I/O information to this descriptor
+	descAddr := r.descPtr + uintptr(tag*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
+
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: 0,
-		// Provide userspace buffer address for this tag
-		Addr: uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
+		// CRITICAL: Must point to the descriptor, NOT the buffer!
+		Addr: uint64(descAddr),
 	}
 
 	// Encode FETCH operation in userData
@@ -679,12 +684,15 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 		return fmt.Errorf("cannot submit COMMIT for tag %d in state %d (not Owned)", tag, r.tagStates[tag])
 	}
 
+	// CRITICAL FIX: Addr must point to the descriptor for this tag
+	descAddr := r.descPtr + uintptr(tag*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
+
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: result,
-		// Provide buffer for next request (piggyback FETCH)
-		Addr: uint64(r.bufPtr + uintptr(int(tag)*64*1024)),
+		// CRITICAL: Must point to the descriptor for next FETCH (piggyback)
+		Addr: uint64(descAddr),
 	}
 
 	// Encode COMMIT operation in userData
@@ -710,14 +718,20 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
 	bufSize := depth * 64 * 1024 // 64KB per request buffer
 
-	// Map descriptor array. Kernel exposes descriptors read-only; matching
-	// ublksrv, request PROT_READ to avoid EPERM when the VM hardens writes.
+	// CRITICAL FIX: Page-round the mmap size
+	pageSize := os.Getpagesize()
+	if rem := descSize % pageSize; rem != 0 {
+		descSize += pageSize - rem
+	}
+
+	// CRITICAL FIX: Map descriptor array with READ|WRITE permissions
+	// The kernel needs to write descriptors (on FETCH) and we need to read them
 	descPtr, _, errno := syscall.Syscall6(
 		syscall.SYS_MMAP,
-		0,                  // addr
-		uintptr(descSize),  // length
-		syscall.PROT_READ,  // prot
-		syscall.MAP_SHARED, // flags
+		0,                                     // addr
+		uintptr(descSize),                     // length (page-rounded)
+		syscall.PROT_READ|syscall.PROT_WRITE, // prot - need both!
+		syscall.MAP_SHARED|syscall.MAP_POPULATE, // flags - populate to avoid page faults
 		uintptr(fd),        // fd
 		0,                  // offset
 	)

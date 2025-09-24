@@ -590,7 +590,14 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 		"cmd", fmt.Sprintf("0x%x", cmd),
 		"controlFd", r.controlFd,
 		"qid", ioCmd.QID,
-		"tag", ioCmd.Tag)
+		"tag", ioCmd.Tag,
+		"ioCmd.Addr", fmt.Sprintf("0x%x", ioCmd.Addr))
+
+	// Verify size is correct
+	ioCmdSize := unsafe.Sizeof(*ioCmd)
+	if ioCmdSize != 16 {
+		return nil, fmt.Errorf("CRITICAL: UblksrvIOCmd size is %d bytes, expected 16", ioCmdSize)
+	}
 
 	// Prepare SQE with the minimal fields the kernel expects
 	sqe := &sqe128{}
@@ -599,17 +606,10 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	sqe.setCmdOp(cmd)
 	sqe.userData = userData
 
-	// Marshal ublksrv_io_cmd exactly like the C reference implementation does.
-	// The kernel reads the payload from sqe->addr3 (bytes 48-63 of the base SQE).
-	payload := uapi.Marshal(ioCmd)
-	if len(payload) != 16 {
-		return nil, fmt.Errorf("I/O command marshal returned %d bytes, expected 16", len(payload))
-	}
-	cmdArea := (*[16]byte)(unsafe.Add(unsafe.Pointer(sqe), 48))
-	copy(cmdArea[:], payload)
-
-	// The C ublksrv sets len to 0 for queue ops; follow the same pattern.
-	sqe.len = 0
+	// CRITICAL FIX: Pass the ublksrv_io_cmd struct via sqe.addr, NOT in the cmd area
+	// The kernel expects a userspace pointer to the struct
+	sqe.addr = uint64(uintptr(unsafe.Pointer(ioCmd)))
+	sqe.len = uint32(ioCmdSize) // Set len to sizeof(struct ublksrv_io_cmd)
 
 	// Submit the command and flush to kernel
 	// submitOnlyCmd handles both queueing the SQE and calling io_uring_enter
