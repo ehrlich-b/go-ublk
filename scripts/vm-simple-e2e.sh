@@ -75,9 +75,9 @@ echo "Started ublk-mem with PID $UBLK_PID"
 echo "Adding PID $UBLK_PID to kernel trace filter for precise monitoring..."
 /tmp/add_pid_filter.sh $UBLK_PID
 
-# Clear trace buffer to capture only ublk operations
-echo "Clearing trace buffer to capture only ublk operations..."
-sudo bash -c ': > /sys/kernel/debug/tracing/trace'
+# DON'T clear trace buffer - we want to see ALL operations from device creation onwards
+echo "Keeping trace buffer to capture device creation + I/O operations..."
+# sudo bash -c ': > /sys/kernel/tracing/trace'  # DISABLED - we want all traces!
 
 # Wait for device to appear (much shorter timeout)
 echo "Waiting for device to appear..."
@@ -106,9 +106,9 @@ echo "HELLO UBLK WORLD - THIS IS A SIMPLE TEST PATTERN" > /tmp/simple_test_data
 truncate -s 512 /tmp/simple_test_data
 echo "✅ Test data created (512 bytes)"
 
-# Clear kernel trace before I/O
-echo "Clearing kernel trace buffer..."
-sudo bash -c 'echo > /sys/kernel/debug/tracing/trace' || true
+# DON'T clear kernel trace before I/O - we want to see control operations + I/O together!
+echo "Keeping kernel trace buffer to see full sequence..."
+# sudo bash -c 'echo > /sys/kernel/tracing/trace' || true  # DISABLED!
 
 echo ""
 echo "=== PERFORMING SINGLE WRITE ==="
@@ -144,7 +144,7 @@ for i in $(seq 1 10); do
         check_d_state_processes || true
 
         echo "Dumping FILTERED kernel trace (ublk-only):"
-        sudo cat /sys/kernel/debug/tracing/trace || true
+        sudo cat /sys/kernel/tracing/trace || true
         echo ""
         echo "Dumping dmesg for kernel errors:"
         sudo dmesg | tail -n 10 || true
@@ -164,7 +164,7 @@ done
 
 echo ""
 echo "=== KERNEL TRACE AFTER WRITE ==="
-sudo cat /sys/kernel/debug/tracing/trace | tail -n 20 || true
+sudo cat /sys/kernel/tracing/trace | tail -n 20 || true
 
 echo ""
 echo "=== PERFORMING SINGLE READ ==="
@@ -179,7 +179,7 @@ if ! timeout 15 sudo dd if="$DEVICE" of=/tmp/simple_read_back bs=512 count=1 sta
         echo "❌ READ FAILED"
     fi
     echo "Dumping trace buffer after read failure/timeout:"
-    sudo cat /sys/kernel/debug/tracing/trace | tail -n 30 || true
+    sudo cat /sys/kernel/tracing/trace | tail -n 30 || true
     echo "Dumping dmesg for kernel errors:"
     sudo dmesg | tail -n 20 || true
     exit 1
@@ -188,7 +188,7 @@ echo "✅ Read completed"
 
 echo ""
 echo "=== KERNEL TRACE AFTER READ ==="
-sudo cat /sys/kernel/debug/tracing/trace | tail -n 20 || true
+sudo cat /sys/kernel/tracing/trace | tail -n 20 || true
 
 echo ""
 echo "=== DATA VERIFICATION ==="

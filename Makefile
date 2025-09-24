@@ -411,13 +411,13 @@ vm-reset:
 	@echo "Step 6: Setting up enhanced kernel tracing..."
 	@./vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
 	@echo "Step 7: Verifying trace setup..."
-	@./vm-ssh.sh 'echo "Active ftrace filter:"; sudo cat /sys/kernel/debug/tracing/set_ftrace_filter | head -10 || echo "No filters set"'
+	@./vm-ssh.sh 'echo "Active kprobes:"; sudo cat /sys/kernel/tracing/kprobe_events | head -10 || echo "No kprobes set"'
 	@echo "✅ VM reset and tracing setup complete"
 
 # Read kernel trace buffer
 kernel-trace:
 	@echo "📋 Reading kernel trace buffer..."
-	@./vm-ssh.sh 'sudo cat /sys/kernel/debug/tracing/trace' | tail -n 50
+	@./vm-ssh.sh 'sudo cat /sys/kernel/tracing/trace' | tail -n 50
 
 # Simple single read/write test with maximum verbosity
 vm-simple-e2e: ublk-mem vm-copy
