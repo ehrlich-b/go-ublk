@@ -724,13 +724,13 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 		descSize += pageSize - rem
 	}
 
-	// CRITICAL FIX: Map descriptor array with READ|WRITE permissions
-	// The kernel needs to write descriptors (on FETCH) and we need to read them
+	// Map descriptor array as READ-ONLY from userspace perspective
+	// The kernel writes to descriptors internally, userspace only reads
 	descPtr, _, errno := syscall.Syscall6(
 		syscall.SYS_MMAP,
 		0,                                     // addr
 		uintptr(descSize),                     // length (page-rounded)
-		syscall.PROT_READ|syscall.PROT_WRITE, // prot - need both!
+		syscall.PROT_READ,                     // prot - READ ONLY from userspace!
 		syscall.MAP_SHARED|syscall.MAP_POPULATE, // flags - populate to avoid page faults
 		uintptr(fd),        // fd
 		0,                  // offset
