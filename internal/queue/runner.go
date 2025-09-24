@@ -300,7 +300,7 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 
 	// CRITICAL FIX: Addr must point to the descriptor for this tag in the mmapped array
 	// The kernel will write I/O information to this descriptor
-	descAddr := r.descPtr + uintptr(tag*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
+	descAddr := r.descPtr + uintptr(int(tag)*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
 
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
@@ -685,7 +685,7 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	}
 
 	// CRITICAL FIX: Addr must point to the descriptor for this tag
-	descAddr := r.descPtr + uintptr(tag*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
+	descAddr := r.descPtr + uintptr(int(tag)*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
 
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
