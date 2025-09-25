@@ -1,15 +1,18 @@
 # TODO.md - Current Status
 
-## Device Creation Works, But I/O Processing Broken
+## Progress: Fixed -EINVAL, Now Process Crashes
 
-Current status (2025-09-24):
-- ✅ ADD_DEV works (returns device ID)
-- ✅ SET_PARAMS works (returns 0)
-- ✅ START_DEV completes successfully
-- ✅ Block device `/dev/ublkb0` is created
-- ❌ **FETCH_REQ operations don't reach kernel** - `ublk_ch_uring_cmd` never called
-- ❌ **I/O operations hang** - dd enters D state forever
-- ❌ Queue runners receive empty FETCH completions (NrSectors=0)
+**PARTIAL FIX (2025-09-25):**
+- ✅ **Fixed -EINVAL**: SQE layout corrected - cmd area now at bytes 48-127 (80 bytes)
+- ✅ **FETCH_REQ returns 0**: No longer getting -EINVAL
+- ❌ **Process crashes**: ublk-mem becomes zombie after first FETCH completion
+- ❌ **Empty descriptors**: FETCH returns with NrSectors=0, OpFlags=0x0
+- ❌ **I/O still hangs**: dd stuck in D state
+
+**Current issue:**
+- FETCH_REQ completes with result=0 but empty descriptor
+- Process crashes immediately after (zombie state)
+- Likely a segfault or panic in the Go code
 
 ## What Was Fixed:
 
@@ -23,11 +26,11 @@ Current status (2025-09-24):
 - **Solution**: Added proper IOCTL encoding for all queue commands
 - **Result**: FETCH_REQ commands now accepted by kernel
 
-## Current Issues:
+## Current Issue: Phantom Completions
 
-### CRITICAL: I/O Processing Flow Broken
+### CRITICAL: FETCH_REQ Completes Without Waiting for I/O
 
-**Deep dive findings (2025-09-23):**
+**Key findings (2025-09-25):**
 
 1. **Polling mechanism works!**
    - Successfully finding I/O via descriptor polling
@@ -44,31 +47,26 @@ Current status (2025-09-24):
    - Possibly COMMIT_AND_FETCH_REQ not actually completing the I/O
    - Or we're not handling the flow correctly
 
-### Root Cause (Confirmed by Testing):
-- **FETCH_REQ operations are not reaching the kernel's ublk driver**
-- Control operations work (`ublk_ctrl_uring_cmd` traced successfully)
-- But I/O operations fail (`ublk_ch_uring_cmd` never called)
-- This means our FETCH_REQ SQE format is likely incorrect
-- See `einval_issue.md` for comprehensive analysis and code
+### The Paradox:
+- **FETCH_REQ returns success (result=0) but with empty descriptors**
+- This suggests FETCH is "accepted" but not "activated"
+- Like a successful no-op - kernel says "OK" but doesn't wait for I/O
+- Pattern: Every fix for I/O breaks START_DEV and vice versa
+- See `einval_issue.md` for 100+ questions that need answering
 
-## Next Steps to Fix:
+## Next Steps:
 
-### 1. Debug why FETCH_REQ doesn't reach kernel
-- [ ] Compare our SQE format with ublksrv C implementation
-- [ ] Check if we need to pass a header struct in sqe.Addr for FETCH_REQ
-- [ ] Verify the IOCTL encoding (0xc0107520) is correct
-- [ ] Test if we need to register the `/dev/ublkcN` fd with io_uring
+### Test the fix:
+1. Build and deploy to VM
+2. Run simple e2e test
+3. Verify FETCH_REQ no longer returns -EINVAL
+4. Check if I/O operations work
 
-### 2. Alternative approaches to test
-- [ ] Try using the non-encoded command value (just 0x20)
-- [ ] Test with sqe.Addr pointing to a header struct
-- [ ] Try different sqe.OpFlags values
-- [ ] Check if queue_id/tag should be in sqe.Addr instead of UserData
-
-### 3. Kernel investigation needed
-- [ ] Why can't we trace `ublk_ch_uring_cmd` with kprobes?
-- [ ] What's the exact SQE format the kernel expects for FETCH_REQ?
-- [ ] Is there a state machine we're not following correctly?
+### Key changes made:
+1. ✅ Fixed sqe128 struct - cmd area now at bytes 48-127 (80 bytes)
+2. ✅ Fixed SubmitIOCmd - writes ublksrv_io_cmd to bytes 48-63
+3. ✅ Fixed SubmitCtrlCmd - writes control cmd to correct location
+4. ✅ Already had thread locking (runtime.LockOSThread) per queue
 
 ## Testing:
 ```bash

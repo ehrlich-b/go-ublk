@@ -1,127 +1,134 @@
-# Linux ublk FETCH_REQ -EINVAL Issue - Kernel Investigation Needed
+# UBLK Go Implementation - FETCH_REQ Returns -EINVAL
 
-## Summary
-Pure Go ublk implementation gets `-EINVAL` for FETCH_REQ operations on Linux 6.11. Need kernel source analysis to determine correct command format.
+## Executive Summary
+We have a Go implementation of ublk that successfully creates devices but FETCH_REQ commands immediately return -EINVAL. Device creation works perfectly, but I/O processing fails at the first step.
 
-## Environment
-- **Kernel**: Linux 6.11.0-24-generic (Ubuntu 24.04)
-- **Language**: Pure Go (no cgo)
-- **Interface**: io_uring URING_CMD
+## Test Environment
+- **Kernel: 6.11** (Debian VM)
+- **go-ublk commit**: 3049986
+- **Test command**: `make vm-simple-e2e`
 
-## Current Status
+## What Works
+- ✅ Device creation (ADD_DEV → SET_PARAMS → START_DEV)
+- ✅ Block device appears at `/dev/ublkb2`
+- ✅ Character device opens successfully at `/dev/ublkc2`
+- ✅ io_uring setup with SQE128/CQE32
+- ✅ mmap of descriptor regions
+- ✅ Control commands through `/dev/ublk-control`
 
-### What Works ✅
-- Device creation: `/dev/ublkb0` created successfully
-- Control operations: ADD_DEV, SET_PARAMS, START_DEV all return 0
-- Queue initialization: mmap succeeds, io_uring setup works
+## The Problem
 
-### What Fails ❌
-- **All FETCH_REQ operations return -EINVAL (-22)**
-- I/O hangs because kernel can't dispatch to userspace
-
-## The Core Problem
-
-We submit FETCH_REQ via io_uring URING_CMD but get -EINVAL. There's conflicting information about where to place the `ublksrv_io_cmd` struct:
-
-### Approach 1: Via sqe->addr (Our Current Code - FAILS)
-```go
-func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
-    sqe := &sqe128{}
-    sqe.opcode = kernelUringCmdOpcode()  // 46 (IORING_OP_URING_CMD)
-    sqe.fd = int32(r.controlFd)          // /dev/ublkcN fd
-    sqe.setCmdOp(cmd)                    // 0xc0107520 for FETCH_REQ
-
-    // Pass struct via sqe.addr
-    sqe.addr = uint64(uintptr(unsafe.Pointer(ioCmd)))
-    sqe.len = uint32(unsafe.Sizeof(*ioCmd))  // 16 bytes
-
-    // Submit...
-}
-```
-
-### Approach 2: Via cmd area at sqe->addr3 (C ublksrv does this)
-```c
-// From ublksrv C implementation
-static inline void *ublksrv_get_sqe_cmd(struct io_uring_sqe *sqe) {
-    return (void *)&sqe->addr3;  // Points to bytes 48-63 of SQE
-}
-
-// Usage:
-cmd = (struct ublksrv_io_cmd *)ublksrv_get_sqe_cmd(sqe);
-cmd->q_id = q->q_id;
-cmd->tag = tag;
-cmd->addr = (__u64)io->buf_addr;
-```
-
-## Test Output Showing -EINVAL
+FETCH_REQ commands return -22 (EINVAL) immediately. The sequence is:
+1. Submit FETCH_REQs (before START_DEV)
+2. Submit START_DEV
+3. START_DEV hangs waiting for completion
+4. FETCH_REQs complete with result=-22
 
 ```
-time=2025-09-24T10:41:58.383-04:00 msg="*** CRITICAL: SubmitIOCmd called"
-    cmd=0xc0107520 controlFd=5 qid=0 tag=0 ioCmd.Addr=0x763a5261e000
-
 Queue 0: Tag 0 FETCH completion, result=-22, state=0
 Queue 0: Tag 0 unexpected result=-22
 ```
 
-All 32 tags return -EINVAL immediately upon submission.
+## Our Implementation
 
-## The ublksrv_io_cmd Structure
-
+### SQE Structure (128 bytes)
 ```go
-// 16 bytes total
-type UblksrvIOCmd struct {
-    QID    uint16  // Queue ID
-    Tag    uint16  // Request tag
-    Result int32   // For COMMIT operations
-    Addr   uint64  // Points to mmapped descriptor for this tag
+type sqe128 struct {
+    // 0..31: base SQE
+    opcode      uint8    // 0: set to 46 (IORING_OP_URING_CMD)
+    flags       uint8    // 1
+    ioprio      uint16   // 2-3
+    fd          int32    // 4-7: fd from /dev/ublkcN
+    union0      [8]byte  // 8-15: cmd_op goes here (0xC0107520 for FETCH_REQ)
+    addr        uint64   // 16-23
+    len         uint32   // 24-27: set to 16
+    opcodeFlags uint32   // 28-31
+
+    // 32..63: extended fields
+    userData    uint64   // 32-39
+    bufIndex    uint16   // 40-41
+    personality uint16   // 42-43
+    spliceFdIn  int32    // 44-47
+    fileIndex   uint32   // 48-51
+    _pad64      [12]byte // 52-63
+
+    // 64..127: cmd area for SQE128
+    cmd [64]byte // 64-127
 }
 ```
 
-For FETCH_REQ, we set:
-- QID: 0 (queue 0)
-- Tag: 0-31
-- Result: 0
-- Addr: Points to mmapped descriptor (`0x763a5261e000` + tag*32)
+### How We Submit FETCH_REQ
+```go
+sqe := &sqe128{}
+sqe.opcode = 46  // IORING_OP_URING_CMD
+sqe.fd = int32(charDeviceFd)  // fd from /dev/ublkcN
+sqe.setCmdOp(0xC0107520)  // UBLK_U_IO_FETCH_REQ
+sqe.len = 16
+sqe.userData = (opFetch << 48) | (uint64(queueID) << 16) | uint64(tag)
 
-## What We Need From Kernel Investigation
-
-**Please examine Linux kernel 6.11 source: `drivers/block/ublk_drv.c`**
-
-### Specific Questions:
-
-1. **In `ublk_ch_uring_cmd()` for UBLK_IO_FETCH_REQ:**
-   - Does it read the struct from `io_uring_sqe_cmd()` (cmd area)?
-   - Or from `u64_to_user_ptr(sqe->addr)`?
-
-2. **What validation causes -EINVAL?**
-   - Is it the struct location?
-   - Is it the struct contents?
-   - Is it missing some required field?
-
-3. **Command encoding:**
-   - We use `0xc0107520` (_IOWR('u', 0x20, 16))
-   - Is the size parameter (16) correct?
-
-## Key Code Paths to Check
-
-```c
-// In kernel source, need to find:
-static int ublk_ch_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags)
-{
-    // How does it get ublksrv_io_cmd?
-    // Option A: From cmd area
-    const struct ublksrv_io_cmd *ub_cmd = io_uring_sqe_cmd(cmd->sqe);
-
-    // Option B: From sqe->addr
-    const struct ublksrv_io_cmd __user *ub_cmd = u64_to_user_ptr(sqe->addr);
-
-    // What causes -EINVAL for FETCH_REQ?
+// ublksrv_io_cmd (16 bytes)
+ioCmd := &UblksrvIOCmd{
+    QID:    queueID,  // 2 bytes
+    Tag:    tag,      // 2 bytes
+    Result: 0,        // 4 bytes
+    Addr:   bufferAddr, // 8 bytes - points to 64KB I/O buffer
 }
 ```
 
-## Additional Context
+## What We've Tried
 
-- Control operations (via `/dev/ublk-control`) work perfectly using similar URING_CMD submission
-- The C ublksrv implementation works on this kernel
-- Our Go implementation mimics C but clearly has wrong format for FETCH_REQ
-- The -EINVAL happens immediately, suggesting early validation failure
+### 1. Placement of ublksrv_io_cmd (all result in -EINVAL)
+- **Bytes 16-31**: Overwrites addr/len fields
+- **Bytes 48-63**: In the extended area
+- **Bytes 64-79**: In the cmd field for SQE128
+
+### 2. Fixed Issues
+- ✅ Set `sqe.len = 16` (was 0)
+- ✅ Fixed mmap offset to `queueID * descSize`
+- ✅ Submit FETCH_REQs BEFORE START_DEV
+- ✅ Wait for START_DEV completion
+
+### 3. Actual SQE Bytes Submitted
+```
+Example FETCH_REQ SQE (tag 0, queue 0):
+Bytes 0-31:  2e00000005000000207510c0000000000000e2fd967a00000010000000000000
+Bytes 32-63: 0000000000010000000000000000000000000000010000000000e2fd967a0000
+Bytes 64-95: 0000000000000000000000000000000000000000000000000000000000000000
+```
+
+## Critical Questions
+
+### 1. Where exactly does ublksrv_io_cmd go in SQE128?
+For IORING_OP_URING_CMD with SQE128:
+- The standard says cmd area is bytes 64-127
+- But we get -EINVAL when placing the 16-byte struct there
+- Control commands work when placed at bytes 48-63
+- **What's the correct location for I/O commands?**
+
+### 2. What validates the ublksrv_io_cmd structure?
+The kernel returns -EINVAL for FETCH_REQ. What is it checking?
+- Queue ID bounds? (we use qid=0)
+- Tag bounds? (we use tag=0..31 for depth=32)
+- Buffer address alignment? (we use mmap'd addresses)
+- Something else?
+
+### 3. Is our ioctl encoding correct?
+- We use `0xC0107520` for UBLK_U_IO_FETCH_REQ
+- Calculated as: `_IOC(_IOC_READ|_IOC_WRITE, 'u', 0x20, 16)`
+- Is this the correct encoding for kernel 6.11?
+
+### 4. Any prerequisites before FETCH_REQ?
+- Do we need to register buffers with io_uring first?
+- Is there a specific state the device needs to be in?
+- Any initialization we're missing between opening /dev/ublkcN and submitting FETCH_REQ?
+
+## Request for Help
+
+We need:
+1. **The exact SQE128 layout for UBLK_IO_FETCH_REQ** - which bytes contain what
+2. **What causes -EINVAL in ublk_ch_uring_cmd** for FETCH_REQ
+3. **A minimal working example** of FETCH_REQ submission in C
+
+The full source is at https://github.com/ehrlich-b/go-ublk
+
+Thank you for your patience and expertise!

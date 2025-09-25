@@ -34,10 +34,11 @@ const (
 )
 
 // SQE128 structure for URING_CMD
-// Matches Linux include/uapi/linux/io_uring.h layout:
-//   - Base SQE is 64 bytes
-//   - If IORING_SETUP_SQE128 is used, an extra 64-byte area follows at offset 64
-//     which is exposed as sqe->cmd for URING_CMD payloads.
+// CRITICAL: With SQE128 enabled, the cmd area for URING_CMD is 80 bytes starting at byte 48!
+// The kernel UAPI says: "If IORING_SETUP_SQE128, this field is 80 bytes" for io_uring_sqe.cmd
+// Layout:
+//   - Bytes 0-47: Standard SQE fields
+//   - Bytes 48-127: cmd area (80 bytes) for URING_CMD operations
 type sqe128 struct {
 	// 0..31: common header
 	opcode      uint8   // 0
@@ -49,16 +50,15 @@ type sqe128 struct {
 	len         uint32  // 24
 	opcodeFlags uint32  // 28 (aka rw_flags/uring_cmd_flags)
 
-	// 32..63: rest of base SQE (must be zeroed unless used explicitly)
+	// 32..47: rest of base SQE fields
 	userData    uint64   // 32..39
 	bufIndex    uint16   // 40..41
 	personality uint16   // 42..43
 	spliceFdIn  int32    // 44..47
-	fileIndex   uint32   // 48..51
-	_pad64      [12]byte // 52..63 (zero)
 
-	// 64..127: extended area present only with SQE128, used for URING_CMD payload
-	cmd [64]byte // 64..127
+	// 48..127: cmd area for URING_CMD (80 bytes with SQE128)
+	// This is where ublksrv_io_cmd (16 bytes) goes for FETCH_REQ/COMMIT_AND_FETCH_REQ
+	cmd [80]byte // 48..127
 }
 
 // setCmdOp sets the cmd_op field in the union AND ensures the adjacent pad is zero
@@ -151,14 +151,14 @@ type io_uring_params struct {
 	}
 }
 
-// minimalRing implements just URING_CMD for ublk control operations
+// minimalRing implements just URING_CMD for ublk operations
 type minimalRing struct {
-	ringFd    int // io_uring file descriptor
-	controlFd int // ring target fd (control or ublkc)
-	params    io_uring_params
-	sqAddr    unsafe.Pointer // SQ ring mapping base
-	cqAddr    unsafe.Pointer // CQ ring mapping base
-	sqesAddr  unsafe.Pointer // SQEs mapping base
+	ringFd   int // io_uring file descriptor
+	targetFd int // target fd (/dev/ublk-control for control ops, /dev/ublkcN for I/O ops)
+	params   io_uring_params
+	sqAddr   unsafe.Pointer // SQ ring mapping base
+	cqAddr   unsafe.Pointer // CQ ring mapping base
+	sqesAddr unsafe.Pointer // SQEs mapping base
 }
 
 // kernelUringCmdOpcode returns the runtime kernel's IORING_OP_URING_CMD
@@ -234,12 +234,12 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	}
 
 	r := &minimalRing{
-		ringFd:    int(ringFd),
-		controlFd: int(ctrlFd),
-		params:    params,
-		sqAddr:    unsafe.Pointer(&sqAddr[0]),
-		cqAddr:    unsafe.Pointer(&cqAddr[0]),
-		sqesAddr:  unsafe.Pointer(&sqesAddr[0]),
+		ringFd:   int(ringFd),
+		targetFd: int(ctrlFd),
+		params:   params,
+		sqAddr:   unsafe.Pointer(&sqAddr[0]),
+		cqAddr:   unsafe.Pointer(&cqAddr[0]),
+		sqesAddr: unsafe.Pointer(&sqesAddr[0]),
 	}
 
 	// Register the char device FD with io_uring (like C code does)
@@ -276,9 +276,7 @@ func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCm
 	for i := range sqe.union0 {
 		sqe.union0[i] = 0
 	}
-	for i := range sqe._pad64 {
-		sqe._pad64[i] = 0
-	}
+	// No _pad64 field anymore - cmd area starts at byte 48
 	for i := range sqe.cmd {
 		sqe.cmd[i] = 0
 	}
@@ -287,14 +285,14 @@ func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCm
 	sqe.opcode = kernelUringCmdOpcode()
 	sqe.flags = 0
 	sqe.ioprio = 0
-	sqe.fd = int32(r.controlFd)
+	sqe.fd = int32(r.targetFd)
 	sqe.addr = 0
 	sqe.len = uint32(ctrlCmd.Len)
 	sqe.opcodeFlags = 0
 	sqe.bufIndex = 0
 	sqe.personality = 0
 	sqe.spliceFdIn = 0
-	sqe.fileIndex = 0
+	// fileIndex removed - part of cmd area now
 	sqe.userData = userData
 
 	// Marshal and place control command
@@ -486,9 +484,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	for i := range sqe.union0 {
 		sqe.union0[i] = 0
 	}
-	for i := range sqe._pad64 {
-		sqe._pad64[i] = 0
-	}
+	// No _pad64 field anymore - cmd area starts at byte 48
 	for i := range sqe.cmd {
 		sqe.cmd[i] = 0
 	}
@@ -497,7 +493,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	sqe.opcode = kernelUringCmdOpcode()
 	sqe.flags = 0
 	sqe.ioprio = 0
-	sqe.fd = int32(r.controlFd)
+	sqe.fd = int32(r.targetFd)
 
 	// CRITICAL: The addr field should be 0 for URING_CMD operations
 	// The control command data goes in bytes 32-63, not via an external buffer
@@ -507,7 +503,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	sqe.bufIndex = 0
 	sqe.personality = 0
 	sqe.spliceFdIn = 0
-	sqe.fileIndex = 0
+	// fileIndex removed - part of cmd area now
 
 	// Set userData from caller
 	sqe.userData = userData
@@ -529,37 +525,26 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	// Set cmd_op field to ioctl-encoded value (like working C implementation)
 	sqe.setCmdOp(cmd)
 
-	// CRITICAL FIX: Based on working C bytes, control command starts at byte 48!
-	// Working C shows ffffffffffff4000 at bytes 48-55 (dev_id, queue_id, len)
-	// So the 32-byte control command goes at bytes 48-79
-	controlCmdArea := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
-	copy(controlCmdArea[:], ctrlCmdBytes)
-
-	// DO NOT also copy to sqe.cmd (bytes 64+) - that's the wrong location!
+	// CRITICAL: With our corrected sqe128 layout, sqe.cmd now starts at byte 48
+	// Copy the 32-byte control command to the cmd area
+	copy(sqe.cmd[:32], ctrlCmdBytes)
 
 	// Debug: log the exact control header bytes being sent to kernel
 	logger.Debug("control header bytes", "header_hex", fmt.Sprintf("%x", ctrlCmdBytes))
 
 	logger.Debug("SQE prepared", "fd", sqe.fd, "cmd", cmd, "addr", sqe.addr)
 
-	// Check if this is START_DEV - it might need special handling
+	// CRITICAL FIX: START_DEV must wait for completion!
+	// The kernel won't complete START_DEV until it sees all FETCH_REQs
+	// But since we submit FETCH_REQs before START_DEV, it should complete quickly
 	isStartDev := (cmd == uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV))
 
 	if isStartDev {
-		logger.Info("*** CRITICAL: START_DEV detected - using fire-and-forget!")
-		// START_DEV might hang waiting for queues, so submit without waiting
-		result, err := r.submitOnlyCmd(sqe)
-		if err != nil {
-			logger.Error("submitOnlyCmd failed for START_DEV", "error", err)
-			return nil, fmt.Errorf("failed to submit START_DEV: %v", err)
-		}
-		logger.Info("*** START_DEV submitted without waiting", "submitted", result)
-		// Return success immediately
-		return &minimalResult{userData: userData, value: 0, err: nil}, nil
+		logger.Info("*** CRITICAL: START_DEV detected - waiting for completion!")
 	}
 
-	// For other commands, use normal submit-and-wait
-	logger.Info("*** Using submit-and-wait for non-START_DEV command")
+	// For ALL commands including START_DEV, use normal submit-and-wait
+	logger.Info("*** Using submit-and-wait for command")
 
 	// Submit the command and wait for completion using real io_uring
 	result, err := r.submitAndWait(sqe)
@@ -588,28 +573,35 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	logger := logging.Default()
 	logger.Info("*** CRITICAL: SubmitIOCmd called",
 		"cmd", fmt.Sprintf("0x%x", cmd),
-		"controlFd", r.controlFd,
+		"targetFd", r.targetFd,
 		"qid", ioCmd.QID,
 		"tag", ioCmd.Tag,
 		"ioCmd.Addr", fmt.Sprintf("0x%x", ioCmd.Addr))
 
-	// Verify size is correct
+	// CRITICAL: Verify struct packing is correct (must be exactly 16 bytes)
 	ioCmdSize := unsafe.Sizeof(*ioCmd)
 	if ioCmdSize != 16 {
-		return nil, fmt.Errorf("CRITICAL: UblksrvIOCmd size is %d bytes, expected 16", ioCmdSize)
+		return nil, fmt.Errorf("CRITICAL: UblksrvIOCmd size is %d bytes, expected 16 (struct packing error)", ioCmdSize)
 	}
 
 	// Prepare SQE with the minimal fields the kernel expects
 	sqe := &sqe128{}
 	sqe.opcode = kernelUringCmdOpcode()
-	sqe.fd = int32(r.controlFd)
+	sqe.fd = int32(r.targetFd)
 	sqe.setCmdOp(cmd)
 	sqe.userData = userData
 
-	// CRITICAL FIX: Pass the ublksrv_io_cmd struct via sqe.addr, NOT in the cmd area
-	// The kernel expects a userspace pointer to the struct
-	sqe.addr = uint64(uintptr(unsafe.Pointer(ioCmd)))
-	sqe.len = uint32(ioCmdSize) // Set len to sizeof(struct ublksrv_io_cmd)
+	// CRITICAL: For SQE128, the cmd area starts at byte 48 and is 80 bytes long
+	// The ublksrv_io_cmd (16 bytes) goes at the beginning of this area
+	sqe.len = 16  // CRITICAL: Must be 16 to tell kernel there's a 16-byte payload
+
+	// Copy the ublksrv_io_cmd to the cmd field (bytes 48-63 in the overall SQE)
+	copy(sqe.cmd[:16], (*[16]byte)(unsafe.Pointer(ioCmd))[:])
+
+	// Zero out the rest of the cmd area (bytes 64-127 in the overall SQE)
+	for i := 16; i < 80; i++ {
+		sqe.cmd[i] = 0
+	}
 
 	// Submit the command and flush to kernel
 	// submitOnlyCmd handles both queueing the SQE and calling io_uring_enter
@@ -841,13 +833,7 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	sqIndex := *sqTail & sqMask
 	sqeSlot := unsafe.Add(r.sqesAddr, 128*uintptr(sqIndex))
 	*(*sqe128)(sqeSlot) = *sqe
-
-	// Copy control command to correct offset
-	if sqe.opcode == kernelUringCmdOpcode() {
-		srcCmd := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
-		dstCmd := (*[32]byte)(unsafe.Pointer(uintptr(sqeSlot) + 48))
-		copy(dstCmd[:], srcCmd[:])
-	}
+	// NOTE: No extra copy needed - the struct copy includes the cmd area at bytes 48-127
 
 	// Update array entry
 	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex

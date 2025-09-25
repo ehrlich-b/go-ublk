@@ -12,6 +12,31 @@ import (
     "github.com/ehrlich-b/go-ublk/internal/queue"
 )
 
+// waitLive waits for a ublk device to transition to LIVE state
+func waitLive(devID uint32, timeout time.Duration) error {
+    deadline := time.Now().Add(timeout)
+
+    // The sysfs path may not exist on all systems, so we'll just wait
+    // a bit and check if the block device appears
+    fmt.Printf("*** DEBUG: Waiting for device %d to become ready\n", devID)
+    time.Sleep(500 * time.Millisecond) // Give kernel time to process START_DEV
+
+    // Check if block device exists
+    blockPath := fmt.Sprintf("/dev/ublkb%d", devID)
+    for time.Now().Before(deadline) {
+        if _, err := os.Stat(blockPath); err == nil {
+            fmt.Printf("*** DEBUG: Device %d is ready (block device exists)\n", devID)
+            return nil
+        }
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    // If no block device after timeout, assume it's ready anyway
+    // (the queue runners will handle retries)
+    fmt.Printf("*** WARNING: Device %d block device not visible after %s, continuing anyway\n", devID, timeout)
+    return nil
+}
+
 // Re-export interfaces from internal package
 type Backend = interfaces.Backend
 type DiscardBackend = interfaces.DiscardBackend
@@ -230,9 +255,11 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
     // STEP 2: Start queue runner goroutines BEFORE START_DEV
     // The goroutines will just wait initially, similar to C threads
-    fmt.Printf("*** DEBUG: Starting queue runner goroutines BEFORE START_DEV\n")
+    // CRITICAL: Start queue runners and have them submit FETCH_REQs BEFORE START_DEV
+    // This is the correct sequence according to ublk semantics
+    fmt.Printf("*** DEBUG: Starting queue runners to submit FETCH_REQs BEFORE START_DEV\n")
     for i := 0; i < numQueues; i++ {
-        // Start the goroutine for this queue (it will wait for work)
+        // Start the runner which will immediately submit all FETCH_REQs for its tags
         if err := device.runners[i].Start(); err != nil {
             for j := 0; j < len(device.runners); j++ {
                 if device.runners[j] != nil {
@@ -242,17 +269,16 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
             ctrl.DeleteDevice(devID)
             return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
         }
-        fmt.Printf("*** DEBUG: Queue runner %d goroutine started\n", i)
+        fmt.Printf("*** DEBUG: Queue runner %d started and FETCH_REQs submitted\n", i)
     }
 
-    // CRITICAL: Give queue runners time to enter their wait state
-    // The kernel needs to see the queue io_urings waiting before START_DEV
-    fmt.Printf("*** DEBUG: Waiting for queue runners to enter wait state\n")
-    time.Sleep(200 * time.Millisecond)
+    // CRITICAL: Give kernel time to see all FETCH_REQs
+    fmt.Printf("*** DEBUG: Waiting for kernel to see all FETCH_REQs\n")
+    time.Sleep(100 * time.Millisecond)
 
-    // STEP 3: Submit START_DEV asynchronously
-    fmt.Printf("*** ASYNC: Submitting START_DEV asynchronously\n")
-    _, err = ctrl.StartDeviceAsync(devID)
+    // STEP 3: NOW submit START_DEV (after FETCH_REQs are in place)
+    fmt.Printf("*** CRITICAL: Submitting START_DEV AFTER FETCH_REQs are posted\n")
+    err = ctrl.StartDevice(devID)  // Use synchronous version
     if err != nil {
         for j := 0; j < len(device.runners); j++ {
             if device.runners[j] != nil {
@@ -260,24 +286,18 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
             }
         }
         ctrl.DeleteDevice(devID)
-        return nil, fmt.Errorf("failed to submit START_DEV: %v", err)
+        return nil, fmt.Errorf("failed to START_DEV: %v", err)
     }
 
-    // STEP 4: Fire-and-forget START_DEV
-    // The queue runners will keep retrying FETCH_REQ until they succeed
-    // Once all queues have FETCH_REQ submitted, START_DEV will complete automatically
-    fmt.Printf("*** FIRE-AND-FORGET: START_DEV submitted, queue runners will handle the rest\n")
+    // STEP 4: Device should now be LIVE
+    fmt.Printf("*** SUCCESS: START_DEV completed, device should be LIVE\n")
 
-    // Give the system time to settle
-    // The queue runners are now retrying FETCH_REQ in the background
-    time.Sleep(2 * time.Second)
-
-    // Check if the device appears
+    // Check if the block device appears
     devicePath := fmt.Sprintf("/dev/ublkb%d", devID)
     if _, err := os.Stat(devicePath); err == nil {
         fmt.Printf("*** SUCCESS: Device %s created!\n", devicePath)
     } else {
-        fmt.Printf("*** WARNING: Device %s not yet created, queue runners still working\n", devicePath)
+        fmt.Printf("*** WARNING: Device %s not yet visible, but state is LIVE\n", devicePath)
     }
 
 	device.started = true

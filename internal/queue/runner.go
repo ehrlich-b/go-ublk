@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
@@ -144,6 +143,12 @@ func (r *Runner) Start() error {
 		r.logger.Printf("Starting queue %d for device %d", r.queueID, r.devID)
 	}
 
+	// CRITICAL: Submit initial FETCH_REQs BEFORE starting the I/O loop
+	// This ensures they're ready before START_DEV is called
+	if err := r.Prime(); err != nil {
+		return fmt.Errorf("failed to prime queue %d: %w", r.queueID, err)
+	}
+
 	// Start the I/O loop in a goroutine
 	go r.ioLoop()
 	return nil
@@ -234,38 +239,9 @@ func (r *Runner) ioLoop() {
 		r.logger.Printf("Queue %d: Queue io_uring ready", r.queueID)
 	}
 
-	// Wait for START_DEV to be submitted
-	time.Sleep(300 * time.Millisecond) // Give time for START_DEV to be submitted
-
-	// Add retry logic for initial priming
-	primed := false
-	retryCount := 0
-
-	for !primed && retryCount < 200 { // Try for up to 20 seconds
-		if err := r.Prime(); err != nil {
-			// Keep retrying on any error - START_DEV might still be processing
-			time.Sleep(100 * time.Millisecond)
-			retryCount++
-			// Log progress every 10 retries (1 second)
-			if retryCount%10 == 0 {
-				if r.logger != nil {
-					r.logger.Printf("Queue %d: Still waiting for START_DEV (retry %d)", r.queueID, retryCount)
-				}
-			}
-			continue
-		}
-		primed = true
-	}
-
-	if !primed {
-		if r.logger != nil {
-			r.logger.Printf("Queue %d: Failed to prime queue after %d retries", r.queueID, retryCount)
-		}
-		return
-	}
-
+	// FETCH_REQs were already submitted in Start(), just log that we're ready
 	if r.logger != nil {
-		r.logger.Printf("Queue %d: Successfully primed after %d retries", r.queueID, retryCount)
+		r.logger.Printf("Queue %d: I/O loop ready for processing", r.queueID)
 	}
 
 	// Continue with normal I/O processing loop
@@ -298,22 +274,22 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 		return fmt.Errorf("tag %d already initialized (state=%d)", tag, r.tagStates[tag])
 	}
 
-	// CRITICAL FIX: Addr must point to the descriptor for this tag in the mmapped array
-	// The kernel will write I/O information to this descriptor
-	descAddr := r.descPtr + uintptr(int(tag)*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
+	// CRITICAL FIX: Addr must point to the DATA BUFFER for this tag, not the descriptor
+	// The kernel will use this buffer for I/O data transfers
+	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
 
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: 0,
-		// CRITICAL: Must point to the descriptor, NOT the buffer!
-		Addr: uint64(descAddr),
+		// CRITICAL: Must point to the I/O data buffer, NOT the descriptor!
+		Addr: uint64(bufferAddr),
 	}
 
 	// Encode FETCH operation in userData
 	userData := udOpFetch | (uint64(r.queueID)<<16) | uint64(tag)
-	// Use IOCTL-encoded command to avoid -EOPNOTSUPP
-	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)
+	// CRITICAL: Use the new IOCTL-encoded command (UBLK_U_IO_FETCH_REQ), not the legacy raw value!
+	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)  // This creates UBLK_U_IO_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
 		return err
@@ -536,11 +512,13 @@ func (r *Runner) processIOAndCommit(tag uint16) error {
 	fmt.Printf("[DEBUG] processIOAndCommit: tag=%d, OpFlags=0x%x, NrSectors=%d, StartSector=%d, Addr=0x%x\n",
 		tag, desc.OpFlags, desc.NrSectors, desc.StartSector, desc.Addr)
 
-	// Handle empty descriptor (keep-alive)
+	// Handle empty descriptor - submit COMMIT_AND_FETCH with result=0
+	// to acknowledge and wait for next I/O
 	if desc.OpFlags == 0 && desc.NrSectors == 0 {
 		if r.logger != nil {
-			r.logger.Debugf("Queue %d: Tag %d noop completion (empty descriptor)", r.queueID, tag)
+			r.logger.Debugf("Queue %d: Tag %d empty descriptor, submitting noop COMMIT_AND_FETCH", r.queueID, tag)
 		}
+		// Submit COMMIT_AND_FETCH with result=0 (no-op)
 		return r.submitCommitAndFetch(tag, nil, desc)
 	}
 
@@ -684,20 +662,21 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 		return fmt.Errorf("cannot submit COMMIT for tag %d in state %d (not Owned)", tag, r.tagStates[tag])
 	}
 
-	// CRITICAL FIX: Addr must point to the descriptor for this tag
-	descAddr := r.descPtr + uintptr(int(tag)*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
+	// CRITICAL FIX: Addr must point to the DATA BUFFER for next I/O
+	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
 
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: result,
-		// CRITICAL: Must point to the descriptor for next FETCH (piggyback)
-		Addr: uint64(descAddr),
+		// CRITICAL: Must point to the I/O data buffer for next operation
+		Addr: uint64(bufferAddr),
 	}
 
 	// Encode COMMIT operation in userData
 	userData := udOpCommit | (uint64(r.queueID)<<16) | uint64(tag)
-	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ)
+	// CRITICAL: Use the new IOCTL-encoded command (UBLK_U_IO_COMMIT_AND_FETCH_REQ), not the legacy raw value!
+	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ)  // This creates UBLK_U_IO_COMMIT_AND_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
 		return fmt.Errorf("COMMIT_AND_FETCH_REQ failed: %w", err)
@@ -724,6 +703,11 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 		descSize += pageSize - rem
 	}
 
+	// CRITICAL FIX: Calculate per-queue offset for mmap
+	// The kernel uses vm_pgoff to select the queue
+	// Formula: offset = queueID * round_up(queue_depth * sizeof(desc), PAGE_SIZE)
+	mmapOffset := uintptr(queueID) * uintptr(descSize)
+
 	// Map descriptor array as READ-ONLY from userspace perspective
 	// The kernel writes to descriptors internally, userspace only reads
 	descPtr, _, errno := syscall.Syscall6(
@@ -733,7 +717,7 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 		syscall.PROT_READ,                     // prot - READ ONLY from userspace!
 		syscall.MAP_SHARED|syscall.MAP_POPULATE, // flags - populate to avoid page faults
 		uintptr(fd),        // fd
-		0,                  // offset
+		mmapOffset,         // CRITICAL: per-queue offset!
 	)
 	if errno != 0 {
 		return 0, 0, fmt.Errorf("failed to mmap descriptor array: %v", errno)
