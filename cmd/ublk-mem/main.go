@@ -37,8 +37,7 @@ func main() {
 	// Create device parameters
 	params := ublk.DefaultParams(memBackend)
 	if *minimal {
-		// Use absolute minimal parameters to avoid memory allocation issues
-		fmt.Printf("*** Using MINIMAL parameters for debugging memory allocation\n")
+		// Use minimal parameters for testing
 		params.QueueDepth = 1        // Absolute minimum
 		params.NumQueues = 1         // Single queue
 		params.MaxIOSize = 64 * 1024 // 64KB to match our buffer size
@@ -104,6 +103,9 @@ func main() {
 	<-sigCh
 
 	logger.Info("received shutdown signal")
+
+	// Cancel the context to signal all goroutines to stop
+	cancel()
 }
 
 // parseSize parses a size string like "64M", "1G", "512K"

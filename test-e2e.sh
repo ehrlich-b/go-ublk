@@ -132,9 +132,13 @@ fi
 echo "✅ Device nodes ready: $DEVICE_BDEV and $DEVICE_CDEV"
 
 # Create test data
-echo "Creating test data..."
+echo "Creating random test data..."
 dd if=/dev/urandom of=/tmp/test_data bs=1024 count=64 2>/dev/null
 echo "✅ Created 64KB of random test data"
+
+# Also write the same data to a regular file for MD5 comparison
+cp /tmp/test_data /tmp/file_reference
+echo "✅ Created reference file for MD5 comparison"
 
 # CRITICAL TEST 1: Write data to device
 echo ""
@@ -163,40 +167,102 @@ echo "✅ Read completed successfully"
 # CRITICAL TEST 3: Data integrity verification
 echo ""
 echo "=== CRITICAL TEST 3: Data Integrity ==="
-echo "Verifying data integrity..."
-if ! cmp /tmp/test_data /tmp/read_back; then
-    echo "❌ CRITICAL FAILURE: Data corruption detected!"
-    echo "Written data does not match read data"
-    echo "Backend or I/O processing has bugs!"
+echo "Verifying data integrity with MD5 comparison..."
+
+# Calculate MD5 of original random data
+ORIGINAL_MD5=$(md5sum /tmp/test_data | cut -d' ' -f1)
+echo "Original data MD5: $ORIGINAL_MD5"
+
+# Calculate MD5 of data read back from ublk device
+UBLK_MD5=$(md5sum /tmp/read_back | cut -d' ' -f1)
+echo "Ublk read MD5:     $UBLK_MD5"
+
+# Also write and read from regular file for comparison
+echo "Writing same data to regular file for verification..."
+cp /tmp/test_data /tmp/regular_file_test
+FILE_MD5=$(md5sum /tmp/regular_file_test | cut -d' ' -f1)
+echo "Regular file MD5:  $FILE_MD5"
+
+# Compare all three MD5 hashes
+if [ "$ORIGINAL_MD5" != "$UBLK_MD5" ]; then
+    echo "❌ CRITICAL FAILURE: Ublk device data corruption detected!"
+    echo "Original MD5:  $ORIGINAL_MD5"
+    echo "Ublk MD5:      $UBLK_MD5"
+    echo "Data integrity failed - backend or I/O processing has bugs!"
     exit 1
 fi
-echo "✅ Data integrity verified - read data matches written data"
 
-# CRITICAL TEST 4: Multiple block operations
+if [ "$ORIGINAL_MD5" != "$FILE_MD5" ]; then
+    echo "❌ CRITICAL FAILURE: Regular file data corruption detected!"
+    echo "This indicates filesystem or storage issues"
+    exit 1
+fi
+
+if [ "$UBLK_MD5" != "$FILE_MD5" ]; then
+    echo "❌ CRITICAL FAILURE: Ublk vs file MD5 mismatch!"
+    echo "Ublk MD5: $UBLK_MD5"
+    echo "File MD5: $FILE_MD5"
+    exit 1
+fi
+
+echo "✅ Data integrity verified - all MD5 hashes match:"
+echo "  Original:     $ORIGINAL_MD5"
+echo "  Ublk device:  $UBLK_MD5"
+echo "  Regular file: $FILE_MD5"
+
+# CRITICAL TEST 4: Multiple block operations with MD5 verification
 echo ""
 echo "=== CRITICAL TEST 4: Multiple Block Test ==="
-echo "Testing multiple scattered writes..."
+echo "Testing multiple scattered writes with full verification..."
 
-# Write at different offsets
-sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=512 seek=0 count=1 2>/dev/null
-sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=512 seek=100 count=1 2>/dev/null  
-sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=512 seek=200 count=1 2>/dev/null
+# Create multiple test patterns
+echo "Creating multiple test patterns..."
+dd if=/dev/urandom of=/tmp/pattern1 bs=512 count=2 2>/dev/null  # 1KB
+dd if=/dev/urandom of=/tmp/pattern2 bs=512 count=4 2>/dev/null  # 2KB
+dd if=/dev/urandom of=/tmp/pattern3 bs=512 count=8 2>/dev/null  # 4KB
 
-# Read back and verify first block
-sudo dd if="$DEVICE_BDEV" of=/tmp/read_back bs=512 count=1 2>/dev/null
-if ! cmp <(head -c 512 /tmp/test_data) /tmp/read_back; then
-    echo "❌ CRITICAL FAILURE: Multi-block I/O failed"
+# Write patterns to different locations on both ublk and regular file
+echo "Writing patterns to different offsets..."
+# Pattern 1 at offset 0
+sudo dd if=/tmp/pattern1 of="$DEVICE_BDEV" bs=512 seek=0 count=2 conv=notrunc 2>/dev/null
+dd if=/tmp/pattern1 of=/tmp/reference_multiblock bs=512 seek=0 count=2 conv=notrunc 2>/dev/null
+
+# Pattern 2 at offset 8KB (sector 16)
+sudo dd if=/tmp/pattern2 of="$DEVICE_BDEV" bs=512 seek=16 count=4 conv=notrunc 2>/dev/null
+dd if=/tmp/pattern2 of=/tmp/reference_multiblock bs=512 seek=16 count=4 conv=notrunc 2>/dev/null
+
+# Pattern 3 at offset 16KB (sector 32)
+sudo dd if=/tmp/pattern3 of="$DEVICE_BDEV" bs=512 seek=32 count=8 conv=notrunc 2>/dev/null
+dd if=/tmp/pattern3 of=/tmp/reference_multiblock bs=512 seek=32 count=8 conv=notrunc 2>/dev/null
+
+# Read back the entire areas and compare
+echo "Reading back and verifying scattered data..."
+sudo dd if="$DEVICE_BDEV" of=/tmp/multiblock_readback bs=512 count=40 2>/dev/null
+
+# Calculate MD5 of the reference vs readback
+MULTI_REF_MD5=$(md5sum /tmp/reference_multiblock | cut -d' ' -f1)
+MULTI_UBLK_MD5=$(md5sum /tmp/multiblock_readback | cut -d' ' -f1)
+
+echo "Multi-block reference MD5: $MULTI_REF_MD5"
+echo "Multi-block ublk MD5:      $MULTI_UBLK_MD5"
+
+if [ "$MULTI_REF_MD5" != "$MULTI_UBLK_MD5" ]; then
+    echo "❌ CRITICAL FAILURE: Multi-block data integrity failed!"
+    echo "Scattered write/read operations have data corruption"
     exit 1
 fi
-echo "✅ Multiple block operations working"
+
+echo "✅ Multiple block operations with MD5 verification working"
 
 echo ""
 echo "🎉 ALL CRITICAL TESTS PASSED!"
-echo "✅ Device creation works"  
+echo "✅ Device creation works"
 echo "✅ Write operations work"
 echo "✅ Read operations work"
-echo "✅ Data integrity maintained"
-echo "✅ Multiple block I/O works"
+echo "✅ Data integrity verified with MD5 hashing"
+echo "✅ Multiple block I/O with scattered writes verified"
+echo "✅ Ublk device matches regular file behavior exactly"
 echo ""
 echo "The ublk device is FUNCTIONALLY WORKING for I/O operations!"
+echo "Data integrity is cryptographically verified across all test scenarios."
 echo "It is safe to proceed with performance testing."

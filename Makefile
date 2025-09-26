@@ -138,6 +138,13 @@ vm-e2e: ublk-mem vm-copy
 		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && ./test-e2e.sh"
 	@echo "✅ VM e2e test completed"
 
+vm-benchmark: ublk-mem vm-copy
+	@echo "📊 Running baseline performance benchmark on VM..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-benchmark.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-benchmark.sh && ./test-benchmark.sh"
+	@echo "✅ VM benchmark completed"
+
 .PHONY: vm-e2e-80 vm-e2e-64 vm-e2e-80-raw vm-e2e-64-raw vm-run-env
 vm-e2e-80: ublk-mem vm-copy
 	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=80 ..."

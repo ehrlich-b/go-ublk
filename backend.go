@@ -2,39 +2,39 @@
 package ublk
 
 import (
-    "context"
-    "fmt"
-    "os"
-    "time"
+	"context"
+	"fmt"
+	"os"
+	"time"
 
-    "github.com/ehrlich-b/go-ublk/internal/ctrl"
-    "github.com/ehrlich-b/go-ublk/internal/interfaces"
-    "github.com/ehrlich-b/go-ublk/internal/queue"
+	"github.com/ehrlich-b/go-ublk/internal/ctrl"
+	"github.com/ehrlich-b/go-ublk/internal/interfaces"
+	"github.com/ehrlich-b/go-ublk/internal/queue"
 )
 
 // waitLive waits for a ublk device to transition to LIVE state
 func waitLive(devID uint32, timeout time.Duration) error {
-    deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(timeout)
 
-    // The sysfs path may not exist on all systems, so we'll just wait
-    // a bit and check if the block device appears
-    fmt.Printf("*** DEBUG: Waiting for device %d to become ready\n", devID)
-    time.Sleep(500 * time.Millisecond) // Give kernel time to process START_DEV
+	// The sysfs path may not exist on all systems, so we'll just wait
+	// a bit and check if the block device appears
+	fmt.Printf("*** DEBUG: Waiting for device %d to become ready\n", devID)
+	time.Sleep(500 * time.Millisecond) // Give kernel time to process START_DEV
 
-    // Check if block device exists
-    blockPath := fmt.Sprintf("/dev/ublkb%d", devID)
-    for time.Now().Before(deadline) {
-        if _, err := os.Stat(blockPath); err == nil {
-            fmt.Printf("*** DEBUG: Device %d is ready (block device exists)\n", devID)
-            return nil
-        }
-        time.Sleep(10 * time.Millisecond)
-    }
+	// Check if block device exists
+	blockPath := fmt.Sprintf("/dev/ublkb%d", devID)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(blockPath); err == nil {
+			fmt.Printf("*** DEBUG: Device %d is ready (block device exists)\n", devID)
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
-    // If no block device after timeout, assume it's ready anyway
-    // (the queue runners will handle retries)
-    fmt.Printf("*** WARNING: Device %d block device not visible after %s, continuing anyway\n", devID, timeout)
-    return nil
+	// If no block device after timeout, assume it's ready anyway
+	// (the queue runners will handle retries)
+	fmt.Printf("*** WARNING: Device %d block device not visible after %s, continuing anyway\n", devID, timeout)
+	return nil
 }
 
 // Re-export interfaces from internal package
@@ -50,7 +50,7 @@ type Device struct {
 	// ID is the device ID assigned by the kernel
 	ID uint32
 
-	// Path is the path to the block device (e.g., "/dev/ublkb0")  
+	// Path is the path to the block device (e.g., "/dev/ublkb0")
 	Path string
 
 	// CharPath is the path to the character device (e.g., "/dev/ublkc0")
@@ -64,11 +64,11 @@ type Device struct {
 	cancel context.CancelFunc
 
 	// Internal state
-	queues   int
-	depth    int
+	queues    int
+	depth     int
 	blockSize int
-	started  bool
-	runners  []*queue.Runner
+	started   bool
+	runners   []*queue.Runner
 }
 
 // DeviceParams contains parameters for creating a ublk device
@@ -77,10 +77,10 @@ type DeviceParams struct {
 	Backend Backend
 
 	// Device configuration
-	QueueDepth       int    // Queue depth per queue (default: 128)
-	NumQueues        int    // Number of queues (default: number of CPUs)
-	LogicalBlockSize int    // Logical block size in bytes (default: 512)
-	MaxIOSize        int    // Maximum I/O size in bytes (default: 1MB)
+	QueueDepth       int // Queue depth per queue (default: 128)
+	NumQueues        int // Number of queues (default: number of CPUs)
+	LogicalBlockSize int // Logical block size in bytes (default: 512)
+	MaxIOSize        int // Maximum I/O size in bytes (default: 1MB)
 
 	// Feature flags
 	EnableZeroCopy     bool // Enable zero-copy if supported
@@ -90,21 +90,21 @@ type DeviceParams struct {
 	EnableIoctlEncode  bool // Use ioctl encoding instead of URING_CMD
 
 	// Device attributes
-	ReadOnly        bool // Make device read-only
-	Rotational      bool // Device is rotational (HDD-like)
-	VolatileCache   bool // Device has volatile cache
-	EnableFUA       bool // Enable Force Unit Access
+	ReadOnly      bool // Make device read-only
+	Rotational    bool // Device is rotational (HDD-like)
+	VolatileCache bool // Device has volatile cache
+	EnableFUA     bool // Enable Force Unit Access
 
 	// Discard parameters (only used if backend implements DiscardBackend)
-	DiscardAlignment    uint32 // Discard alignment
-	DiscardGranularity  uint32 // Discard granularity
-	MaxDiscardSectors   uint32 // Max sectors per discard
-	MaxDiscardSegments  uint16 // Max segments per discard
+	DiscardAlignment   uint32 // Discard alignment
+	DiscardGranularity uint32 // Discard granularity
+	MaxDiscardSectors  uint32 // Max sectors per discard
+	MaxDiscardSegments uint16 // Max segments per discard
 
 	// Advanced options
-	DeviceID      int32  // Specific device ID to request (-1 for auto)
-	DeviceName    string // Optional device name
-	CPUAffinity   []int  // CPU affinity mask for queue threads
+	DeviceID    int32  // Specific device ID to request (-1 for auto)
+	DeviceName  string // Optional device name
+	CPUAffinity []int  // CPU affinity mask for queue threads
 }
 
 // DefaultParams returns default device parameters
@@ -155,26 +155,27 @@ type Logger interface {
 
 // CreateAndServe creates a ublk device with the given parameters and starts serving I/O.
 // This is the main entry point for creating ublk devices.
-// 
+//
 // The device will continue serving I/O until:
 // - The context is cancelled
 // - StopAndDelete is called
 // - An unrecoverable error occurs
 //
 // Example:
-//   backend := mem.New(64 << 20) // 64MB RAM disk
-//   params := ublk.DefaultParams(backend)
-//   device, err := ublk.CreateAndServe(context.Background(), params, nil)
+//
+//	backend := mem.New(64 << 20) // 64MB RAM disk
+//	params := ublk.DefaultParams(backend)
+//	device, err := ublk.CreateAndServe(context.Background(), params, nil)
 func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) (*Device, error) {
 	fmt.Printf("*** CRITICAL: CreateAndServe starting with new code\n")
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	
+
 	if options == nil {
 		options = &Options{}
 	}
-	
+
 	if options.Context != nil {
 		ctx = options.Context
 	}
@@ -221,84 +222,84 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		numQueues = 1 // Single queue for minimal implementation
 	}
 
-    // CRITICAL FIX: Queue runners must be started BEFORE START_DEV
-    // The kernel waits for initial FETCH_REQ commands from all queues
-    // before completing START_DEV. This matches the C implementation.
+	// CRITICAL FIX: Queue runners must be started BEFORE START_DEV
+	// The kernel waits for initial FETCH_REQ commands from all queues
+	// before completing START_DEV. This matches the C implementation.
 
-    // STEP 1: Initialize queue runners
-    fmt.Printf("*** DEBUG: Creating %d queue runners\n", numQueues)
-    device.runners = make([]*queue.Runner, numQueues)
-    for i := 0; i < numQueues; i++ {
-        fmt.Printf("*** DEBUG: Creating queue runner %d\n", i)
-        runnerConfig := queue.Config{
-            DevID:   devID,
-            QueueID: uint16(i),
-            Depth:   params.QueueDepth,
-            Backend: params.Backend,
-            Logger:  options.Logger,
-        }
+	// STEP 1: Initialize queue runners
+	fmt.Printf("*** DEBUG: Creating %d queue runners\n", numQueues)
+	device.runners = make([]*queue.Runner, numQueues)
+	for i := 0; i < numQueues; i++ {
+		fmt.Printf("*** DEBUG: Creating queue runner %d\n", i)
+		runnerConfig := queue.Config{
+			DevID:   devID,
+			QueueID: uint16(i),
+			Depth:   params.QueueDepth,
+			Backend: params.Backend,
+			Logger:  options.Logger,
+		}
 
-        runner, err := queue.NewRunner(device.ctx, runnerConfig)
-        if err != nil {
-            // Cleanup already created runners
-            for j := 0; j < i; j++ {
-                if device.runners[j] != nil {
-                    device.runners[j].Close()
-                }
-            }
-            ctrl.DeleteDevice(devID)
-            return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
-        }
-        fmt.Printf("*** DEBUG: Queue runner %d created successfully\n", i)
-        device.runners[i] = runner
-    }
+		runner, err := queue.NewRunner(device.ctx, runnerConfig)
+		if err != nil {
+			// Cleanup already created runners
+			for j := 0; j < i; j++ {
+				if device.runners[j] != nil {
+					device.runners[j].Close()
+				}
+			}
+			ctrl.DeleteDevice(devID)
+			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
+		}
+		fmt.Printf("*** DEBUG: Queue runner %d created successfully\n", i)
+		device.runners[i] = runner
+	}
 
-    // STEP 2: Start queue runner goroutines BEFORE START_DEV
-    // The goroutines will just wait initially, similar to C threads
-    // CRITICAL: Start queue runners and have them submit FETCH_REQs BEFORE START_DEV
-    // This is the correct sequence according to ublk semantics
-    fmt.Printf("*** DEBUG: Starting queue runners to submit FETCH_REQs BEFORE START_DEV\n")
-    for i := 0; i < numQueues; i++ {
-        // Start the runner which will immediately submit all FETCH_REQs for its tags
-        if err := device.runners[i].Start(); err != nil {
-            for j := 0; j < len(device.runners); j++ {
-                if device.runners[j] != nil {
-                    device.runners[j].Close()
-                }
-            }
-            ctrl.DeleteDevice(devID)
-            return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
-        }
-        fmt.Printf("*** DEBUG: Queue runner %d started and FETCH_REQs submitted\n", i)
-    }
+	// STEP 2: Start queue runner goroutines BEFORE START_DEV
+	// The goroutines will just wait initially, similar to C threads
+	// CRITICAL: Start queue runners and have them submit FETCH_REQs BEFORE START_DEV
+	// This is the correct sequence according to ublk semantics
+	fmt.Printf("*** DEBUG: Starting queue runners to submit FETCH_REQs BEFORE START_DEV\n")
+	for i := 0; i < numQueues; i++ {
+		// Start the runner which will immediately submit all FETCH_REQs for its tags
+		if err := device.runners[i].Start(); err != nil {
+			for j := 0; j < len(device.runners); j++ {
+				if device.runners[j] != nil {
+					device.runners[j].Close()
+				}
+			}
+			ctrl.DeleteDevice(devID)
+			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
+		}
+		fmt.Printf("*** DEBUG: Queue runner %d started and FETCH_REQs submitted\n", i)
+	}
 
-    // CRITICAL: Give kernel time to see all FETCH_REQs
-    fmt.Printf("*** DEBUG: Waiting for kernel to see all FETCH_REQs\n")
-    time.Sleep(100 * time.Millisecond)
+	// CRITICAL: Give kernel time to see all FETCH_REQs
+	fmt.Printf("*** DEBUG: Waiting for kernel to see all FETCH_REQs\n")
+	time.Sleep(100 * time.Millisecond)
 
-    // STEP 3: NOW submit START_DEV (after FETCH_REQs are in place)
-    fmt.Printf("*** CRITICAL: Submitting START_DEV AFTER FETCH_REQs are posted\n")
-    err = ctrl.StartDevice(devID)  // Use synchronous version
-    if err != nil {
-        for j := 0; j < len(device.runners); j++ {
-            if device.runners[j] != nil {
-                device.runners[j].Close()
-            }
-        }
-        ctrl.DeleteDevice(devID)
-        return nil, fmt.Errorf("failed to START_DEV: %v", err)
-    }
+	// STEP 3: NOW submit START_DEV (after FETCH_REQs are in place)
+	fmt.Printf("*** CRITICAL: Submitting START_DEV AFTER FETCH_REQs are posted\n")
+	err = ctrl.StartDevice(devID) // Use synchronous version
+	if err != nil {
+		for j := 0; j < len(device.runners); j++ {
+			if device.runners[j] != nil {
+				device.runners[j].Close()
+			}
+		}
+		ctrl.DeleteDevice(devID)
+		return nil, fmt.Errorf("failed to START_DEV: %v", err)
+	}
 
-    // STEP 4: Device should now be LIVE
-    fmt.Printf("*** SUCCESS: START_DEV completed, device should be LIVE\n")
+	// STEP 4: Device should now be LIVE
+	fmt.Printf("*** SUCCESS: START_DEV completed, device should be LIVE\n")
 
-    // Check if the block device appears
-    devicePath := fmt.Sprintf("/dev/ublkb%d", devID)
-    if _, err := os.Stat(devicePath); err == nil {
-        fmt.Printf("*** SUCCESS: Device %s created!\n", devicePath)
-    } else {
-        fmt.Printf("*** WARNING: Device %s not yet visible, but state is LIVE\n", devicePath)
-    }
+	// Check if the block device appears
+	devicePath := fmt.Sprintf("/dev/ublkb%d", devID)
+	if _, err := os.Stat(devicePath); err == nil {
+		fmt.Printf("*** SUCCESS: Device %s created!\n", devicePath)
+	} else {
+		fmt.Printf("*** WARNING: Device %s not yet visible, but state is LIVE\n", devicePath)
+	}
 
 	device.started = true
 
@@ -360,7 +361,7 @@ func createController() (*ctrl.Controller, error) {
 // convertToCtrlParams converts public DeviceParams to internal ctrl.DeviceParams
 func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	ctrlParams := ctrl.DefaultDeviceParams(params.Backend)
-	
+
 	// Copy all fields
 	ctrlParams.DeviceID = params.DeviceID
 	ctrlParams.QueueDepth = params.QueueDepth
@@ -398,11 +399,11 @@ func (e UblkError) Error() string {
 }
 
 const (
-	ErrNotImplemented    UblkError = "not implemented"
-	ErrDeviceNotFound    UblkError = "device not found"
-	ErrDeviceBusy        UblkError = "device busy"
-	ErrInvalidParameters UblkError = "invalid parameters"
+	ErrNotImplemented     UblkError = "not implemented"
+	ErrDeviceNotFound     UblkError = "device not found"
+	ErrDeviceBusy         UblkError = "device busy"
+	ErrInvalidParameters  UblkError = "invalid parameters"
 	ErrKernelNotSupported UblkError = "kernel does not support ublk"
-	ErrPermissionDenied  UblkError = "permission denied"
+	ErrPermissionDenied   UblkError = "permission denied"
 	ErrInsufficientMemory UblkError = "insufficient memory"
 )

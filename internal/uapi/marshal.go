@@ -204,8 +204,7 @@ func unmarshalParams(data []byte, params *UblkParams) error {
 
 // directMarshal performs direct memory copy for marshaling
 func directMarshal(v interface{}) []byte {
-	// CRITICAL FIX: Need to dereference the interface to get actual struct pointer
-	// The old code was marshaling the interface itself, not the struct!
+	// Dereference the interface to get actual struct pointer
 	ptr := reflect.ValueOf(v).Pointer()
 	size := int(reflect.TypeOf(v).Elem().Size())
 

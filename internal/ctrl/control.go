@@ -10,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
@@ -22,6 +23,7 @@ type Controller struct {
 	controlFd int
 	ring      uring.Ring
 	useIoctl  bool
+	logger    *logging.Logger
 }
 
 func NewController() (*Controller, error) {
@@ -45,9 +47,8 @@ func NewController() (*Controller, error) {
 	return &Controller{
 		controlFd: fd,
 		ring:      ring,
-		// Modern kernels expect ioctl-encoded control commands. Default to true
-		// so STOP/DEL issued by a fresh controller use the same encoding path.
-		useIoctl: true,
+		useIoctl:  true,
+		logger:    logging.Default(),
 	}, nil
 }
 
@@ -83,9 +84,12 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 		OwnerGID:     uint32(os.Getgid()),
 	}
 
-	// Debug: log the device parameters being sent
-	fmt.Printf("*** DEBUG: ADD_DEV device info: queues=%d, depth=%d, maxIO=%d, flags=0x%x, devID=%d\n",
-		devInfo.NrHwQueues, devInfo.QueueDepth, devInfo.MaxIOBufBytes, devInfo.UblksrvFlags, devInfo.DevID)
+	c.logger.Debug("submitting ADD_DEV",
+		"queues", devInfo.NrHwQueues,
+		"depth", devInfo.QueueDepth,
+		"max_io", devInfo.MaxIOBufBytes,
+		"flags", fmt.Sprintf("0x%x", devInfo.UblksrvFlags),
+		"dev_id", devInfo.DevID)
 
 	// Marshal device info and optionally pad to requested length (64 or 80)
 	infoBuf := uapi.Marshal(devInfo)
@@ -95,7 +99,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 				padded := make([]byte, 80)
 				copy(padded, infoBuf)
 				infoBuf = padded
-				fmt.Printf("*** DEBUG: Using 80-byte dev_info payload (padded)\n")
+				c.logger.Debug("using padded dev_info payload", "size", 80)
 			} else if want == 64 && len(infoBuf) != 64 {
 				// Not expected today; keep as-is
 			}
@@ -114,12 +118,13 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 		Reserved:   0,
 	}
 
-	// Debug: log the control command being sent
-	fmt.Printf("*** DEBUG: ADD_DEV ctrl cmd: devID=%d, queueID=%d, len=%d, addr=0x%x\n",
-		cmd.DevID, cmd.QueueID, cmd.Len, cmd.Addr)
+	c.logger.Debug("submitting control command",
+		"dev_id", cmd.DevID,
+		"queue_id", cmd.QueueID,
+		"len", cmd.Len,
+		"addr", fmt.Sprintf("0x%x", cmd.Addr))
 
-	// Debug: dump the actual buffer bytes being sent
-	fmt.Printf("*** DEBUG: Device info buffer (%d bytes): %x\n", len(infoBuf), infoBuf)
+	c.logger.Debug("device info buffer", "size", len(infoBuf), "data", fmt.Sprintf("%x", infoBuf))
 
 	// ALWAYS use ioctl encoding - kernel 6.11+ requires it
 	c.useIoctl = true
@@ -129,7 +134,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 		return 0, fmt.Errorf("ADD_DEV submit failed: %v", err)
 	}
 
-	fmt.Printf("*** CRITICAL: ADD_DEV result: %d\n", result.Value())
+	c.logger.Info("ADD_DEV completed", "result", result.Value())
 
 	if result.Value() < 0 {
 		return 0, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
@@ -139,14 +144,15 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 	runtime.KeepAlive(infoBuf)
 
 	info := uapi.UnmarshalCtrlDevInfo(infoBuf)
-	fmt.Printf("*** CRITICAL: Device ID after ADD_DEV: %d\n", info.DevID)
+	c.logger.Info("device created", "dev_id", info.DevID)
 	return info.DevID, nil
 }
 
 func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
-	// Debug: log the input params
-	fmt.Printf("*** DEBUG SET_PARAMS input: LogicalBS=%d, MaxIO=%d, Backend.Size=%d\n",
-		params.LogicalBlockSize, params.MaxIOSize, params.Backend.Size())
+	c.logger.Debug("setting device parameters",
+		"logical_bs", params.LogicalBlockSize,
+		"max_io", params.MaxIOSize,
+		"backend_size", params.Backend.Size())
 
 	ublkParams := &uapi.UblkParams{
 		Types: uapi.UBLK_PARAM_TYPE_BASIC,
@@ -163,38 +169,29 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 		},
 	}
 
-	fmt.Printf("*** DEBUG SET_PARAMS Basic: LogicalBSShift=%d, MaxSectors=%d, DevSectors=%d\n",
-		ublkParams.Basic.LogicalBSShift, ublkParams.Basic.MaxSectors, ublkParams.Basic.DevSectors)
+	c.logger.Debug("calculated basic parameters",
+		"logical_bs_shift", ublkParams.Basic.LogicalBSShift,
+		"max_sectors", ublkParams.Basic.MaxSectors,
+		"dev_sectors", ublkParams.Basic.DevSectors)
 
-	// Add discard params if supported - DISABLED TO DEBUG
-	// TODO: Re-enable after fixing basic params
-	/*
-		if _, ok := params.Backend.(interface{ Discard(int64, int64) error }); ok {
-			ublkParams.Types |= uapi.UBLK_PARAM_TYPE_DISCARD
-			ublkParams.Discard = uapi.UblkParamDiscard{
-				DiscardAlignment:      params.DiscardAlignment,
-				DiscardGranularity:   params.DiscardGranularity,
-				MaxDiscardSectors:    params.MaxDiscardSectors,
-				MaxDiscardSegments:   params.MaxDiscardSegments,
-			}
-		}
-	*/
+	// TODO: Add discard parameters if backend supports it
 
 	// Marshal params - the Len field is set automatically by the marshal function
 	buf := uapi.Marshal(ublkParams)
 
-	// CRITICAL: Kernel might expect minimum 128 byte buffer
+	// Pad buffer to minimum 128 bytes if needed
 	if len(buf) < 128 {
 		padded := make([]byte, 128)
 		copy(padded, buf)
 		buf = padded
-		// Update the Len field in the buffer to match actual size
 		binary.LittleEndian.PutUint32(buf[0:4], 128)
-		fmt.Printf("*** DEBUG SET_PARAMS: Padded buffer to 128 bytes and updated Len field\n")
+		c.logger.Debug("padded parameter buffer", "size", 128)
 	}
 
-	fmt.Printf("*** DEBUG SET_PARAMS: params buffer len=%d, addr=%p\n", len(buf), &buf[0])
-	fmt.Printf("*** DEBUG SET_PARAMS: first 16 bytes: %x\n", buf[:16])
+	c.logger.Debug("parameter buffer prepared",
+		"size", len(buf),
+		"addr", fmt.Sprintf("%p", &buf[0]),
+		"first_16_bytes", fmt.Sprintf("%x", buf[:16]))
 
 	cmd := &uapi.UblksrvCtrlCmd{
 		DevID:      devID,
@@ -216,7 +213,7 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 		return fmt.Errorf("SET_PARAMS failed: %v", err)
 	}
 
-	fmt.Printf("*** CRITICAL: SET_PARAMS result: %d\n", result.Value())
+	c.logger.Info("SET_PARAMS completed", "result", result.Value())
 
 	if result.Value() < 0 {
 		return fmt.Errorf("SET_PARAMS failed with error: %d", result.Value())
@@ -226,8 +223,7 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 }
 
 func (c *Controller) StartDevice(devID uint32) error {
-	// IMPORTANT: pass daemon PID in ctrl cmd data[0], like ublksrv does.
-	// The kernel uses this to signal the userspace queue threads.
+	c.logger.Debug("starting device", "dev_id", devID)
 	cmd := &uapi.UblksrvCtrlCmd{
 		DevID:      devID,
 		QueueID:    0xFFFF,
@@ -247,7 +243,7 @@ func (c *Controller) StartDevice(devID uint32) error {
 		return fmt.Errorf("START_DEV failed: %v", err)
 	}
 
-	fmt.Printf("*** CRITICAL: START_DEV result: %d\n", result.Value())
+	c.logger.Info("START_DEV completed", "result", result.Value())
 
 	if result.Value() < 0 {
 		return fmt.Errorf("START_DEV failed with error: %d", result.Value())
@@ -306,21 +302,9 @@ func (c *Controller) StartDeviceAsync(devID uint32) (*AsyncStartHandle, error) {
 	}, nil
 }
 
-// StartDataPlane is removed - FETCH_REQ must be done by per-queue runners
-// Device nodes are created by the kernel after START_DEV, not by FETCH_REQ
+// StartDataPlane is deprecated - queue runners handle FETCH_REQ directly
 func (c *Controller) StartDataPlane(devID uint32, numQueues, queueDepth int) error {
-	fmt.Printf("*** CRITICAL: StartDataPlane - FETCH_REQ approach was wrong!\n")
-	fmt.Printf("*** Device nodes should appear after START_DEV, not after FETCH_REQ\n")
-	fmt.Printf("*** FETCH_REQ must be done by queue runners on /dev/ublkc%d fds\n", devID)
-
-	// The correct sequence is:
-	// 1. ADD_DEV (done)
-	// 2. SET_PARAMS (done)
-	// 3. START_DEV (done)
-	// 4. Device nodes /dev/ublkb<ID> and /dev/ublkc<ID> should now exist
-	// 5. Queue runners open /dev/ublkc<ID> and submit FETCH_REQ on those fds
-
-	// For now, just return success - device creation should already have triggered node creation
+	c.logger.Warn("StartDataPlane is deprecated", "dev_id", devID)
 	return nil
 }
 
@@ -468,6 +452,13 @@ func (c *Controller) buildFeatureFlags(params *DeviceParams) uint64 {
 	}
 
 	return flags
+}
+
+// SetLogger sets the logger for this controller
+func (c *Controller) SetLogger(logger *logging.Logger) {
+	if logger != nil {
+		c.logger = logger
+	}
 }
 
 // sizeToShift converts a size to its shift value (log2)

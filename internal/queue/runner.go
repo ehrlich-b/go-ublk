@@ -63,12 +63,16 @@ type Config struct {
 
 // NewRunner creates a new queue runner
 func NewRunner(ctx context.Context, config Config) (*Runner, error) {
-	fmt.Printf("*** DEBUG: NewRunner called for dev %d queue %d\n", config.DevID, config.QueueID)
+	if config.Logger != nil {
+		config.Logger.Debugf("creating queue runner for device %d queue %d", config.DevID, config.QueueID)
+	}
 
 	// The character device (/dev/ublkcN) should exist after ADD_DEV.
 	// We may need to retry briefly until udev creates the node.
 	charPath := uapi.UblkDevicePath(config.DevID)
-	fmt.Printf("*** DEBUG: Opening character device %s\n", charPath)
+	if config.Logger != nil {
+		config.Logger.Debugf("opening character device %s", charPath)
+	}
 
 	var fd int
 	var err error
@@ -76,7 +80,9 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 	for i := 0; i < maxRetries; i++ {
 		fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
 		if err == nil {
-			fmt.Printf("*** DEBUG: Opened %s successfully, fd=%d\n", charPath, fd)
+			if config.Logger != nil {
+				config.Logger.Debugf("opened %s successfully, fd=%d", charPath, fd)
+			}
 			break
 		}
 		if err != syscall.ENOENT {
@@ -97,24 +103,34 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		Flags:   0,
 	}
 
-	fmt.Printf("*** DEBUG: Creating io_uring for queue with fd=%d\n", fd)
+	if config.Logger != nil {
+		config.Logger.Debugf("creating io_uring for queue with fd=%d", fd)
+	}
 	ring, err := uring.NewRing(ringConfig)
 	if err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to create io_uring: %v", err)
 	}
-	fmt.Printf("*** DEBUG: io_uring created successfully for queue\n")
+	if config.Logger != nil {
+		config.Logger.Debugf("io_uring created successfully for queue")
+	}
 
 	// Memory map the descriptor array and I/O buffers
-	fmt.Printf("*** DEBUG: About to call mmapQueues for fd=%d\n", fd)
+	if config.Logger != nil {
+		config.Logger.Debugf("mmapping queues for fd=%d", fd)
+	}
 	descPtr, bufPtr, err := mmapQueues(fd, config.QueueID, config.Depth)
 	if err != nil {
-		fmt.Printf("*** DEBUG: mmapQueues failed: %v\n", err)
+		if config.Logger != nil {
+			config.Logger.Debugf("mmapQueues failed: %v", err)
+		}
 		ring.Close()
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to mmap queues: %v", err)
 	}
-	fmt.Printf("*** DEBUG: mmapQueues succeeded\n")
+	if config.Logger != nil {
+		config.Logger.Debugf("mmapQueues succeeded")
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -143,8 +159,7 @@ func (r *Runner) Start() error {
 		r.logger.Printf("Starting queue %d for device %d", r.queueID, r.devID)
 	}
 
-	// CRITICAL: Submit initial FETCH_REQs BEFORE starting the I/O loop
-	// This ensures they're ready before START_DEV is called
+	// Submit initial FETCH_REQs before starting the I/O loop
 	if err := r.Prime(); err != nil {
 		return fmt.Errorf("failed to prime queue %d: %w", r.queueID, err)
 	}
@@ -217,9 +232,8 @@ func (r *Runner) Close() error {
 
 // ioLoop is the main I/O processing loop
 func (r *Runner) ioLoop() {
-	// CRITICAL: Pin to OS thread for ublk thread affinity requirement
-	// ublk_drv records one ubq_daemon (Linux thread) per queue and rejects
-	// any URING_CMD from different threads with -EINVAL
+	// Pin to OS thread for ublk thread affinity requirement
+	// ublk_drv records one thread per queue and rejects commands from different threads
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -233,8 +247,7 @@ func (r *Runner) ioLoop() {
 		return
 	}
 
-	// CRITICAL: Queue is ready - the io_uring exists and is associated with the char device
-	// The kernel can now see this queue exists
+	// Queue is ready - the io_uring exists and is associated with the char device
 	if r.logger != nil {
 		r.logger.Printf("Queue %d: Queue io_uring ready", r.queueID)
 	}
@@ -274,21 +287,20 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 		return fmt.Errorf("tag %d already initialized (state=%d)", tag, r.tagStates[tag])
 	}
 
-	// CRITICAL FIX: Addr must point to the DATA BUFFER for this tag, not the descriptor
-	// The kernel will use this buffer for I/O data transfers
+	// Addr must point to the data buffer for this tag
 	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
 
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: 0,
-		// CRITICAL: Must point to the I/O data buffer, NOT the descriptor!
+		// Must point to the I/O data buffer
 		Addr: uint64(bufferAddr),
 	}
 
 	// Encode FETCH operation in userData
 	userData := udOpFetch | (uint64(r.queueID) << 16) | uint64(tag)
-	// CRITICAL: Use the new IOCTL-encoded command (UBLK_U_IO_FETCH_REQ), not the legacy raw value!
+	// Use the IOCTL-encoded command
 	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ) // This creates UBLK_U_IO_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
@@ -446,7 +458,9 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		opType = "COMMIT"
 	}
 
-	fmt.Printf("Queue %d: Tag %d %s completion, result=%d, state=%d\n", r.queueID, tag, opType, result, currentState)
+	if r.logger != nil {
+		r.logger.Debugf("queue %d tag %d %s completion, result=%d, state=%d", r.queueID, tag, opType, result, currentState)
+	}
 
 	// State machine transitions
 	switch currentState {
@@ -455,16 +469,22 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		if result == 0 {
 			// UBLK_IO_RES_OK: I/O request available - transition to Owned and process
 			r.tagStates[tag] = TagStateOwned
-			fmt.Printf("Queue %d: Tag %d I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
+			if r.logger != nil {
+				r.logger.Debugf("queue %d tag %d I/O arrived, processing", r.queueID, tag)
+			}
 			return r.processIOAndCommit(tag)
 		} else if result == 1 {
 			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path (not implemented yet)
 			r.tagStates[tag] = TagStateOwned
-			fmt.Printf("Queue %d: Tag %d NEED_GET_DATA (result=1) - not implemented\n", r.queueID, tag)
+			if r.logger != nil {
+				r.logger.Printf("queue %d tag %d NEED_GET_DATA not implemented", r.queueID, tag)
+			}
 			return fmt.Errorf("NEED_GET_DATA not implemented")
 		} else {
 			// Unexpected result code
-			fmt.Printf("Queue %d: Tag %d unexpected result=%d\n", r.queueID, tag, result)
+			if r.logger != nil {
+				r.logger.Printf("queue %d tag %d unexpected FETCH result=%d", r.queueID, tag, result)
+			}
 			return fmt.Errorf("unexpected FETCH result: %d", result)
 		}
 
@@ -475,16 +495,22 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		if result == 0 {
 			// UBLK_IO_RES_OK: Next I/O request available - transition to Owned and process immediately
 			r.tagStates[tag] = TagStateOwned
-			fmt.Printf("Queue %d: Tag %d next I/O arrived (result=0=OK), processing...\n", r.queueID, tag)
+			if r.logger != nil {
+				r.logger.Debugf("queue %d tag %d next I/O arrived, processing", r.queueID, tag)
+			}
 			return r.processIOAndCommit(tag)
 		} else if result == 1 {
 			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path
 			r.tagStates[tag] = TagStateOwned
-			fmt.Printf("Queue %d: Tag %d next NEED_GET_DATA (result=1) - not implemented\n", r.queueID, tag)
+			if r.logger != nil {
+				r.logger.Printf("queue %d tag %d next NEED_GET_DATA not implemented", r.queueID, tag)
+			}
 			return fmt.Errorf("NEED_GET_DATA not implemented")
 		} else if result < 0 {
 			// Error/abort path
-			fmt.Printf("Queue %d: Tag %d COMMIT error/abort: result=%d\n", r.queueID, tag, result)
+			if r.logger != nil {
+				r.logger.Printf("queue %d tag %d COMMIT error/abort: result=%d", r.queueID, tag, result)
+			}
 			r.tagStates[tag] = TagStateOwned // Tag can be reused after error
 			return fmt.Errorf("COMMIT_AND_FETCH error: %d", result)
 		} else {
@@ -508,9 +534,10 @@ func (r *Runner) processIOAndCommit(tag uint16) error {
 	descPtr := unsafe.Add(unsafe.Pointer(r.descPtr), uintptr(tag)*uintptr(descSize))
 	desc := *(*uapi.UblksrvIODesc)(descPtr)
 
-	// Debug: Log what we read from descriptor
-	fmt.Printf("[DEBUG] processIOAndCommit: tag=%d, OpFlags=0x%x, NrSectors=%d, StartSector=%d, Addr=0x%x\n",
-		tag, desc.OpFlags, desc.NrSectors, desc.StartSector, desc.Addr)
+	if r.logger != nil {
+		r.logger.Debugf("processIOAndCommit: tag=%d, OpFlags=0x%x, NrSectors=%d, StartSector=%d, Addr=0x%x",
+			tag, desc.OpFlags, desc.NrSectors, desc.StartSector, desc.Addr)
+	}
 
 	// Handle empty descriptor - submit COMMIT_AND_FETCH with result=0
 	// to acknowledge and wait for next I/O
@@ -582,11 +609,13 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 		opName = fmt.Sprintf("OP_%d", op)
 	}
 
-	// Show bytes for small ops, KB for larger ones
-	if length < 1024 {
-		fmt.Printf("[Q%d:T%02d] %s %dB @ sector %d (offset %dB)\n", r.queueID, tag, opName, length, desc.StartSector, offset)
-	} else {
-		fmt.Printf("[Q%d:T%02d] %s %dKB @ sector %d (offset %dKB)\n", r.queueID, tag, opName, length/1024, desc.StartSector, offset/1024)
+	// Log I/O operations for progress visibility
+	if r.logger != nil {
+		if length < 1024 {
+			r.logger.Printf("[Q%d:T%02d] %s %dB @ sector %d", r.queueID, tag, opName, length, desc.StartSector)
+		} else {
+			r.logger.Printf("[Q%d:T%02d] %s %dKB @ sector %d", r.queueID, tag, opName, length/1024, desc.StartSector)
+		}
 	}
 
 	if r.logger != nil {
@@ -598,15 +627,16 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	bufOffset := int(tag) * 64 * 1024 // 64KB per buffer
 	bufPtr := unsafe.Pointer(r.bufPtr + uintptr(bufOffset))
 
-	// CRITICAL: Check if length exceeds buffer size (64KB)
+	// Check if length exceeds buffer size (64KB)
 	const maxBufferSize = 64 * 1024
 
 	var buffer []byte
 	var dynamicBuffer []byte
 
 	if length > maxBufferSize {
-		// TEMPORARY: Dynamic allocation for large I/O to test if rest works
-		fmt.Printf("    DYNAMIC ALLOC: Requested length %d exceeds buffer size %d\n", length, maxBufferSize)
+		if r.logger != nil {
+			r.logger.Printf("dynamic allocation: length %d exceeds buffer size %d", length, maxBufferSize)
+		}
 		dynamicBuffer = make([]byte, length)
 		buffer = dynamicBuffer
 	} else {
@@ -616,9 +646,13 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	var err error
 	switch op {
 	case uapi.UBLK_IO_OP_READ:
-		fmt.Printf("[DEBUG] About to call ReadAt: offset=%d, buflen=%d\n", offset, len(buffer))
+		if r.logger != nil {
+			r.logger.Debugf("calling ReadAt: offset=%d, buflen=%d", offset, len(buffer))
+		}
 		_, err = r.backend.ReadAt(buffer, int64(offset))
-		fmt.Printf("[DEBUG] ReadAt completed: err=%v\n", err)
+		if r.logger != nil {
+			r.logger.Debugf("ReadAt completed: err=%v", err)
+		}
 	case uapi.UBLK_IO_OP_WRITE:
 		_, err = r.backend.WriteAt(buffer, int64(offset))
 	case uapi.UBLK_IO_OP_FLUSH:
@@ -633,17 +667,22 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	// Submit COMMIT_AND_FETCH_REQ with result
-	fmt.Printf("[DEBUG] About to call submitCommitAndFetch: tag=%d, err=%v\n", tag, err)
+	if r.logger != nil {
+		r.logger.Debugf("calling submitCommitAndFetch: tag=%d, err=%v", tag, err)
+	}
 	submitErr := r.submitCommitAndFetch(tag, err, desc)
-	fmt.Printf("[DEBUG] submitCommitAndFetch completed: err=%v\n", submitErr)
+	if r.logger != nil {
+		r.logger.Debugf("submitCommitAndFetch completed: err=%v", submitErr)
+	}
 	return submitErr
 }
 
 // submitCommitAndFetch submits COMMIT_AND_FETCH_REQ with proper state tracking
 func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
-	// Tag mutex MUST already be held by caller. This is invoked from handleCompletion()
-	// while the tag lock is held, so taking it again would deadlock.
-	fmt.Printf("[DEBUG] submitCommitAndFetch: Starting for tag=%d\n", tag)
+	// Tag mutex is already held by caller to prevent deadlock
+	if r.logger != nil {
+		r.logger.Debugf("submitCommitAndFetch: starting for tag=%d", tag)
+	}
 
 	// Calculate result: bytes processed for success, negative errno for error
 	// Always set result = nr_sectors << 9 (nr_sectors * 512) as per expert guidance
@@ -654,27 +693,29 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 			r.logger.Printf("Queue %d: I/O error for tag %d: %v", r.queueID, tag, ioErr)
 		}
 	}
-	fmt.Printf("[DEBUG] submitCommitAndFetch: Calculated result=%d\n", result)
+	if r.logger != nil {
+		r.logger.Debugf("submitCommitAndFetch: calculated result=%d", result)
+	}
 
 	// Only submit if we're in Owned state
 	if r.tagStates[tag] != TagStateOwned {
 		return fmt.Errorf("cannot submit COMMIT for tag %d in state %d (not Owned)", tag, r.tagStates[tag])
 	}
 
-	// CRITICAL FIX: Addr must point to the DATA BUFFER for next I/O
+	// Addr must point to the data buffer for next I/O
 	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
 
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:    r.queueID,
 		Tag:    tag,
 		Result: result,
-		// CRITICAL: Must point to the I/O data buffer for next operation
+		// Must point to the I/O data buffer for next operation
 		Addr: uint64(bufferAddr),
 	}
 
 	// Encode COMMIT operation in userData
 	userData := udOpCommit | (uint64(r.queueID) << 16) | uint64(tag)
-	// CRITICAL: Use the new IOCTL-encoded command (UBLK_U_IO_COMMIT_AND_FETCH_REQ), not the legacy raw value!
+	// Use the IOCTL-encoded command
 	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ) // This creates UBLK_U_IO_COMMIT_AND_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
@@ -684,8 +725,10 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	// Update state: COMMIT_AND_FETCH_REQ is now in flight
 	r.tagStates[tag] = TagStateInFlightCommit
 
-	fmt.Printf("Queue %d: COMMIT_AND_FETCH_REQ submitted for tag %d with result=%d bytes\n",
-		r.queueID, tag, result)
+	if r.logger != nil {
+		r.logger.Debugf("queue %d: COMMIT_AND_FETCH_REQ submitted for tag %d with result=%d bytes",
+			r.queueID, tag, result)
+	}
 
 	return nil
 }
@@ -696,14 +739,13 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
 	bufSize := depth * 64 * 1024 // 64KB per request buffer
 
-	// CRITICAL FIX: Page-round the mmap size
+	// Page-round the mmap size
 	pageSize := os.Getpagesize()
 	if rem := descSize % pageSize; rem != 0 {
 		descSize += pageSize - rem
 	}
 
-	// CRITICAL FIX: Calculate per-queue offset for mmap
-	// The kernel uses vm_pgoff to select the queue
+	// Calculate per-queue offset for mmap
 	// Formula: offset = queueID * round_up(queue_depth * sizeof(desc), PAGE_SIZE)
 	mmapOffset := uintptr(queueID) * uintptr(descSize)
 
@@ -716,7 +758,7 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 		syscall.PROT_READ, // prot - READ ONLY from userspace!
 		syscall.MAP_SHARED|syscall.MAP_POPULATE, // flags - populate to avoid page faults
 		uintptr(fd), // fd
-		mmapOffset,  // CRITICAL: per-queue offset!
+		mmapOffset,  // per-queue offset
 	)
 	if errno != 0 {
 		return 0, 0, fmt.Errorf("failed to mmap descriptor array: %v", errno)

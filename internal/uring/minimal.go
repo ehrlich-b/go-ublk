@@ -34,7 +34,7 @@ const (
 )
 
 // SQE128 structure for URING_CMD
-// CRITICAL: With SQE128 enabled, the cmd area for URING_CMD is 80 bytes starting at byte 48!
+// With SQE128 enabled, the cmd area for URING_CMD is 80 bytes starting at byte 48
 // The kernel UAPI says: "If IORING_SETUP_SQE128, this field is 80 bytes" for io_uring_sqe.cmd
 // Layout:
 //   - Bytes 0-47: Standard SQE fields
@@ -91,7 +91,7 @@ type AsyncHandle struct {
 // Wait polls for completion of async operation
 func (h *AsyncHandle) Wait(timeout time.Duration) (Result, error) {
 	logger := logging.Default()
-	logger.Info("*** ASYNC: Starting wait for completion", "userData", h.userData, "timeout", timeout)
+	logger.Debug("waiting for completion", "userData", h.userData, "timeout", timeout)
 	deadline := time.Now().Add(timeout)
 
 	attempts := 0
@@ -100,20 +100,20 @@ func (h *AsyncHandle) Wait(timeout time.Duration) (Result, error) {
 		// Try to get completion without blocking
 		result, err := h.ring.tryGetCompletion(h.userData)
 		if err == nil {
-			logger.Info("*** ASYNC: Found completion", "attempts", attempts, "result", result.Value())
+			logger.Debug("found completion", "attempts", attempts, "result", result.Value())
 			return result, nil
 		}
 
 		// Log every 100 attempts (1 second)
 		if attempts%100 == 0 {
-			logger.Info("*** ASYNC: Still waiting for completion", "attempts", attempts, "error", err.Error())
+			logger.Debug("still waiting for completion", "attempts", attempts, "error", err.Error())
 		}
 
 		// Not ready yet, sleep briefly
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	logger.Info("*** ASYNC: Timeout waiting for completion", "attempts", attempts)
+	logger.Debug("timeout waiting for completion", "attempts", attempts)
 	return nil, fmt.Errorf("timeout waiting for completion after %d attempts", attempts)
 }
 
@@ -174,7 +174,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	// Verify SQE structure size is exactly 128 bytes
 	sqeSize := unsafe.Sizeof(sqe128{})
 	if sqeSize != 128 {
-		return nil, fmt.Errorf("CRITICAL: sqe128 size is %d bytes, expected 128", sqeSize)
+		return nil, fmt.Errorf("sqe128 size is %d bytes, expected 128", sqeSize)
 	}
 	logger.Debug("SQE128 size verified", "size", sqeSize)
 
@@ -202,7 +202,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 
 	// Verify the kernel accepted our flags
 	if (params.flags & IORING_SETUP_SQE128) == 0 {
-		logger.Error("CRITICAL: Kernel did not accept IORING_SETUP_SQE128 flag!")
+		logger.Error("kernel did not accept IORING_SETUP_SQE128 flag")
 		syscall.Close(int(ringFd))
 		return nil, fmt.Errorf("kernel rejected IORING_SETUP_SQE128 flag")
 	}
@@ -243,7 +243,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	}
 
 	// Register the char device FD with io_uring (like C code does)
-	// This is critical for queue operations to work!
+	// Required for queue operations
 	if ctrlFd >= 0 {
 		fds := []int32{ctrlFd}
 		if err := r.RegisterFiles(fds); err != nil {
@@ -260,9 +260,9 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 // SubmitCtrlCmdAsync submits command without waiting
 func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error) {
 	logger := logging.Default()
-	logger.Info("*** ASYNC: SubmitCtrlCmdAsync called", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
+	logger.Debug("submitting async ctrl command", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
 
-	// CRITICAL: Keep the buffer that ctrlCmd.Addr points to alive
+	// Keep the buffer alive until kernel copies it
 	var bufferPtr unsafe.Pointer
 	if ctrlCmd.Addr != 0 {
 		bufferPtr = unsafe.Pointer(uintptr(ctrlCmd.Addr))
@@ -318,7 +318,7 @@ func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCm
 		return nil, fmt.Errorf("failed to submit: %v", errno)
 	}
 
-	logger.Info("*** ASYNC: Command submitted without waiting", "userData", userData)
+	logger.Debug("command submitted without waiting", "userData", userData)
 
 	// Return handle for later polling
 	return &AsyncHandle{
@@ -360,7 +360,7 @@ func (r *minimalRing) submitToRing(sqe *sqe128) error {
 	// Update tail atomically
 	atomic.StoreUint32(sqTail, *sqTail+1)
 
-	logger.Debug("*** ASYNC: SQE prepared in ring", "index", sqIndex, "tail", *sqTail)
+	logger.Debug("SQE prepared in ring", "index", sqIndex, "tail", *sqTail)
 	return nil
 }
 
@@ -372,14 +372,14 @@ func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
 	// This is critical for async operations as the kernel might not have pushed completions yet
 	_, _, errno := r.submitAndWaitRing(0, 0) // submit=0, wait=0 but with GETEVENTS
 	if errno != 0 {
-		logger.Debug("*** ASYNC: io_uring_enter for completion processing failed", "errno", errno)
+		logger.Debug("io_uring_enter for completion processing failed", "errno", errno)
 	}
 
 	// Check CQ head/tail
 	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
 	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
 
-	logger.Debug("*** ASYNC: Checking completions", "cqHead", *cqHead, "cqTail", *cqTail, "looking_for", userData)
+	logger.Debug("checking completions", "cqHead", *cqHead, "cqTail", *cqTail, "looking_for", userData)
 
 	if *cqHead == *cqTail {
 		return nil, fmt.Errorf("no completions available")
@@ -394,7 +394,7 @@ func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
 		cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(index)))
 		cqe := (*cqe32)(cqeSlot)
 
-		logger.Debug("*** ASYNC: Found completion", "index", index, "userData", cqe.userData, "res", cqe.res, "looking_for", userData)
+		logger.Debug("found completion", "index", index, "userData", cqe.userData, "res", cqe.res)
 
 		if cqe.userData == userData {
 			// Found our completion - advance head to this position + 1
@@ -410,7 +410,7 @@ func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
 				result.err = fmt.Errorf("operation failed with result: %d", cqe.res)
 			}
 
-			logger.Info("*** ASYNC: Found matching completion", "userData", userData, "result", cqe.res)
+			logger.Debug("found matching completion", "userData", userData, "result", cqe.res)
 			return result, nil
 		}
 
@@ -452,21 +452,15 @@ func (r *minimalRing) RegisterFiles(fds []int32) error {
 
 func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
 	logger := logging.Default()
-	// CRITICAL: Log the actual command value we receive to see if ioctl encoding is applied
-	fmt.Printf("*** DEBUG: SubmitCtrlCmd raw cmd value: 0x%08x (%d)\n", cmd, cmd)
 
-	// Add stack trace to see who's calling this
-	buf := make([]byte, 4096)
-	n := runtime.Stack(buf, false)
-	fmt.Printf("*** STACK TRACE:\n%s\n", buf[:n])
 
-	logger.Info("*** CRITICAL: SubmitCtrlCmd called", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
+	logger.Debug("submitting ctrl command", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
 	logger.Debug("preparing URING_CMD", "cmd", cmd, "dev_id", ctrlCmd.DevID)
 
 	// Log the actual command being used
 	logger.Debug("using command", "cmd", cmd)
 
-	// CRITICAL: Keep the buffer that ctrlCmd.Addr points to alive
+	// Keep the buffer alive until kernel copies it
 	// The kernel needs to access this memory during the syscall
 	var bufferPtr unsafe.Pointer
 	if ctrlCmd.Addr != 0 {
@@ -475,9 +469,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	}
 
 	// Create URING_CMD SQE for control operations
-	// CRITICAL FIX: The 32-byte ublksrv_ctrl_cmd must be placed directly in the
-	// standard SQE cmd area (bytes 32-63), NOT in the SQE128 extension!
-	// This matches the working C implementation layout.
+	// The 32-byte ublksrv_ctrl_cmd is placed in the SQE cmd area
 	sqe := &sqe128{}
 
 	// Zero all fields first to ensure clean state
@@ -495,8 +487,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	sqe.ioprio = 0
 	sqe.fd = int32(r.targetFd)
 
-	// CRITICAL: The addr field should be 0 for URING_CMD operations
-	// The control command data goes in bytes 32-63, not via an external buffer
+	// addr field is 0 for URING_CMD operations
 	sqe.addr = 0
 	sqe.len = uint32(ctrlCmd.Len)
 	sqe.opcodeFlags = 0
@@ -514,37 +505,18 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 		return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
 	}
 
-	// Debug: Log the control command fields before marshaling
-	logger.Debug("control cmd fields",
-		"dev_id", ctrlCmd.DevID,
-		"queue_id", ctrlCmd.QueueID,
-		"len", ctrlCmd.Len,
-		"addr", fmt.Sprintf("0x%x", ctrlCmd.Addr),
-		"data", ctrlCmd.Data)
 
 	// Set cmd_op field to ioctl-encoded value (like working C implementation)
 	sqe.setCmdOp(cmd)
 
-	// CRITICAL: With our corrected sqe128 layout, sqe.cmd now starts at byte 48
+	// With sqe128 layout, sqe.cmd starts at byte 48
 	// Copy the 32-byte control command to the cmd area
 	copy(sqe.cmd[:32], ctrlCmdBytes)
 
-	// Debug: log the exact control header bytes being sent to kernel
-	logger.Debug("control header bytes", "header_hex", fmt.Sprintf("%x", ctrlCmdBytes))
 
 	logger.Debug("SQE prepared", "fd", sqe.fd, "cmd", cmd, "addr", sqe.addr)
 
-	// CRITICAL FIX: START_DEV must wait for completion!
-	// The kernel won't complete START_DEV until it sees all FETCH_REQs
-	// But since we submit FETCH_REQs before START_DEV, it should complete quickly
-	isStartDev := (cmd == uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV))
-
-	if isStartDev {
-		logger.Info("*** CRITICAL: START_DEV detected - waiting for completion!")
-	}
-
-	// For ALL commands including START_DEV, use normal submit-and-wait
-	logger.Info("*** Using submit-and-wait for command")
+	// START_DEV must wait for completion
 
 	// Submit the command and wait for completion using real io_uring
 	result, err := r.submitAndWait(sqe)
@@ -571,17 +543,15 @@ func (r *minimalResult) Error() error     { return r.err }
 func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
 	// Submit URING_CMD for data-plane to this ring's fd (expected to be /dev/ublkc<ID>)
 	logger := logging.Default()
-	logger.Info("*** CRITICAL: SubmitIOCmd called",
+	logger.Debug("submitting IO command",
 		"cmd", fmt.Sprintf("0x%x", cmd),
-		"targetFd", r.targetFd,
 		"qid", ioCmd.QID,
-		"tag", ioCmd.Tag,
-		"ioCmd.Addr", fmt.Sprintf("0x%x", ioCmd.Addr))
+		"tag", ioCmd.Tag)
 
-	// CRITICAL: Verify struct packing is correct (must be exactly 16 bytes)
+	// Verify struct packing is correct (must be exactly 16 bytes)
 	ioCmdSize := unsafe.Sizeof(*ioCmd)
 	if ioCmdSize != 16 {
-		return nil, fmt.Errorf("CRITICAL: UblksrvIOCmd size is %d bytes, expected 16 (struct packing error)", ioCmdSize)
+		return nil, fmt.Errorf("UblksrvIOCmd size is %d bytes, expected 16 (struct packing error)", ioCmdSize)
 	}
 
 	// Prepare SQE with the minimal fields the kernel expects
@@ -591,9 +561,9 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	sqe.setCmdOp(cmd)
 	sqe.userData = userData
 
-	// CRITICAL: For SQE128, the cmd area starts at byte 48 and is 80 bytes long
+	// For SQE128, the cmd area starts at byte 48 and is 80 bytes long
 	// The ublksrv_io_cmd (16 bytes) goes at the beginning of this area
-	sqe.len = 16  // CRITICAL: Must be 16 to tell kernel there's a 16-byte payload
+	sqe.len = 16  // Must be 16 to tell kernel there's a 16-byte payload
 
 	// Copy the ublksrv_io_cmd to the cmd field (bytes 48-63 in the overall SQE)
 	copy(sqe.cmd[:16], (*[16]byte)(unsafe.Pointer(ioCmd))[:])
@@ -687,7 +657,7 @@ func (b *minimalBatch) Len() int {
 // submitAndWait submits an SQE and waits for completion using real io_uring
 func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	logger := logging.Default()
-	logger.Info("*** CRITICAL: submitAndWait called - making syscalls", "fd", sqe.fd, "opcode", sqe.opcode)
+	logger.Debug("submitAndWait called", "fd", sqe.fd, "opcode", sqe.opcode)
 	logger.Debug("submitting URING_CMD via io_uring", "fd", sqe.fd, "opcode", sqe.opcode)
 
 	// This is the real io_uring submission implementation
@@ -701,39 +671,29 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 		return nil, fmt.Errorf("submission queue full")
 	}
 
-	// Debug: Check SQ flags
-	sqFlags := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.flags))
-	logger.Debug("SQ flags", "value", fmt.Sprintf("0x%x", *sqFlags))
 
 	// Step 2: Get SQE slot and copy our prepared SQE into SQEs mapping
 	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
 	sqIndex := *sqTail & sqMask
 
-	// CRITICAL: Calculate SQE slot offset
+	// Calculate SQE slot offset
 	sqeSize := unsafe.Sizeof(*sqe)
 	if sqeSize != 128 {
-		logger.Error("CRITICAL: SQE size mismatch during submission", "size", sqeSize)
+		logger.Error("SQE size mismatch during submission", "size", sqeSize)
 	}
 	sqeSlot := unsafe.Add(r.sqesAddr, sqeSize*uintptr(sqIndex))
-	logger.Debug("SQE slot calculation", "index", sqIndex, "offset", sqeSize*uintptr(sqIndex), "sqeSize", sqeSize)
 
 	// Copy our SQE to the SQEs array
 	*(*sqe128)(sqeSlot) = *sqe
 
-	// CRITICAL: For URING_CMD, write control command directly to sqeSlot at byte 48
-	// This must be done AFTER the struct copy to avoid being overwritten
+	// For URING_CMD, write control command directly to sqeSlot at byte 48
 	if sqe.opcode == kernelUringCmdOpcode() {
-		// The control command needs to be at bytes 48-79 (starting at addr3)
-		// Extract the control command from the original sqe memory
+		// Extract and copy the control command
 		srcCmd := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
 		dstCmd := (*[32]byte)(unsafe.Pointer(uintptr(sqeSlot) + 48))
 		copy(dstCmd[:], srcCmd[:])
 	}
 
-	// Debug: Log the entire SQE as bytes to verify layout
-	sqeBytes := (*[128]byte)(unsafe.Pointer(sqeSlot))
-	logger.Debug("Full SQE bytes", "hex", fmt.Sprintf("%x", sqeBytes[:]))
-	logger.Debug("SQE offsets", "0-31", fmt.Sprintf("%x", sqeBytes[0:32]), "32-63", fmt.Sprintf("%x", sqeBytes[32:64]), "64-95", fmt.Sprintf("%x", sqeBytes[64:96]))
 
 	// Update array entry
 	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), uintptr(4*sqIndex))) = sqIndex
@@ -754,13 +714,9 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	// Another memory barrier after tail update
 	runtime.KeepAlive(sqTail)
 
-	logger.Info("*** ULTRA-THINK: Updated SQ tail", "old", oldTail, "new", newTail, "head", *sqHead)
+	logger.Debug("updated SQ tail", "old", oldTail, "new", newTail)
 
-	// Step 4: Try normal submit and wait for all commands
-	// The control structure fix might have resolved the START_DEV issue
-	logger.Info("*** ULTRA-THINK: Trying normal path for all commands")
-
-	// Normal path: submit and wait
+	// Submit and wait for completion
 	submitted, completed, errno := r.submitAndWaitRing(1, 1)
 	if errno != 0 {
 		logger.Error("io_uring_enter failed", "errno", errno, "submitted", submitted, "completed", completed)
@@ -786,7 +742,7 @@ func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted
 		flags = IORING_ENTER_GETEVENTS
 	}
 
-	logger.Debug("*** ULTRA-THINK: Calling io_uring_enter", "toSubmit", toSubmit, "minComplete", minComplete, "flags", flags)
+	logger.Debug("calling io_uring_enter", "toSubmit", toSubmit, "minComplete", minComplete, "flags", flags)
 
 	r1, r2, err := syscall.Syscall6(
 		unix.SYS_IO_URING_ENTER,
@@ -796,7 +752,7 @@ func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted
 		uintptr(flags),
 		0, 0)
 
-	logger.Debug("*** ULTRA-THINK: io_uring_enter returned", "r1", r1, "r2", r2, "err", err)
+	logger.Debug("io_uring_enter returned", "r1", r1, "r2", r2, "err", err)
 
 	return uint32(r1), uint32(r2), err
 }
@@ -846,7 +802,7 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	atomic.StoreUint32(sqTail, newTail)
 	runtime.KeepAlive(sqTail)
 
-	logger.Info("*** submitOnlyCmd: Updated SQ tail", "old", oldTail, "new", newTail)
+	logger.Debug("updated SQ tail", "old", oldTail, "new", newTail)
 
 	// Submit without waiting
 	submitted, errno := r.submitOnly(1)
