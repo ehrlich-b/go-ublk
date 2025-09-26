@@ -28,9 +28,14 @@ cleanup() {
     if [ -n "${TAIL_PID:-}" ]; then kill $TAIL_PID 2>/dev/null || true; fi
     if [ -n "${UBLK_PID:-}" ]; then
         sudo kill -SIGINT $UBLK_PID 2>/dev/null || true
-        wait $UBLK_PID 2>/dev/null || true
+        sleep 2
+        # Check if it's still running and force kill if needed
+        if kill -0 $UBLK_PID 2>/dev/null; then
+            echo "ublk-mem didn't exit cleanly, force killing..."
+            sudo kill -9 $UBLK_PID 2>/dev/null || true
+        fi
     fi
-    rm -f /tmp/test_data /tmp/read_back /tmp/ublk_mem.log
+    sudo rm -f /tmp/test_data /tmp/read_back /tmp/ublk_mem.log /tmp/pattern* /tmp/*multiblock* /tmp/file_reference /tmp/regular_file_test 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -221,6 +226,11 @@ dd if=/dev/urandom of=/tmp/pattern1 bs=512 count=2 2>/dev/null  # 1KB
 dd if=/dev/urandom of=/tmp/pattern2 bs=512 count=4 2>/dev/null  # 2KB
 dd if=/dev/urandom of=/tmp/pattern3 bs=512 count=8 2>/dev/null  # 4KB
 
+# Initialize both reference file and ublk device with zeros to ensure identical starting state
+echo "Initializing reference file and ublk device with zeros..."
+dd if=/dev/zero of=/tmp/reference_multiblock bs=512 count=40 2>/dev/null
+sudo dd if=/dev/zero of="$DEVICE_BDEV" bs=512 count=40 2>/dev/null
+
 # Write patterns to different locations on both ublk and regular file
 echo "Writing patterns to different offsets..."
 # Pattern 1 at offset 0
@@ -249,6 +259,8 @@ echo "Multi-block ublk MD5:      $MULTI_UBLK_MD5"
 if [ "$MULTI_REF_MD5" != "$MULTI_UBLK_MD5" ]; then
     echo "❌ CRITICAL FAILURE: Multi-block data integrity failed!"
     echo "Scattered write/read operations have data corruption"
+    echo "Reference MD5: $MULTI_REF_MD5"
+    echo "Ublk MD5:      $MULTI_UBLK_MD5"
     exit 1
 fi
 

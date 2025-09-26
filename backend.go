@@ -16,24 +16,19 @@ import (
 func waitLive(devID uint32, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
-	// The sysfs path may not exist on all systems, so we'll just wait
-	// a bit and check if the block device appears
-	fmt.Printf("*** DEBUG: Waiting for device %d to become ready\n", devID)
-	time.Sleep(500 * time.Millisecond) // Give kernel time to process START_DEV
+	// Give kernel time to process START_DEV
+	time.Sleep(500 * time.Millisecond)
 
 	// Check if block device exists
 	blockPath := fmt.Sprintf("/dev/ublkb%d", devID)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(blockPath); err == nil {
-			fmt.Printf("*** DEBUG: Device %d is ready (block device exists)\n", devID)
 			return nil
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// If no block device after timeout, assume it's ready anyway
-	// (the queue runners will handle retries)
-	fmt.Printf("*** WARNING: Device %d block device not visible after %s, continuing anyway\n", devID, timeout)
+	// Device may still be functional even if not visible
 	return nil
 }
 
@@ -167,7 +162,6 @@ type Logger interface {
 //	params := ublk.DefaultParams(backend)
 //	device, err := ublk.CreateAndServe(context.Background(), params, nil)
 func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) (*Device, error) {
-	fmt.Printf("*** CRITICAL: CreateAndServe starting with new code\n")
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -222,15 +216,10 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		numQueues = 1 // Single queue for minimal implementation
 	}
 
-	// CRITICAL FIX: Queue runners must be started BEFORE START_DEV
+	// Initialize queue runners before START_DEV
 	// The kernel waits for initial FETCH_REQ commands from all queues
-	// before completing START_DEV. This matches the C implementation.
-
-	// STEP 1: Initialize queue runners
-	fmt.Printf("*** DEBUG: Creating %d queue runners\n", numQueues)
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
-		fmt.Printf("*** DEBUG: Creating queue runner %d\n", i)
 		runnerConfig := queue.Config{
 			DevID:   devID,
 			QueueID: uint16(i),
@@ -250,17 +239,11 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			ctrl.DeleteDevice(devID)
 			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
 		}
-		fmt.Printf("*** DEBUG: Queue runner %d created successfully\n", i)
 		device.runners[i] = runner
 	}
 
-	// STEP 2: Start queue runner goroutines BEFORE START_DEV
-	// The goroutines will just wait initially, similar to C threads
-	// CRITICAL: Start queue runners and have them submit FETCH_REQs BEFORE START_DEV
-	// This is the correct sequence according to ublk semantics
-	fmt.Printf("*** DEBUG: Starting queue runners to submit FETCH_REQs BEFORE START_DEV\n")
+	// Start queue runners and submit FETCH_REQs before START_DEV
 	for i := 0; i < numQueues; i++ {
-		// Start the runner which will immediately submit all FETCH_REQs for its tags
 		if err := device.runners[i].Start(); err != nil {
 			for j := 0; j < len(device.runners); j++ {
 				if device.runners[j] != nil {
@@ -270,16 +253,13 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			ctrl.DeleteDevice(devID)
 			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
 		}
-		fmt.Printf("*** DEBUG: Queue runner %d started and FETCH_REQs submitted\n", i)
 	}
 
-	// CRITICAL: Give kernel time to see all FETCH_REQs
-	fmt.Printf("*** DEBUG: Waiting for kernel to see all FETCH_REQs\n")
+	// Give kernel time to see FETCH_REQs
 	time.Sleep(100 * time.Millisecond)
 
-	// STEP 3: NOW submit START_DEV (after FETCH_REQs are in place)
-	fmt.Printf("*** CRITICAL: Submitting START_DEV AFTER FETCH_REQs are posted\n")
-	err = ctrl.StartDevice(devID) // Use synchronous version
+	// Submit START_DEV after FETCH_REQs are in place
+	err = ctrl.StartDevice(devID)
 	if err != nil {
 		for j := 0; j < len(device.runners); j++ {
 			if device.runners[j] != nil {
@@ -288,17 +268,6 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		}
 		ctrl.DeleteDevice(devID)
 		return nil, fmt.Errorf("failed to START_DEV: %v", err)
-	}
-
-	// STEP 4: Device should now be LIVE
-	fmt.Printf("*** SUCCESS: START_DEV completed, device should be LIVE\n")
-
-	// Check if the block device appears
-	devicePath := fmt.Sprintf("/dev/ublkb%d", devID)
-	if _, err := os.Stat(devicePath); err == nil {
-		fmt.Printf("*** SUCCESS: Device %s created!\n", devicePath)
-	} else {
-		fmt.Printf("*** WARNING: Device %s not yet visible, but state is LIVE\n", devicePath)
 	}
 
 	device.started = true
