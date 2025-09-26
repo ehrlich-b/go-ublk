@@ -53,17 +53,17 @@ type UblksrvCtrlDevInfo struct {
 // Compile-time size check - 64 bytes as per kernel 6.6+
 var _ [64]byte = [unsafe.Sizeof(UblksrvCtrlDevInfo{})]byte{}
 
-// UblksrvIODesc describes each I/O operation (stored in shared memory)
+// UblksrvIODesc describes each I/O operation (stored in shared memory).
+// Layout must match Linux's struct ublksrv_io_desc exactly (24 bytes).
 type UblksrvIODesc struct {
-	OpFlags     uint32  // op: bits 0-7, flags: bits 8-31
-	NrSectors   uint32  // number of sectors (or nr_zones for REPORT_ZONES)
-	StartSector uint64  // starting sector
-	Addr        uint64  // buffer address in userspace
-	_           [8]byte // padding to reach 32 bytes
+	OpFlags     uint32 // op: bits 0-7, flags: bits 8-31
+	NrSectors   uint32 // number of sectors (or nr_zones for REPORT_ZONES)
+	StartSector uint64 // starting sector
+	Addr        uint64 // buffer address in userspace
 }
 
-// Compile-time size check
-var _ [32]byte = [unsafe.Sizeof(UblksrvIODesc{})]byte{}
+// Compile-time size check - kernel struct is 24 bytes.
+var _ [24]byte = [unsafe.Sizeof(UblksrvIODesc{})]byte{}
 
 // GetOp extracts the operation code from OpFlags
 func (d *UblksrvIODesc) GetOp() uint8 {

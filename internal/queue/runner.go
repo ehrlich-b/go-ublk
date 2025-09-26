@@ -32,17 +32,17 @@ const (
 
 // Runner handles I/O for a single ublk queue
 type Runner struct {
-	devID      uint32
-	queueID    uint16
-	depth      int
-	backend    interfaces.Backend
-	charFd     int
-	ring       uring.Ring
-	descPtr    uintptr // mmap'd descriptor array
-	bufPtr     uintptr // I/O buffer base
-	ctx        context.Context
-	cancel     context.CancelFunc
-	logger     Logger
+	devID   uint32
+	queueID uint16
+	depth   int
+	backend interfaces.Backend
+	charFd  int
+	ring    uring.Ring
+	descPtr uintptr // mmap'd descriptor array
+	bufPtr  uintptr // I/O buffer base
+	ctx     context.Context
+	cancel  context.CancelFunc
+	logger  Logger
 	// Per-tag state tracking for proper serialization
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
@@ -287,9 +287,9 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	}
 
 	// Encode FETCH operation in userData
-	userData := udOpFetch | (uint64(r.queueID)<<16) | uint64(tag)
+	userData := udOpFetch | (uint64(r.queueID) << 16) | uint64(tag)
 	// CRITICAL: Use the new IOCTL-encoded command (UBLK_U_IO_FETCH_REQ), not the legacy raw value!
-	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)  // This creates UBLK_U_IO_FETCH_REQ
+	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ) // This creates UBLK_U_IO_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
 		return err
@@ -641,7 +641,10 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 // submitCommitAndFetch submits COMMIT_AND_FETCH_REQ with proper state tracking
 func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
+	// Tag mutex MUST already be held by caller. This is invoked from handleCompletion()
+	// while the tag lock is held, so taking it again would deadlock.
 	fmt.Printf("[DEBUG] submitCommitAndFetch: Starting for tag=%d\n", tag)
+
 	// Calculate result: bytes processed for success, negative errno for error
 	// Always set result = nr_sectors << 9 (nr_sectors * 512) as per expert guidance
 	result := int32(desc.NrSectors) << 9 // Success: return bytes processed
@@ -652,10 +655,6 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 		}
 	}
 	fmt.Printf("[DEBUG] submitCommitAndFetch: Calculated result=%d\n", result)
-
-	// Guard against double submission
-	r.tagMutexes[tag].Lock()
-	defer r.tagMutexes[tag].Unlock()
 
 	// Only submit if we're in Owned state
 	if r.tagStates[tag] != TagStateOwned {
@@ -674,9 +673,9 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	}
 
 	// Encode COMMIT operation in userData
-	userData := udOpCommit | (uint64(r.queueID)<<16) | uint64(tag)
+	userData := udOpCommit | (uint64(r.queueID) << 16) | uint64(tag)
 	// CRITICAL: Use the new IOCTL-encoded command (UBLK_U_IO_COMMIT_AND_FETCH_REQ), not the legacy raw value!
-	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ)  // This creates UBLK_U_IO_COMMIT_AND_FETCH_REQ
+	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ) // This creates UBLK_U_IO_COMMIT_AND_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
 		return fmt.Errorf("COMMIT_AND_FETCH_REQ failed: %w", err)
@@ -712,12 +711,12 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 	// The kernel writes to descriptors internally, userspace only reads
 	descPtr, _, errno := syscall.Syscall6(
 		syscall.SYS_MMAP,
-		0,                                     // addr
-		uintptr(descSize),                     // length (page-rounded)
-		syscall.PROT_READ,                     // prot - READ ONLY from userspace!
+		0,                 // addr
+		uintptr(descSize), // length (page-rounded)
+		syscall.PROT_READ, // prot - READ ONLY from userspace!
 		syscall.MAP_SHARED|syscall.MAP_POPULATE, // flags - populate to avoid page faults
-		uintptr(fd),        // fd
-		mmapOffset,         // CRITICAL: per-queue offset!
+		uintptr(fd), // fd
+		mmapOffset,  // CRITICAL: per-queue offset!
 	)
 	if errno != 0 {
 		return 0, 0, fmt.Errorf("failed to mmap descriptor array: %v", errno)
