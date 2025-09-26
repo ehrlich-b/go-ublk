@@ -45,6 +45,9 @@ func NewController() (*Controller, error) {
 	return &Controller{
 		controlFd: fd,
 		ring:      ring,
+		// Modern kernels expect ioctl-encoded control commands. Default to true
+		// so STOP/DEL issued by a fresh controller use the same encoding path.
+		useIoctl: true,
 	}, nil
 }
 
