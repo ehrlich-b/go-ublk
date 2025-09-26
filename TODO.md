@@ -61,33 +61,64 @@
 
 ### Graceful Shutdown (FIXED ✅)
 - **Issue**: WaitForCompletion blocked indefinitely, preventing clean exit on SIGINT
-- **Solution**: Added 1-second timeout for StopAndDelete cleanup
-- **Result**: Process now exits cleanly on SIGINT/SIGTERM
+- **Solution**: Cancel context first, then close queue runners, then STOP_DEV/DELETE_DEV
+- **Result**: Process now exits cleanly on SIGINT/SIGTERM without timeout needed
 
-## Next Phase: Production Polish
+## Next Phase: Production-Grade Library (Informed by Peer Review)
 
-### HIGH PRIORITY:
-1. **Error Handling & Recovery**
-   - Robust error handling for all failure modes
-   - Connection loss recovery
-   - Resource cleanup on errors
-   - Proper error propagation to users
+**STRATEGIC INSIGHT**: We're at an inflection point from "working prototype" to "production-grade library". The core functionality is solid, but we need deliberate API hardening, observability, and safety improvements.
 
-### MEDIUM PRIORITY:
-4. **Multi-Queue Support**
-   - Currently single queue only
+### SHORT-TERM: API Stability & Foundation (1-2 weeks)
+1. **Structured Error Handling**
+   - Replace plain string errors with structured UblkError type
+   - Add errno mapping and errors.Is/As support
+   - Provide actionable error diagnostics for callers
+
+2. **API Lifecycle Separation**
+   - Replace monolithic CreateAndServe with staged lifecycle
+   - `Create()` → `Start()` → `Stop()` pattern for better control
+   - Enable validation, dry-run, deferred start scenarios
+
+3. **Testing Foundation**
+   - Add unit tests for queue state machine (success + error injection)
+   - Add race detector CI job and staticcheck
+   - Remove duplicate iouring.go.disabled file to prevent divergence
+
+4. **Basic Observability**
+   - Add atomic counters: ops/sec, bytes/sec, error counts
+   - Provide metrics export interface (prepare for Prometheus)
+
+### MEDIUM-TERM: Scalability & Production Features (2-5 weeks)
+5. **Multi-Queue Scaling**
+   - Currently single queue limits throughput ceiling
    - Add CPU affinity and NUMA awareness
-   - Benchmark scaling characteristics
+   - Benchmark linear scaling characteristics
 
-5. **Advanced Features**
-   - Discard/TRIM support
-   - Write zeroes optimization
-   - Flush/FUA handling
+6. **Memory & Performance Optimization**
+   - Buffer pool to eliminate >64KB dynamic allocation path
+   - Reduce per-request syscall overhead
+   - Add asynchronous backend operation interface
 
-6. **Library API Polish**
-   - Clean up public API surface
-   - Add comprehensive examples
-   - Improve documentation
+7. **Feature Completeness**
+   - Implement NEED_GET_DATA path for kernel compatibility
+   - Enhanced Discard/TRIM and Write Zeroes support
+   - Robust Flush/FUA handling with batching
+
+8. **Safety & Robustness**
+   - Add invariant assertions around unsafe memory operations
+   - Implement "paranoid mode" with strict validation
+   - Fuzzing for UAPI marshal/unmarshal paths
+
+### LONG-TERM: Advanced Performance (5+ weeks)
+9. **Advanced Optimization**
+   - Adaptive queue depth based on latency feedback
+   - Zero-copy enhancements with registered buffers
+   - NUMA-aware memory allocation
+
+10. **Benchmarking & Validation**
+    - Comparative benchmarks vs loop device, NBD, FUSE
+    - Automated regression detection
+    - Performance tuning documentation
 
 ### Testing Commands:
 ```bash
@@ -100,24 +131,58 @@ make vm-perf        # TODO: implement
 make vm-compare     # TODO: vs loop device
 ```
 
+## Peer Review Key Insights (2025-09-26)
+
+**ARCHITECTURE VALIDATION**: Peer review confirms our layered design is strong:
+- Clean separation: control plane, queue runner, io_uring abstraction, protocol structs
+- Correct SQE128/command area handling (critical past pitfalls now fixed)
+- Deterministic queue tag state machine preventing race conditions
+
+**CRITICAL API ISSUES IDENTIFIED**:
+- Single `CreateAndServe` API conflates creation + start; needs staged lifecycle
+- Missing device error state reporting to callers (no error channels)
+- Large `DeviceParams` struct will break API when adding features
+- Plain string errors lack structured errno mapping for actionable diagnostics
+
+**MISSING PRODUCTION ESSENTIALS**:
+- No observability: missing I/O counters, latency metrics, error rates
+- Limited error taxonomy: no `errors.Is/As` support or kernel errno mapping
+- Testing gaps: queue state machine lacks unit tests, no race detection
+- Safety concerns: extensive unsafe code without guard rails or fuzzing
+
+**PERFORMANCE BOTTLENECKS**:
+- Single queue limits scaling to multiple cores
+- Fixed 64KB buffers trigger dynamic allocation for large I/O
+- Synchronous per-request processing prevents overlapped operations
+
+**IMMEDIATE QUICK WINS** (Ready to implement):
+- Remove duplicate `iouring.go.disabled` file
+- Fix README mock backend reference mismatch
+- Add structured error type with errno mapping
+- Introduce basic atomic counters for ops/bytes/errors
+- Add queue state machine unit tests
+- Consolidate logging interfaces
+
 ## Current Status: **FUNCTIONAL PROTOTYPE WITH EXCELLENT PERFORMANCE**
-The core ublk implementation is fully functional with excellent performance and verified data integrity. Suitable for development and testing use with opportunities for further polish and optimization.
+The core ublk implementation is fully functional with excellent performance and verified data integrity. Strategic investment in API ergonomics, observability, and safety will prevent costly refactors and accelerate adoption.
 
-## CRITICAL: Library API Issues Identified (2025-09-25)
+## 🚨 CRITICAL PERFORMANCE BUG: Slow Device Initialization
 
-**From Go Expert Review - these affect library usability:**
+**Issue**: Device initialization takes 8-10 seconds for 256MB devices (should be instant)
+- 16MB device: ~1 second to initialize ✅
+- 256MB device: ~8-10 seconds to initialize ❌ (UNACCEPTABLE)
+- Root cause: We're doing something very inefficient during startup
+- Impact: Makes benchmarking and real usage painful
 
-### HIGH PRIORITY API Issues:
-1. **Public API Inconsistency**: Backend interfaces are re-exported from internal packages, creating confusing import patterns
-2. **No Testing Support**: MockBackend is private - users can't easily unit test code that uses go-ublk
-3. **Missing Device Inspection**: No way to check device state, get metrics, or inspect running devices
-4. **Poor Resource Control**: All-or-nothing CreateAndServe - users need separated Create/Start lifecycle
-5. **Shutdown Issue**: `WaitForCompletion(0)` blocks indefinitely, preventing graceful shutdown
+**Benchmark Results (2025-09-26)** - After fixing wait time:
+- **4K Random Read (QD=1)**: 63.4k IOPS, 248 MB/s
+- **4K Random Read (QD=32)**: 62.7k IOPS, 245 MB/s
+- **4K Random Write (QD=1)**: 51.8k IOPS, 202 MB/s
+- **128K Sequential Read**: 9,463 IOPS, 1,183 MB/s
+- **Mixed 70/30 R/W**: 81k read IOPS, 34.7k write IOPS
 
-### MEDIUM PRIORITY:
-6. **Configuration Sprawl**: 25+ field DeviceParams struct - needs functional options pattern
-7. **Error Handling**: Custom UblkError type lacks errors.Is/As support and error codes
-8. **No Observability**: Missing I/O statistics, performance metrics, error rates
+Performance is good once running, but startup time is a critical bug that needs immediate attention.
+
 
 ## Historical Debug Information (RESOLVED)
 

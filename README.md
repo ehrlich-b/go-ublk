@@ -43,7 +43,7 @@ sudo mount /dev/ublkb0 /mnt
 # ... use the filesystem ...
 sudo umount /mnt
 
-# Stop with Ctrl+C - device will be cleaned up automatically
+# Stop with Ctrl+C - exits cleanly with proper device cleanup
 ```
 
 ### File-backed Device (Loop Device Alternative)
@@ -160,10 +160,10 @@ var (
 
 ## Testing Your Code
 
-The library provides `ublk.MockBackend` for easy unit testing:
+The library provides `ublk.NewMockBackend()` for easy unit testing:
 
 ```go
-package myapp
+package myapp_test
 
 import (
     "testing"
@@ -182,9 +182,12 @@ func TestMyFunction(t *testing.T) {
         t.Error("Expected flush to be called")
     }
 
-    stats := backend.CallCounts()
-    if stats["read"] != 2 {
-        t.Errorf("Expected 2 reads, got %d", stats["read"])
+    // Check call statistics if your backend implements StatBackend
+    if statBackend, ok := backend.(ublk.StatBackend); ok {
+        stats := statBackend.Stats()
+        if readCalls := stats["read_calls"].(int); readCalls != 2 {
+            t.Errorf("Expected 2 read calls, got %d", readCalls)
+        }
     }
 }
 ```

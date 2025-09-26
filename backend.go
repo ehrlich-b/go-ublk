@@ -58,6 +58,10 @@ type Device struct {
 	blockSize int
 	started   bool
 	runners   []*queue.Runner
+
+	// Metrics and observability
+	metrics  *Metrics
+	observer Observer
 }
 
 // DeviceParams contains parameters for creating a ublk device
@@ -134,6 +138,9 @@ type Options struct {
 
 	// Logger for debug/info messages (if nil, no logging)
 	Logger Logger
+
+	// Observer for metrics collection (if nil, uses no-op observer)
+	Observer Observer
 }
 
 // Logger interface is now defined in interfaces.go
@@ -187,6 +194,16 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		return nil, fmt.Errorf("failed to set parameters: %v", err)
 	}
 
+	// Initialize metrics and observer
+	metrics := NewMetrics()
+	var observer Observer = &NoOpObserver{}
+	if options.Observer != nil {
+		observer = options.Observer
+	} else {
+		// Default to metrics observer if no custom observer provided
+		observer = NewMetricsObserver(metrics)
+	}
+
 	// Create Device struct
 	device := &Device{
 		ID:        devID,
@@ -197,6 +214,8 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		depth:     params.QueueDepth,
 		blockSize: params.LogicalBlockSize,
 		started:   false, // Not started yet
+		metrics:   metrics,
+		observer:  observer,
 	}
 
 	device.ctx, device.cancel = context.WithCancel(ctx)
@@ -380,6 +399,22 @@ func (d *Device) Info() DeviceInfo {
 	}
 }
 
+// Metrics returns the current metrics for the device
+func (d *Device) Metrics() *Metrics {
+	if d == nil {
+		return nil
+	}
+	return d.metrics
+}
+
+// MetricsSnapshot returns a point-in-time snapshot of device metrics
+func (d *Device) MetricsSnapshot() MetricsSnapshot {
+	if d == nil || d.metrics == nil {
+		return MetricsSnapshot{}
+	}
+	return d.metrics.Snapshot()
+}
+
 // StopAndDelete stops the device and removes it from the system.
 // This should be called to cleanly shut down a ublk device.
 func StopAndDelete(ctx context.Context, device *Device) error {
@@ -390,6 +425,11 @@ func StopAndDelete(ctx context.Context, device *Device) error {
 	// Cancel context first to signal all goroutines to stop
 	if device.cancel != nil {
 		device.cancel()
+	}
+
+	// Mark metrics as stopped
+	if device.metrics != nil {
+		device.metrics.Stop()
 	}
 
 	// Give goroutines a moment to see the cancellation
@@ -464,19 +504,4 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	return ctrlParams
 }
 
-// Error definitions
-type UblkError string
-
-func (e UblkError) Error() string {
-	return string(e)
-}
-
-const (
-	ErrNotImplemented     UblkError = "not implemented"
-	ErrDeviceNotFound     UblkError = "device not found"
-	ErrDeviceBusy         UblkError = "device busy"
-	ErrInvalidParameters  UblkError = "invalid parameters"
-	ErrKernelNotSupported UblkError = "kernel does not support ublk"
-	ErrPermissionDenied   UblkError = "permission denied"
-	ErrInsufficientMemory UblkError = "insufficient memory"
-)
+// Error definitions moved to errors.go

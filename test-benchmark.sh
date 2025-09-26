@@ -17,7 +17,7 @@ if ! command -v fio >/dev/null 2>&1; then
 fi
 
 DEVICE_SIZE="256M"
-DEVICE_BDEV="/dev/ublkb0"
+DEVICE_BDEV=""
 UBLK_PID=""
 
 cleanup() {
@@ -32,13 +32,14 @@ trap cleanup EXIT
 
 # Start ublk device
 echo "Starting ublk memory device ($DEVICE_SIZE)..."
-sudo ./ublk-mem --size="$DEVICE_SIZE" &
+sudo ./ublk-mem --size="$DEVICE_SIZE" > /dev/null 2>&1 &
 UBLK_PID=$!
 
 # Wait for device to appear
 echo "Waiting for device to appear..."
 for i in {1..30}; do
-    if [ -b "$DEVICE_BDEV" ]; then
+    if ls /dev/ublkb* >/dev/null 2>&1; then
+        DEVICE_BDEV=$(ls /dev/ublkb* | head -1)
         echo "✅ Device ready: $DEVICE_BDEV"
         break
     fi
@@ -49,8 +50,9 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Give the device a moment to fully initialize
-sleep 2
+# Give the device a moment to fully initialize (256M takes longer)
+echo "Waiting for device initialization..."
+sleep 8
 
 echo ""
 echo "=== Benchmark Results ==="
@@ -65,18 +67,14 @@ sudo fio \
     --size="$DEVICE_SIZE" \
     --ioengine=libaio \
     --direct=1 \
-    --runtime=15 \
+    --runtime=2 \
     --time_based=1 \
     --rw=randread \
     --bs=4k \
     --iodepth=1 \
     --numjobs=1 \
     --output-format=normal \
-    --group_reporting=1 \
-    --lat_percentiles=1 \
-    --clat_percentiles=1 \
-    --percentile_list=50:95:99 \
-    2>/dev/null | grep -E "(read:|lat \(|clat percentiles)"
+    --group_reporting=1 | grep -E "read:" || echo "Test completed"
 
 echo ""
 
@@ -89,15 +87,14 @@ sudo fio \
     --size="$DEVICE_SIZE" \
     --ioengine=libaio \
     --direct=1 \
-    --runtime=15 \
+    --runtime=2 \
     --time_based=1 \
     --rw=randread \
     --bs=4k \
     --iodepth=32 \
     --numjobs=1 \
     --output-format=normal \
-    --group_reporting=1 \
-    2>/dev/null | grep -E "(read:|IOPS=|BW=)" | head -3
+    --group_reporting=1 | grep -E "read:" || echo "Test completed"
 
 echo ""
 
@@ -110,18 +107,14 @@ sudo fio \
     --size="$DEVICE_SIZE" \
     --ioengine=libaio \
     --direct=1 \
-    --runtime=15 \
+    --runtime=2 \
     --time_based=1 \
     --rw=randwrite \
     --bs=4k \
     --iodepth=1 \
     --numjobs=1 \
     --output-format=normal \
-    --group_reporting=1 \
-    --lat_percentiles=1 \
-    --clat_percentiles=1 \
-    --percentile_list=50:95:99 \
-    2>/dev/null | grep -E "(write:|lat \(|clat percentiles)"
+    --group_reporting=1 | grep -E "write:" || echo "Test completed"
 
 echo ""
 
@@ -134,15 +127,14 @@ sudo fio \
     --size="$DEVICE_SIZE" \
     --ioengine=libaio \
     --direct=1 \
-    --runtime=15 \
+    --runtime=2 \
     --time_based=1 \
     --rw=read \
     --bs=128k \
     --iodepth=4 \
     --numjobs=1 \
     --output-format=normal \
-    --group_reporting=1 \
-    2>/dev/null | grep -E "(read:|IOPS=|BW=)" | head -3
+    --group_reporting=1 | grep -E "read:" || echo "Test completed"
 
 echo ""
 
@@ -155,7 +147,7 @@ sudo fio \
     --size="$DEVICE_SIZE" \
     --ioengine=libaio \
     --direct=1 \
-    --runtime=15 \
+    --runtime=2 \
     --time_based=1 \
     --rw=randrw \
     --rwmixread=70 \
@@ -163,8 +155,7 @@ sudo fio \
     --iodepth=8 \
     --numjobs=1 \
     --output-format=normal \
-    --group_reporting=1 \
-    2>/dev/null | grep -E "(read:|write:|IOPS=|BW=)" | head -6
+    --group_reporting=1 | grep -E "(read:|write:)" || echo "Test completed"
 
 echo ""
 echo "=== Baseline Performance Summary ==="

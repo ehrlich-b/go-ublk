@@ -43,23 +43,19 @@ type Runner struct {
 	bufPtr  uintptr // I/O buffer base
 	ctx     context.Context
 	cancel  context.CancelFunc
-	logger  Logger
+	logger  interfaces.Logger
 	// Per-tag state tracking for proper serialization
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
 }
 
-type Logger interface {
-	Printf(format string, args ...interface{})
-	Debugf(format string, args ...interface{})
-}
 
 type Config struct {
 	DevID   uint32
 	QueueID uint16
 	Depth   int
 	Backend interfaces.Backend
-	Logger  Logger
+	Logger  interfaces.Logger
 }
 
 // NewRunner creates a new queue runner

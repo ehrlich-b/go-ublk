@@ -92,3 +92,9 @@ type ResizeBackend interface {
 	// If the new size is larger, the new space should read as zeros.
 	Resize(newSize int64) error
 }
+
+// Logger interface for optional logging
+type Logger interface {
+	Printf(format string, args ...interface{})
+	Debugf(format string, args ...interface{})
+}

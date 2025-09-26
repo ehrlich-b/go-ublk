@@ -438,5 +438,17 @@ vm-simple-e2e: ublk-mem vm-copy
 	  echo "=== FINAL DMESG ===" && \
 	  ./vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
 
+# FIO test to debug Direct I/O vs Buffered I/O issue
+vm-fio-simple-e2e: ublk-mem vm-copy
+	@echo "🧪 Running FIO debug test (buffered vs direct I/O)..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-fio-simple-e2e.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
+	@echo "Test will timeout after 60 seconds if hanging..."
+	@timeout 60 ./vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-fio-simple-e2e.sh && ./vm-fio-simple-e2e.sh' || \
+	 (echo "❌ Overall test timed out - checking VM state..." && \
+	  echo "=== FINAL KERNEL TRACE ===" && \
+	  make kernel-trace && \
+	  echo "=== FINAL DMESG ===" && \
+	  ./vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
+
 # FORCE target to ensure rebuilds
 FORCE:
