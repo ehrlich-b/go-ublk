@@ -69,23 +69,19 @@ import (
     "log"
 
     "github.com/ehrlich-b/go-ublk"
-    "github.com/ehrlich-b/go-ublk/backend/mem"
+    "github.com/ehrlich-b/go-ublk/backend"
 )
 
 func main() {
     // Create a 512MB memory backend
-    backend := mem.New(512 << 20)
+    memBackend := backend.NewMemory(512 << 20)
+    defer memBackend.Close()
 
-    params := ublk.DeviceParams{
-        Backend:          backend,
-        LogicalBlockSize: 512,
-        QueueDepth:       128,
-        NumQueues:        1,
-    }
+    params := ublk.DefaultParams(memBackend)
+    params.QueueDepth = 128
+    params.NumQueues = 1
 
-    opts := &ublk.Options{
-        Logger: log.Default(),
-    }
+    opts := &ublk.Options{}
 
     ctx := context.Background()
     device, err := ublk.CreateAndServe(ctx, params, opts)
@@ -93,8 +89,11 @@ func main() {
         log.Fatal(err)
     }
 
-    log.Printf("Device created: %s", device.BlockPath())
-    log.Printf("Character device: %s", device.CharPath())
+    // Inspect device state
+    info := device.Info()
+    log.Printf("Device created: %s (ID: %d)", info.BlockPath, info.ID)
+    log.Printf("State: %s, Queues: %d, Size: %d bytes",
+               info.State, info.NumQueues, info.Size)
 
     // Block until context is cancelled or signal received
     <-ctx.Done()
@@ -106,33 +105,87 @@ func main() {
 ## Implementing Custom Backends
 
 ```go
+package main
+
+import "github.com/ehrlich-b/go-ublk"
+
 type MyBackend struct {
     // your fields
 }
 
+// Implement required Backend interface
 func (b *MyBackend) ReadAt(p []byte, off int64) (int, error) {
     // Read data into p from offset off
+    return 0, nil
 }
 
 func (b *MyBackend) WriteAt(p []byte, off int64) (int, error) {
     // Write data from p at offset off
-}
-
-func (b *MyBackend) Flush() error {
-    // Persist any cached writes
-}
-
-func (b *MyBackend) Trim(off, length int64) error {
-    // Optional: handle discard/trim
-    return nil
+    return len(p), nil
 }
 
 func (b *MyBackend) Size() int64 {
     // Return total size in bytes
+    return 1024 * 1024 * 1024 // 1GB
 }
 
 func (b *MyBackend) Close() error {
     // Cleanup resources
+    return nil
+}
+
+func (b *MyBackend) Flush() error {
+    // Persist any cached writes
+    return nil
+}
+
+// Implement optional interfaces for better performance
+func (b *MyBackend) Discard(offset, length int64) error {
+    // Handle TRIM/discard operations
+    return nil
+}
+
+func (b *MyBackend) Sync() error {
+    // Synchronize to stable storage
+    return nil
+}
+
+// Compile-time interface checks
+var (
+    _ ublk.Backend        = (*MyBackend)(nil)
+    _ ublk.DiscardBackend = (*MyBackend)(nil)
+    _ ublk.SyncBackend    = (*MyBackend)(nil)
+)
+```
+
+## Testing Your Code
+
+The library provides `ublk.MockBackend` for easy unit testing:
+
+```go
+package myapp
+
+import (
+    "testing"
+    "github.com/ehrlich-b/go-ublk"
+)
+
+func TestMyFunction(t *testing.T) {
+    // Create a mock backend for testing
+    backend := ublk.NewMockBackend(1024) // 1KB
+
+    // Use it in your code
+    result := myFunctionThatUsesUblk(backend)
+
+    // Verify behavior
+    if !backend.IsFlushed() {
+        t.Error("Expected flush to be called")
+    }
+
+    stats := backend.CallCounts()
+    if stats["read"] != 2 {
+        t.Errorf("Expected 2 reads, got %d", stats["read"])
+    }
 }
 ```
 

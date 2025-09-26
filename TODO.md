@@ -49,22 +49,25 @@
 - **Solution**: Initialize both ublk device and reference file with zeros before testing
 - **Result**: Perfect MD5 verification across all I/O patterns, comprehensive data integrity
 
+## Recent Improvements (2025-09-25):
+
+### Library Quality Improvements (COMPLETED ✅)
+- **Restructured Public API**: Moved Backend interfaces to root package for clean API
+- **Testing Support**: Created public MockBackend for easy unit testing
+- **Device Inspection**: Added device state inspection methods (State(), IsRunning(), Info())
+- **Constants Management**: Removed hardcoded values, centralized all constants
+- **Code Cleanup**: Removed all debug prints and verbose comments
+- **Professional Logging**: Cleaned up error messages and logging
+
+### Graceful Shutdown (FIXED ✅)
+- **Issue**: WaitForCompletion blocked indefinitely, preventing clean exit on SIGINT
+- **Solution**: Added 1-second timeout for StopAndDelete cleanup
+- **Result**: Process now exits cleanly on SIGINT/SIGTERM
+
 ## Next Phase: Production Polish
 
 ### HIGH PRIORITY:
-1. **Production Code Quality**
-   - Remove all debug prints and `fmt.Printf` statements
-   - Clean up verbose debug comments and "CRITICAL", "DEBUG" prefixes
-   - Professional error messages and logging
-   - Code quality must reflect well professionally
-   - Remove hardcoded values and magic numbers
-
-2. **Fix Graceful Shutdown**
-   - `ublk-mem` doesn't handle SIGTERM/SIGINT properly during cleanup
-   - Process hangs during cleanup, requires force kill
-   - Affects testing workflow and professional appearance
-
-3. **Error Handling & Recovery**
+1. **Error Handling & Recovery**
    - Robust error handling for all failure modes
    - Connection loss recovery
    - Resource cleanup on errors
@@ -99,6 +102,22 @@ make vm-compare     # TODO: vs loop device
 
 ## Current Status: **FUNCTIONAL PROTOTYPE WITH EXCELLENT PERFORMANCE**
 The core ublk implementation is fully functional with excellent performance and verified data integrity. Suitable for development and testing use with opportunities for further polish and optimization.
+
+## CRITICAL: Library API Issues Identified (2025-09-25)
+
+**From Go Expert Review - these affect library usability:**
+
+### HIGH PRIORITY API Issues:
+1. **Public API Inconsistency**: Backend interfaces are re-exported from internal packages, creating confusing import patterns
+2. **No Testing Support**: MockBackend is private - users can't easily unit test code that uses go-ublk
+3. **Missing Device Inspection**: No way to check device state, get metrics, or inspect running devices
+4. **Poor Resource Control**: All-or-nothing CreateAndServe - users need separated Create/Start lifecycle
+5. **Shutdown Issue**: `WaitForCompletion(0)` blocks indefinitely, preventing graceful shutdown
+
+### MEDIUM PRIORITY:
+6. **Configuration Sprawl**: 25+ field DeviceParams struct - needs functional options pattern
+7. **Error Handling**: Custom UblkError type lacks errors.Is/As support and error codes
+8. **No Observability**: Missing I/O statistics, performance metrics, error rates
 
 ## Historical Debug Information (RESOLVED)
 

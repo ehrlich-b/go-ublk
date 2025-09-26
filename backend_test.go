@@ -1,128 +1,14 @@
 package ublk
 
 import (
+	"context"
 	"testing"
 )
 
-// Mock backend for testing
-type mockBackend struct {
-	data     []byte
-	size     int64
-	closed   bool
-	flushed  bool
-	synced   bool
-	stats    map[string]interface{}
-}
-
-func newMockBackend(size int64) *mockBackend {
-	return &mockBackend{
-		data:  make([]byte, size),
-		size:  size,
-		stats: make(map[string]interface{}),
-	}
-}
-
-func (m *mockBackend) ReadAt(p []byte, off int64) (int, error) {
-	if m.closed {
-		return 0, ErrDeviceNotFound
-	}
-
-	if off >= m.size {
-		return 0, nil
-	}
-
-	n := copy(p, m.data[off:])
-	return n, nil
-}
-
-func (m *mockBackend) WriteAt(p []byte, off int64) (int, error) {
-	if m.closed {
-		return 0, ErrDeviceNotFound
-	}
-
-	if off >= m.size {
-		return 0, ErrInvalidParameters
-	}
-
-	n := copy(m.data[off:], p)
-	return n, nil
-}
-
-func (m *mockBackend) Size() int64 {
-	return m.size
-}
-
-func (m *mockBackend) Close() error {
-	m.closed = true
-	return nil
-}
-
-func (m *mockBackend) Flush() error {
-	m.flushed = true
-	return nil
-}
-
-// Optional interfaces
-func (m *mockBackend) Discard(offset, length int64) error {
-	// Zero out the range
-	end := offset + length
-	if end > m.size {
-		end = m.size
-	}
-	for i := offset; i < end; i++ {
-		m.data[i] = 0
-	}
-	return nil
-}
-
-func (m *mockBackend) WriteZeroes(offset, length int64) error {
-	end := offset + length
-	if end > m.size {
-		end = m.size
-	}
-	for i := offset; i < end; i++ {
-		m.data[i] = 0
-	}
-	return nil
-}
-
-func (m *mockBackend) Sync() error {
-	m.synced = true
-	return nil
-}
-
-func (m *mockBackend) SyncRange(offset, length int64) error {
-	m.synced = true
-	return nil
-}
-
-func (m *mockBackend) Stats() map[string]interface{} {
-	m.stats["reads"] = 42
-	m.stats["writes"] = 24
-	return m.stats
-}
-
-func (m *mockBackend) Resize(newSize int64) error {
-	if newSize < 0 {
-		return ErrInvalidParameters
-	}
-
-	if newSize > m.size {
-		// Expand
-		newData := make([]byte, newSize)
-		copy(newData, m.data)
-		m.data = newData
-	} else if newSize < m.size {
-		// Truncate
-		m.data = m.data[:newSize]
-	}
-
-	m.size = newSize
-	return nil
-}
+// Tests now use the public MockBackend from testing.go
 
 func TestMockBackend(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
 
 	// Test size
 	if backend.Size() != 1024 {
@@ -156,7 +42,7 @@ func TestMockBackend(t *testing.T) {
 	if err != nil {
 		t.Errorf("Flush failed: %v", err)
 	}
-	if !backend.flushed {
+	if !backend.IsFlushed() {
 		t.Error("backend not marked as flushed")
 	}
 
@@ -165,7 +51,7 @@ func TestMockBackend(t *testing.T) {
 	if err != nil {
 		t.Errorf("Close failed: %v", err)
 	}
-	if !backend.closed {
+	if !backend.IsClosed() {
 		t.Error("backend not marked as closed")
 	}
 
@@ -177,7 +63,7 @@ func TestMockBackend(t *testing.T) {
 }
 
 func TestDiscardBackend(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
 
 	// Write some data
 	testData := []byte("hello world")
@@ -212,7 +98,7 @@ func TestDiscardBackend(t *testing.T) {
 }
 
 func TestWriteZeroesBackend(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
 
 	// Write some data first
 	testData := []byte("hello world")
@@ -241,7 +127,7 @@ func TestWriteZeroesBackend(t *testing.T) {
 }
 
 func TestSyncBackend(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
 
 	// Check if backend supports sync
 	syncBackend, ok := Backend(backend).(SyncBackend)
@@ -254,25 +140,35 @@ func TestSyncBackend(t *testing.T) {
 	if err != nil {
 		t.Errorf("Sync failed: %v", err)
 	}
-	if !backend.synced {
+	if !backend.IsSynced() {
 		t.Error("backend not marked as synced")
 	}
 
 	// Reset sync flag
-	backend.synced = false
+	backend.Reset()
 
 	// Test sync range
 	err = syncBackend.SyncRange(0, 512)
 	if err != nil {
 		t.Errorf("SyncRange failed: %v", err)
 	}
-	if !backend.synced {
+	if !backend.IsSynced() {
 		t.Error("backend not marked as synced after SyncRange")
 	}
 }
 
 func TestStatBackend(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
+
+	// Set some custom stats
+	backend.SetCustomStats(map[string]interface{}{
+		"custom_stat": 42,
+	})
+
+	// Do some operations to generate call counts
+	backend.ReadAt(make([]byte, 10), 0)
+	backend.WriteAt([]byte("test"), 0)
+	backend.Flush()
 
 	// Check if backend supports stats
 	statBackend, ok := Backend(backend).(StatBackend)
@@ -286,17 +182,21 @@ func TestStatBackend(t *testing.T) {
 		t.Fatal("Stats() returned nil")
 	}
 
-	if reads, ok := stats["reads"].(int); !ok || reads != 42 {
-		t.Errorf("Expected reads=42, got %v", stats["reads"])
+	if customStat, ok := stats["custom_stat"].(int); !ok || customStat != 42 {
+		t.Errorf("Expected custom_stat=42, got %v", stats["custom_stat"])
 	}
 
-	if writes, ok := stats["writes"].(int); !ok || writes != 24 {
-		t.Errorf("Expected writes=24, got %v", stats["writes"])
+	if readCalls, ok := stats["read_calls"].(int); !ok || readCalls != 1 {
+		t.Errorf("Expected read_calls=1, got %v", stats["read_calls"])
+	}
+
+	if writeCalls, ok := stats["write_calls"].(int); !ok || writeCalls != 1 {
+		t.Errorf("Expected write_calls=1, got %v", stats["write_calls"])
 	}
 }
 
 func TestResizeBackend(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
 
 	// Check if backend supports resize
 	resizeBackend, ok := Backend(backend).(ResizeBackend)
@@ -330,27 +230,27 @@ func TestResizeBackend(t *testing.T) {
 }
 
 func TestDefaultParams(t *testing.T) {
-	backend := newMockBackend(1024)
+	backend := NewMockBackend(1024)
 	params := DefaultParams(backend)
 
 	if params.Backend != backend {
 		t.Error("Backend not set correctly")
 	}
 
-	if params.QueueDepth != 128 {
-		t.Errorf("QueueDepth = %d, want 128", params.QueueDepth)
+	if params.QueueDepth != DefaultQueueDepth {
+		t.Errorf("QueueDepth = %d, want %d", params.QueueDepth, DefaultQueueDepth)
 	}
 
-	if params.LogicalBlockSize != 512 {
-		t.Errorf("LogicalBlockSize = %d, want 512", params.LogicalBlockSize)
+	if params.LogicalBlockSize != DefaultLogicalBlockSize {
+		t.Errorf("LogicalBlockSize = %d, want %d", params.LogicalBlockSize, DefaultLogicalBlockSize)
 	}
 
-	if params.MaxIOSize != 1<<20 {
-		t.Errorf("MaxIOSize = %d, want %d", params.MaxIOSize, 1<<20)
+	if params.MaxIOSize != DefaultMaxIOSize {
+		t.Errorf("MaxIOSize = %d, want %d", params.MaxIOSize, DefaultMaxIOSize)
 	}
 
-	if params.DeviceID != -1 {
-		t.Errorf("DeviceID = %d, want -1", params.DeviceID)
+	if params.DeviceID != AutoAssignDeviceID {
+		t.Errorf("DeviceID = %d, want %d", params.DeviceID, AutoAssignDeviceID)
 	}
 
 	// Test boolean defaults
@@ -366,7 +266,7 @@ func TestDefaultParams(t *testing.T) {
 }
 
 func BenchmarkMockBackendRead(b *testing.B) {
-	backend := newMockBackend(1024 * 1024) // 1MB
+	backend := NewMockBackend(1024 * 1024) // 1MB
 	buf := make([]byte, 4096)               // 4KB reads
 
 	b.ResetTimer()
@@ -380,7 +280,7 @@ func BenchmarkMockBackendRead(b *testing.B) {
 }
 
 func BenchmarkMockBackendWrite(b *testing.B) {
-	backend := newMockBackend(1024 * 1024) // 1MB
+	backend := NewMockBackend(1024 * 1024) // 1MB
 	buf := make([]byte, 4096)               // 4KB writes
 	for i := range buf {
 		buf[i] = byte(i)
@@ -393,5 +293,87 @@ func BenchmarkMockBackendWrite(b *testing.B) {
 		if err != nil {
 			b.Fatalf("WriteAt failed: %v", err)
 		}
+	}
+}
+
+func TestDeviceStateInspection(t *testing.T) {
+	// Test nil device
+	var device *Device
+	if device.State() != DeviceStateStopped {
+		t.Error("Nil device should be in stopped state")
+	}
+	if device.IsRunning() {
+		t.Error("Nil device should not be running")
+	}
+
+	// Test device info for nil device
+	info := device.Info()
+	if info.State != "" {
+		t.Errorf("Nil device info should show empty state, got %s", info.State)
+	}
+}
+
+func TestDeviceInfo(t *testing.T) {
+	backend := NewMockBackend(1024 * 1024)
+	params := DefaultParams(backend)
+	params.QueueDepth = 64
+	params.NumQueues = 2
+
+	// Create a device struct manually for testing (since we can't actually create devices in unit tests)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	device := &Device{
+		ID:        5,
+		Path:      "/dev/ublkb5",
+		CharPath:  "/dev/ublkc5",
+		Backend:   backend,
+		queues:    params.NumQueues,
+		depth:     params.QueueDepth,
+		blockSize: params.LogicalBlockSize,
+		started:   true,
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+
+	// Test inspection methods
+	if device.DeviceID() != 5 {
+		t.Errorf("DeviceID() = %d, want 5", device.DeviceID())
+	}
+	if device.BlockPath() != "/dev/ublkb5" {
+		t.Errorf("BlockPath() = %s, want /dev/ublkb5", device.BlockPath())
+	}
+	if device.CharDevicePath() != "/dev/ublkc5" {
+		t.Errorf("CharDevicePath() = %s, want /dev/ublkc5", device.CharDevicePath())
+	}
+	if device.NumQueues() != 2 {
+		t.Errorf("NumQueues() = %d, want 2", device.NumQueues())
+	}
+	if device.QueueDepth() != 64 {
+		t.Errorf("QueueDepth() = %d, want 64", device.QueueDepth())
+	}
+	if device.BlockSize() != 512 {
+		t.Errorf("BlockSize() = %d, want 512", device.BlockSize())
+	}
+	if device.Size() != 1024*1024 {
+		t.Errorf("Size() = %d, want %d", device.Size(), 1024*1024)
+	}
+
+	// Test comprehensive info
+	info := device.Info()
+	if info.ID != 5 {
+		t.Errorf("Info.ID = %d, want 5", info.ID)
+	}
+	if info.BlockPath != "/dev/ublkb5" {
+		t.Errorf("Info.BlockPath = %s, want /dev/ublkb5", info.BlockPath)
+	}
+	if info.NumQueues != 2 {
+		t.Errorf("Info.NumQueues = %d, want 2", info.NumQueues)
+	}
+	if info.QueueDepth != 64 {
+		t.Errorf("Info.QueueDepth = %d, want 64", info.QueueDepth)
+	}
+	if info.Size != 1024*1024 {
+		t.Errorf("Info.Size = %d, want %d", info.Size, 1024*1024)
 	}
 }

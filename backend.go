@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/ctrl"
-	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/queue"
 )
 
@@ -17,7 +17,7 @@ func waitLive(devID uint32, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	// Give kernel time to process START_DEV
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(constants.DeviceStartupDelay)
 
 	// Check if block device exists
 	blockPath := fmt.Sprintf("/dev/ublkb%d", devID)
@@ -25,20 +25,14 @@ func waitLive(devID uint32, timeout time.Duration) error {
 		if _, err := os.Stat(blockPath); err == nil {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(constants.DevicePollingInterval)
 	}
 
 	// Device may still be functional even if not visible
 	return nil
 }
 
-// Re-export interfaces from internal package
-type Backend = interfaces.Backend
-type DiscardBackend = interfaces.DiscardBackend
-type WriteZeroesBackend = interfaces.WriteZeroesBackend
-type SyncBackend = interfaces.SyncBackend
-type StatBackend = interfaces.StatBackend
-type ResizeBackend = interfaces.ResizeBackend
+// Backend interfaces are now defined in interfaces.go
 
 // Device represents a ublk block device
 type Device struct {
@@ -106,10 +100,10 @@ type DeviceParams struct {
 func DefaultParams(backend Backend) DeviceParams {
 	return DeviceParams{
 		Backend:          backend,
-		QueueDepth:       128,
+		QueueDepth:       constants.DefaultQueueDepth,
 		NumQueues:        0, // 0 means auto-detect based on CPUs
-		LogicalBlockSize: 512,
-		MaxIOSize:        1 << 20, // 1MB
+		LogicalBlockSize: constants.DefaultLogicalBlockSize,
+		MaxIOSize:        constants.DefaultMaxIOSize,
 
 		// Sensible defaults
 		EnableZeroCopy:     false, // Requires 4K blocks
@@ -124,12 +118,12 @@ func DefaultParams(backend Backend) DeviceParams {
 		EnableFUA:     false,
 
 		// Discard defaults
-		DiscardAlignment:   4096,
-		DiscardGranularity: 4096,
-		MaxDiscardSectors:  0xffffffff,
-		MaxDiscardSegments: 256,
+		DiscardAlignment:   constants.DefaultDiscardAlignment,
+		DiscardGranularity: constants.DefaultDiscardGranularity,
+		MaxDiscardSectors:  constants.DefaultMaxDiscardSectors,
+		MaxDiscardSegments: constants.DefaultMaxDiscardSegments,
 
-		DeviceID: -1, // Auto-assign
+		DeviceID: constants.AutoAssignDeviceID,
 	}
 }
 
@@ -142,11 +136,7 @@ type Options struct {
 	Logger Logger
 }
 
-// Logger interface for optional logging
-type Logger interface {
-	Printf(format string, args ...interface{})
-	Debugf(format string, args ...interface{})
-}
+// Logger interface is now defined in interfaces.go
 
 // CreateAndServe creates a ublk device with the given parameters and starts serving I/O.
 // This is the main entry point for creating ublk devices.
@@ -256,7 +246,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	}
 
 	// Give kernel time to see FETCH_REQs
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(constants.QueueInitDelay)
 
 	// Submit START_DEV after FETCH_REQs are in place
 	err = ctrl.StartDevice(devID)
@@ -279,12 +269,131 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	return device, nil
 }
 
+// DeviceState represents the current state of a ublk device
+type DeviceState string
+
+const (
+	// DeviceStateCreated indicates the device has been created but not started
+	DeviceStateCreated DeviceState = "created"
+	// DeviceStateRunning indicates the device is actively serving I/O
+	DeviceStateRunning DeviceState = "running"
+	// DeviceStateStopped indicates the device has been stopped
+	DeviceStateStopped DeviceState = "stopped"
+)
+
+// State returns the current state of the device
+func (d *Device) State() DeviceState {
+	if d == nil {
+		return DeviceStateStopped
+	}
+
+	if !d.started {
+		return DeviceStateCreated
+	}
+
+	// Check if context is canceled (but only if context exists)
+	if d.ctx != nil {
+		select {
+		case <-d.ctx.Done():
+			return DeviceStateStopped
+		default:
+			return DeviceStateRunning
+		}
+	}
+
+	return DeviceStateRunning
+}
+
+// IsRunning returns true if the device is currently serving I/O
+func (d *Device) IsRunning() bool {
+	return d.State() == DeviceStateRunning
+}
+
+// NumQueues returns the number of I/O queues configured for this device
+func (d *Device) NumQueues() int {
+	return d.queues
+}
+
+// QueueDepth returns the queue depth configured for this device
+func (d *Device) QueueDepth() int {
+	return d.depth
+}
+
+// BlockSize returns the logical block size of this device
+func (d *Device) BlockSize() int {
+	return d.blockSize
+}
+
+// BlockPath returns the path to the block device (e.g., "/dev/ublkb0")
+func (d *Device) BlockPath() string {
+	return d.Path
+}
+
+// CharDevicePath returns the path to the character device (e.g., "/dev/ublkc0")
+func (d *Device) CharDevicePath() string {
+	return d.CharPath
+}
+
+// DeviceID returns the kernel-assigned device ID
+func (d *Device) DeviceID() uint32 {
+	return d.ID
+}
+
+// Size returns the size of the device in bytes
+func (d *Device) Size() int64 {
+	if d.Backend == nil {
+		return 0
+	}
+	return d.Backend.Size()
+}
+
+// DeviceInfo contains comprehensive information about a ublk device
+type DeviceInfo struct {
+	ID         uint32      `json:"id"`
+	BlockPath  string      `json:"block_path"`
+	CharPath   string      `json:"char_path"`
+	State      DeviceState `json:"state"`
+	NumQueues  int         `json:"num_queues"`
+	QueueDepth int         `json:"queue_depth"`
+	BlockSize  int         `json:"block_size"`
+	Size       int64       `json:"size"`
+	Running    bool        `json:"running"`
+}
+
+// Info returns comprehensive information about the device
+func (d *Device) Info() DeviceInfo {
+	if d == nil {
+		return DeviceInfo{}
+	}
+
+	state := d.State()
+	return DeviceInfo{
+		ID:         d.ID,
+		BlockPath:  d.Path,
+		CharPath:   d.CharPath,
+		State:      state,
+		NumQueues:  d.queues,
+		QueueDepth: d.depth,
+		BlockSize:  d.blockSize,
+		Size:       d.Size(),
+		Running:    state == DeviceStateRunning,
+	}
+}
+
 // StopAndDelete stops the device and removes it from the system.
 // This should be called to cleanly shut down a ublk device.
 func StopAndDelete(ctx context.Context, device *Device) error {
 	if device == nil {
 		return ErrInvalidParameters
 	}
+
+	// Cancel context first to signal all goroutines to stop
+	if device.cancel != nil {
+		device.cancel()
+	}
+
+	// Give goroutines a moment to see the cancellation
+	time.Sleep(10 * time.Millisecond)
 
 	// Stop and cleanup queue runners
 	for _, runner := range device.runners {
@@ -293,11 +402,6 @@ func StopAndDelete(ctx context.Context, device *Device) error {
 		}
 	}
 	device.runners = nil
-
-	// Cancel context to stop any remaining goroutines
-	if device.cancel != nil {
-		device.cancel()
-	}
 
 	// Create controller for cleanup
 	ctrl, err := createController()

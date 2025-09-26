@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ehrlich-b/go-ublk"
 	"github.com/ehrlich-b/go-ublk/backend"
@@ -38,13 +39,13 @@ func main() {
 	params := ublk.DefaultParams(memBackend)
 	if *minimal {
 		// Use minimal parameters for testing
-		params.QueueDepth = 1        // Absolute minimum
-		params.NumQueues = 1         // Single queue
-		params.MaxIOSize = 64 * 1024 // 64KB to match our buffer size
+		params.QueueDepth = 1                     // Absolute minimum
+		params.NumQueues = 1                      // Single queue
+		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
 	} else {
 		params.QueueDepth = 32
 		params.NumQueues = 1
-		params.MaxIOSize = 64 * 1024 // 64KB to match our buffer size
+		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
 	}
 
 	// Critical for kernel 6.11+: use ioctl-encoded control commands
@@ -106,6 +107,27 @@ func main() {
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
+
+	// Try cleanup with a timeout
+	cleanupDone := make(chan bool)
+	go func() {
+		if err := ublk.StopAndDelete(context.Background(), device); err != nil {
+			logger.Error("error stopping device", "error", err)
+		} else {
+			logger.Info("device stopped successfully")
+		}
+		cleanupDone <- true
+	}()
+
+	select {
+	case <-cleanupDone:
+		// Cleanup completed
+	case <-time.After(1 * time.Second):
+		// Cleanup taking too long, exit anyway
+		logger.Info("cleanup timeout, forcing exit")
+	}
+
+	os.Exit(0)
 }
 
 // parseSize parses a size string like "64M", "1G", "512K"

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
@@ -217,7 +218,7 @@ func (r *Runner) Close() error {
 	}
 
 	if r.bufPtr != 0 {
-		bufSize := r.depth * 64 * 1024 // 64KB per request buffer
+		bufSize := r.depth * constants.IOBufferSizePerTag // 64KB per request buffer
 		syscall.Syscall(syscall.SYS_MUNMAP, r.bufPtr, uintptr(bufSize), 0)
 		r.bufPtr = 0
 	}
@@ -624,11 +625,11 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	// Calculate buffer pointer for this tag
-	bufOffset := int(tag) * 64 * 1024 // 64KB per buffer
+	bufOffset := int(tag) * constants.IOBufferSizePerTag // 64KB per buffer
 	bufPtr := unsafe.Pointer(r.bufPtr + uintptr(bufOffset))
 
 	// Check if length exceeds buffer size (64KB)
-	const maxBufferSize = 64 * 1024
+	const maxBufferSize = constants.IOBufferSizePerTag
 
 	var buffer []byte
 	var dynamicBuffer []byte
@@ -640,7 +641,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 		dynamicBuffer = make([]byte, length)
 		buffer = dynamicBuffer
 	} else {
-		buffer = (*[64 * 1024]byte)(bufPtr)[:length:length]
+		buffer = (*[constants.IOBufferSizePerTag]byte)(bufPtr)[:length:length]
 	}
 
 	var err error
@@ -737,7 +738,7 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 	// Calculate sizes
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
-	bufSize := depth * 64 * 1024 // 64KB per request buffer
+	bufSize := depth * constants.IOBufferSizePerTag // 64KB per request buffer
 
 	// Page-round the mmap size
 	pageSize := os.Getpagesize()

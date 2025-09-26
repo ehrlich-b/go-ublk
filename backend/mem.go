@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ehrlich-b/go-ublk/internal/interfaces"
+	"github.com/ehrlich-b/go-ublk"
 )
 
 // Memory provides a RAM-based backend for ublk devices
@@ -135,9 +135,9 @@ func (m *Memory) Stats() map[string]interface{} {
 
 // Compile-time interface checks
 var (
-	_ interfaces.Backend            = (*Memory)(nil)
-	_ interfaces.DiscardBackend     = (*Memory)(nil)
-	_ interfaces.WriteZeroesBackend = (*Memory)(nil)
-	_ interfaces.SyncBackend        = (*Memory)(nil)
-	_ interfaces.StatBackend        = (*Memory)(nil)
+	_ ublk.Backend            = (*Memory)(nil)
+	_ ublk.DiscardBackend     = (*Memory)(nil)
+	_ ublk.WriteZeroesBackend = (*Memory)(nil)
+	_ ublk.SyncBackend        = (*Memory)(nil)
+	_ ublk.StatBackend        = (*Memory)(nil)
 )
