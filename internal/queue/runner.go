@@ -184,8 +184,7 @@ func (r *Runner) Prime() error {
 			}
 			return fmt.Errorf("submit initial FETCH_REQ[%d]: %w", tag, err)
 		}
-		// Set initial state: FETCH_REQ is now in flight
-		r.tagStates[tag] = TagStateInFlightFetch
+		// Set initial state: FETCH_REQ is now in flight (moved to submitInitialFetchReq)
 	}
 	return nil
 }
@@ -301,8 +300,12 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ) // This creates UBLK_U_IO_FETCH_REQ
 	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
 	if err != nil {
+		// Don't update state on submission failure
 		return err
 	}
+
+	// ONLY set state to InFlightFetch after successful submission
+	r.tagStates[tag] = TagStateInFlightFetch
 
 	// Log initial FETCH_REQ submission
 	if r.logger != nil {
@@ -416,8 +419,21 @@ func (r *Runner) processRequests() error {
 		return fmt.Errorf("failed to wait for completions: %w", err)
 	}
 
+	// Handle empty completions as no-work, not an error
+	if len(completions) == 0 {
+		return nil // No work to do - continue loop
+	}
+
 	// Process each completion event using per-tag state machine
 	for _, completion := range completions {
+		// Guard against nil completions
+		if completion == nil {
+			if r.logger != nil {
+				r.logger.Printf("Queue %d: Skipping nil completion", r.queueID)
+			}
+			continue
+		}
+
 		userData := completion.UserData()
 		tag := uint16(userData & 0xFFFF)
 		isCommit := (userData & udOpCommit) != 0

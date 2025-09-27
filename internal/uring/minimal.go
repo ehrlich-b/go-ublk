@@ -375,21 +375,24 @@ func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
 		logger.Debug("io_uring_enter for completion processing failed", "errno", errno)
 	}
 
-	// Check CQ head/tail
+	// Check CQ head/tail with proper atomic acquire semantics
 	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
 	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
 
-	logger.Debug("checking completions", "cqHead", *cqHead, "cqTail", *cqTail, "looking_for", userData)
+	// Load tail with acquire semantics (kernel publishes with release)
+	currentTail := atomic.LoadUint32(cqTail)
+	currentHead := atomic.LoadUint32(cqHead)
 
-	if *cqHead == *cqTail {
+	logger.Debug("checking completions", "cqHead", currentHead, "cqTail", currentTail, "looking_for", userData)
+
+	if currentHead == currentTail {
 		return nil, fmt.Errorf("no completions available")
 	}
 
 	// Process completions looking for our userData
 	cqMask := r.params.cqEntries - 1
-	currentHead := *cqHead
 
-	for currentHead != *cqTail {
+	for currentHead != currentTail {
 		index := currentHead & cqMask
 		cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(index)))
 		cqe := (*cqe32)(cqeSlot)
@@ -397,8 +400,8 @@ func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
 		logger.Debug("found completion", "index", index, "userData", cqe.userData, "res", cqe.res)
 
 		if cqe.userData == userData {
-			// Found our completion - advance head to this position + 1
-			*cqHead = currentHead + 1
+			// Found our completion - advance head with release semantics
+			atomic.StoreUint32(cqHead, currentHead+1)
 
 			result := &minimalResult{
 				userData: cqe.userData,
@@ -592,17 +595,29 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 	drain := func() {
 		cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
 		cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
-		for *cqHead != *cqTail {
+
+		// Load tail with acquire semantics (kernel publishes with release)
+		currentTail := atomic.LoadUint32(cqTail)
+		currentHead := atomic.LoadUint32(cqHead)
+
+		for currentHead != currentTail {
 			cqMask := r.params.cqEntries - 1
-			cqIndex := *cqHead & cqMask
+			cqIndex := currentHead & cqMask
 			cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
 			cqe := (*cqe32)(cqeSlot)
+
+
 			res := &minimalResult{userData: cqe.userData, value: cqe.res}
 			if cqe.res < 0 {
 				res.err = fmt.Errorf("operation failed with result: %d", cqe.res)
 			}
 			results = append(results, res)
-			*cqHead = *cqHead + 1
+			currentHead++
+		}
+
+		// Update head with release semantics only if we consumed completions
+		if currentHead != atomic.LoadUint32(cqHead) {
+			atomic.StoreUint32(cqHead, currentHead)
 		}
 	}
 
@@ -617,7 +632,7 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 		// Don't wait for any completions, just check if there are any
 		_, _, _ = r.submitAndWaitRing(0, 0)
 		drain()
-		return results, nil
+		return results, nil // Return empty slice if no work - NOT an error
 	}
 
 	// Block for at least one completion (only if no timeout)
@@ -628,7 +643,7 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 
 	// Drain whatever arrived
 	drain()
-	return results, nil
+	return results, nil // Always return slice, even if empty
 }
 
 func (r *minimalRing) NewBatch() Batch {
@@ -729,6 +744,7 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	return r.processCompletion()
 }
 
+
 // submitAndWaitRing calls io_uring_enter to submit and wait for completions
 func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted, completed uint32, errno syscall.Errno) {
 	logger := logging.Default()
@@ -821,14 +837,23 @@ func (r *minimalRing) processCompletion() (Result, error) {
 	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
 	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
 
+	// Read tail with acquire semantics (kernel publishes with release)
+	currentTail := atomic.LoadUint32(cqTail)
+	currentHead := *cqHead
+
 	// Check if we have completions
-	if *cqHead == *cqTail {
-		return nil, fmt.Errorf("no completions available")
+	if currentHead == currentTail {
+		// Retry with small delay if first check fails (memory ordering fix)
+		runtime.Gosched()
+		currentTail = atomic.LoadUint32(cqTail)
+		if currentHead == currentTail {
+			return nil, fmt.Errorf("no completions available")
+		}
 	}
 
 	// Get CQE
 	cqMask := r.params.cqEntries - 1
-	cqIndex := *cqHead & cqMask
+	cqIndex := currentHead & cqMask
 	cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
 	cqe := (*cqe32)(cqeSlot)
 
@@ -845,8 +870,8 @@ func (r *minimalRing) processCompletion() (Result, error) {
 		result.err = fmt.Errorf("operation failed with result: %d", cqe.res)
 	}
 
-	// Update head to consume the completion
-	*cqHead = *cqHead + 1
+	// Update head with release semantics to consume the completion
+	atomic.StoreUint32(cqHead, currentHead+1)
 
 	return result, nil
 }
