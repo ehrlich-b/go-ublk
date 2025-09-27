@@ -21,7 +21,7 @@ TEST_FLAGS=-v
 INTEGRATION_FLAGS=-tags=integration
 UNIT_FLAGS=-tags=!integration
 
-.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e suite
+.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e vm-simple-benchmark suite
 
 # Default target
 all: deps build test
@@ -119,7 +119,7 @@ VM_PASS=$(shell cat /tmp/devvm_pwd.txt)
 vm-copy: ublk-mem
 	@echo "📦 Copying ublk-mem and tests to VM..."
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true; rm -f $(VM_DIR)/ublk-mem"
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no ublk-mem test-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no ublk-mem test-e2e.sh test-benchmark.sh test-benchmark-simple.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@echo "✓ Copied."
 
 vm-run: ublk-mem vm-copy
@@ -144,6 +144,13 @@ vm-benchmark: ublk-mem vm-copy
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
 		"set -e; cd $(VM_DIR) && chmod +x ./test-benchmark.sh && ./test-benchmark.sh"
 	@echo "✅ VM benchmark completed"
+
+vm-simple-benchmark: ublk-mem vm-copy
+	@echo "📊 Running simple benchmark with debugging on VM..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-benchmark-simple.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./test-benchmark-simple.sh && timeout 60 ./test-benchmark-simple.sh"
+	@echo "✅ VM simple benchmark completed"
 
 .PHONY: vm-e2e-80 vm-e2e-64 vm-e2e-80-raw vm-e2e-64-raw vm-run-env
 vm-e2e-80: ublk-mem vm-copy

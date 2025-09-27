@@ -149,8 +149,8 @@ echo "✅ Created reference file for MD5 comparison"
 echo ""
 echo "=== CRITICAL TEST 1: Write Test ==="
 echo "Writing 64KB test data to ublk device..."
-echo "Command: dd if=/tmp/test_data of=$DEVICE_BDEV bs=1024 count=64 status=progress"
-if ! sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=1024 count=64 status=progress 2>&1; then
+echo "Command: dd if=/tmp/test_data of=$DEVICE_BDEV bs=1024 count=64 oflag=direct status=progress"
+if ! sudo dd if=/tmp/test_data of="$DEVICE_BDEV" bs=1024 count=64 oflag=direct status=progress 2>&1; then
     echo "❌ CRITICAL FAILURE: Could not write to device"
     echo "Data plane I/O is NOT working!"
     exit 1
@@ -161,8 +161,8 @@ echo "✅ Write completed successfully"
 echo ""
 echo "=== CRITICAL TEST 2: Read Test ==="
 echo "Reading 64KB data back from ublk device..."
-echo "Command: dd if=$DEVICE_BDEV of=/tmp/read_back bs=1024 count=64 status=progress"
-if ! sudo dd if="$DEVICE_BDEV" of=/tmp/read_back bs=1024 count=64 status=progress 2>&1; then
+echo "Command: dd if=$DEVICE_BDEV of=/tmp/read_back bs=1024 count=64 iflag=direct status=progress"
+if ! sudo dd if="$DEVICE_BDEV" of=/tmp/read_back bs=1024 count=64 iflag=direct status=progress 2>&1; then
     echo "❌ CRITICAL FAILURE: Could not read from device"
     echo "Data plane I/O is NOT working!"
     exit 1
@@ -229,12 +229,12 @@ dd if=/dev/urandom of=/tmp/pattern3 bs=512 count=8 2>/dev/null  # 4KB
 # Initialize both reference file and ublk device with zeros to ensure identical starting state
 echo "Initializing reference file and ublk device with zeros..."
 dd if=/dev/zero of=/tmp/reference_multiblock bs=512 count=40 2>/dev/null
-sudo dd if=/dev/zero of="$DEVICE_BDEV" bs=512 count=40 2>/dev/null
+sudo dd if=/dev/zero of="$DEVICE_BDEV" bs=512 count=40 oflag=direct 2>/dev/null
 
 # Write patterns to different locations on both ublk and regular file
 echo "Writing patterns to different offsets..."
 # Pattern 1 at offset 0
-sudo dd if=/tmp/pattern1 of="$DEVICE_BDEV" bs=512 seek=0 count=2 conv=notrunc 2>/dev/null
+sudo dd if=/tmp/pattern1 of="$DEVICE_BDEV" bs=512 seek=0 count=2 conv=notrunc oflag=direct 2>/dev/null
 dd if=/tmp/pattern1 of=/tmp/reference_multiblock bs=512 seek=0 count=2 conv=notrunc 2>/dev/null
 
 # Pattern 2 at offset 8KB (sector 16)
