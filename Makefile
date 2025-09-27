@@ -21,7 +21,7 @@ TEST_FLAGS=-v
 INTEGRATION_FLAGS=-tags=integration
 UNIT_FLAGS=-tags=!integration
 
-.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e
+.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e suite
 
 # Default target
 all: deps build test
@@ -449,6 +449,21 @@ vm-fio-simple-e2e: ublk-mem vm-copy
 	  make kernel-trace && \
 	  echo "=== FINAL DMESG ===" && \
 	  ./vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
+
+# Full test suite - runs build, reset VM, and all tests
+suite:
+	@echo "🧪 Running full test suite..."
+	@echo "📦 Building..."
+	@$(MAKE) build
+	@echo "🔄 Resetting VM..."
+	@$(MAKE) vm-reset
+	@echo "🧪 Running simple E2E tests..."
+	@$(MAKE) vm-simple-e2e
+	@echo "🧪 Running full E2E tests..."
+	@$(MAKE) vm-e2e
+	@echo "📊 Running benchmark tests..."
+	@$(MAKE) vm-benchmark
+	@echo "✅ Full test suite completed successfully!"
 
 # FORCE target to ensure rebuilds
 FORCE:

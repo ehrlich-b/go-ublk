@@ -50,9 +50,7 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Give the device a moment to fully initialize (256M takes longer)
-echo "Waiting for device initialization..."
-sleep 8
+# Device initialization wait is now handled in CreateAndServe
 
 echo ""
 echo "=== Benchmark Results ==="

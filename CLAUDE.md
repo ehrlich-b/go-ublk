@@ -19,6 +19,12 @@
 - Single queue implementation with multi-queue scaling potential
 - Cryptographic data integrity verification across all I/O patterns
 
+### ⚠️ Known Critical Issue:
+- **Slow initialization**: Device takes `queue_depth * 250ms` to initialize (9+ seconds typically)
+- Root cause: Each FETCH_REQ takes exactly 250ms to process (kernel issue?)
+- Workaround: Added calculated wait during device creation
+- See TODO.md for detailed investigation notes
+
 ## Core Design Principles
 
 ### Architecture Philosophy

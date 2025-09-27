@@ -166,22 +166,44 @@ make vm-compare     # TODO: vs loop device
 ## Current Status: **FUNCTIONAL PROTOTYPE WITH EXCELLENT PERFORMANCE**
 The core ublk implementation is fully functional with excellent performance and verified data integrity. Strategic investment in API ergonomics, observability, and safety will prevent costly refactors and accelerate adoption.
 
-## 🚨 CRITICAL PERFORMANCE BUG: Slow Device Initialization
+## Performance Benchmarks
 
-**Issue**: Device initialization takes 8-10 seconds for 256MB devices (should be instant)
-- 16MB device: ~1 second to initialize ✅
-- 256MB device: ~8-10 seconds to initialize ❌ (UNACCEPTABLE)
-- Root cause: We're doing something very inefficient during startup
-- Impact: Makes benchmarking and real usage painful
-
-**Benchmark Results (2025-09-26)** - After fixing wait time:
+**Benchmark Results (2025-09-26)**:
 - **4K Random Read (QD=1)**: 63.4k IOPS, 248 MB/s
 - **4K Random Read (QD=32)**: 62.7k IOPS, 245 MB/s
 - **4K Random Write (QD=1)**: 51.8k IOPS, 202 MB/s
 - **128K Sequential Read**: 9,463 IOPS, 1,183 MB/s
 - **Mixed 70/30 R/W**: 81k read IOPS, 34.7k write IOPS
 
-Performance is good once running, but startup time is a critical bug that needs immediate attention.
+## 🔴 CRITICAL BUG: 250ms Per FETCH_REQ Processing Delay
+
+**Impact**: Device initialization takes `queue_depth * 250ms` (8+ seconds for default config)
+
+**Symptoms**:
+- queue_depth=1: ~1.25 seconds to initialize
+- queue_depth=32: ~9 seconds to initialize
+- Scales exactly linearly: 250ms per FETCH_REQ
+
+**Investigation Results**:
+- ✅ Confirmed: Each FETCH_REQ takes exactly 250ms to process
+- ❌ Not caused by: Individual vs batch submission (tried batching - no improvement)
+- ❌ Not caused by: Memory allocation or device size
+- ❌ Not caused by: Our submission code
+
+**Hypothesis**:
+- Kernel might be timing out each FETCH_REQ after 250ms when no I/O arrives
+- Or there's a deliberate 250ms delay/timer in kernel ublk processing
+- Or our io_uring usage pattern triggers serialization
+
+**Current Workaround**:
+- Sleep for `queue_depth * 250ms + 1s` during device creation
+- This makes device initialization very slow but functional
+
+**TODO**:
+- [ ] Check kernel ublk source for 250ms timers/timeouts
+- [ ] Test if submitting FETCH_REQs AFTER device is ready helps
+- [ ] Investigate if WaitForCompletion(0) blocking causes serialization
+- [ ] Compare with C implementation timing
 
 
 ## Historical Debug Information (RESOLVED)

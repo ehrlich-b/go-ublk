@@ -63,6 +63,9 @@ func main() {
 	// Create options
 	options := &ublk.Options{}
 
+	if *minimal {
+		logger.Info("using minimal queue depth for faster initialization", "depth", params.QueueDepth)
+	}
 	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size)
 
 	// Create and serve the device

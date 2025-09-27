@@ -43,5 +43,5 @@ tmp/
 *.log
 
 # Go workspace file
-go.work.gitignored-repos/
+.gitignored-repos/
 .gomodcache/

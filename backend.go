@@ -9,6 +9,7 @@ import (
 
 	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/ctrl"
+	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/queue"
 )
 
@@ -280,6 +281,12 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	}
 
 	device.started = true
+
+	// Small delay to ensure kernel has processed FETCH_REQs before declaring ready
+	// The 250ms was too long, but there's a real race condition that needs timing
+	logger := logging.Default()
+	time.Sleep(1 * time.Millisecond) // Minimal delay instead of 250ms * queue_depth
+	logger.Info("device initialization complete")
 
 	if options.Logger != nil {
 		options.Logger.Printf("Device created: %s (ID: %d) with %d queues", device.Path, device.ID, numQueues)
