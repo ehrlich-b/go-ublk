@@ -31,6 +31,9 @@ const (
 	IORING_OFF_SQ_RING = 0
 	IORING_OFF_CQ_RING = 0x8000000
 	IORING_OFF_SQES    = 0x10000000
+
+	// SQE flags
+	IOSQE_FIXED_FILE = 1 << 0 // Use registered file descriptors
 )
 
 // SQE128 structure for URING_CMD
@@ -560,7 +563,8 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	// Prepare SQE with the minimal fields the kernel expects
 	sqe := &sqe128{}
 	sqe.opcode = kernelUringCmdOpcode()
-	sqe.fd = int32(r.targetFd)
+	sqe.flags = IOSQE_FIXED_FILE // Use registered file (matches C implementation)
+	sqe.fd = 0                   // Index 0 in registered files array
 	sqe.setCmdOp(cmd)
 	sqe.userData = userData
 
@@ -814,7 +818,11 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	oldTail := *sqTail
 	newTail := oldTail + 1
 
+	// Memory barrier to ensure SQE writes are visible before tail update
 	runtime.KeepAlive(sqe)
+	// Force memory synchronization - ensures kernel sees SQE data before tail pointer
+	_ = atomic.LoadUint32(sqTail)
+	// Use atomic store to ensure the tail update is visible to the kernel
 	atomic.StoreUint32(sqTail, newTail)
 	runtime.KeepAlive(sqTail)
 
