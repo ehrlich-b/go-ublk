@@ -1,19 +1,33 @@
 # TODO.md - Current Status
 
-## 🎉 MILESTONE: FULLY FUNCTIONAL PROTOTYPE WITH EXCELLENT PERFORMANCE
+## ✅ FIXED: Logging Deadlock in Thread-Locked Goroutines (2025-09-29)
 
-**STATUS (2025-09-25): WORKING IMPLEMENTATION WITH EXCELLENT PERFORMANCE**
-- ✅ **Device creation works**: ADD_DEV, SET_PARAMS, START_DEV all working
-- ✅ **All I/O patterns work**: Sequential, scattered, multi-block operations verified
-- ✅ **Performance achieved**: 504k IOPS write, 482k IOPS read
-- ✅ **Data integrity**: Perfect MD5 verification across all I/O patterns
-- ✅ **Comprehensive testing**: Full end-to-end test suite passing
+**ROOT CAUSE**:
+- Goroutines locked to OS threads (required for io_uring) CANNOT block on I/O
+- log/slog writes synchronously to stderr, blocking on `syscall.Write()`
+- Under concurrent load, multiple threads trying to log simultaneously caused deadlock
+- Threads couldn't reschedule because they're locked to OS threads for io_uring
 
-**Test results:**
+**THE FIX**:
+- Replaced log/slog with zerolog + **non-blocking async writer**
+- Async writer uses buffered channel (1000 messages) with dedicated goroutine
+- **Critical: `select` with `default` case drops messages if buffer full**
+- Logging calls NEVER block - either queue or drop, never wait for I/O
+
+**THE PROOF**:
+- WITHOUT fix (log/slog): 100% hang rate with `-v` flag under any concurrency
+- WITH fix (zerolog + async): **1.6 GB/s @ QD=32 with `-v` flag enabled!**
+- Tested 5x benchmark runs + 3x manual tests - 100% success rate
+
+**KEY INSIGHT**:
+When goroutines are locked to OS threads (`runtime.LockOSThread()`), they cannot block on I/O or mutexes without risking deadlock. Any logging in hot paths must be completely non-blocking.
+
+**TESTING STATUS**:
 - `make vm-simple-e2e`: ✅ PASS
-- `make vm-e2e`: ✅ **PASS** - all critical tests including data integrity
-- Performance: 504k IOPS write, 482k IOPS read - **EXCELLENT**
-- Data integrity: ✅ **VERIFIED** with cryptographic MD5 hashing
+- `make vm-e2e`: ✅ PASS
+- `make vm-benchmark`: ✅ PASS - 400-500k IOPS, 1.6-2.0 GB/s
+- `make vm-benchmark-race`: ✅ PASS - 5/5 runs succeeded
+- All tests pass with `-v` verbose logging enabled!
 
 ## What Was Fixed to Get Here:
 

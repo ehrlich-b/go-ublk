@@ -18,6 +18,12 @@ vendor/
 # Build directory
 build/
 
+# Built binaries
+ublk-mem
+ublk-file
+ublk-null
+ublk-zip
+
 # IDE specific files
 .idea/
 *.swp

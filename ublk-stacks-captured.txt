@@ -1,0 +1,122 @@
+Goroutine stack dump at 2025-09-29T15:57:08-04:00
+Process ID: 2774
+
+goroutine 34 [running]:
+main.main.func2()
+	/home/behrlich/repos/go-ublk/cmd/ublk-mem/main.go:114 +0xbf
+created by main.main in goroutine 1
+	/home/behrlich/repos/go-ublk/cmd/ublk-mem/main.go:110 +0xca9
+
+goroutine 1 [chan receive]:
+main.main()
+	/home/behrlich/repos/go-ublk/cmd/ublk-mem/main.go:139 +0xd1b
+
+goroutine 10 [runnable, locked to thread]:
+internal/sync.runtime_nanotime()
+	/usr/local/go/src/runtime/sema.go:709 +0x2f
+internal/sync.(*Mutex).lockSlow(0xc000010118)
+	/usr/local/go/src/internal/sync/mutex.go:150 +0x177
+internal/sync.(*Mutex).Lock(...)
+	/usr/local/go/src/internal/sync/mutex.go:70
+sync.(*Mutex).Lock(...)
+	/usr/local/go/src/sync/mutex.go:46
+log/slog.(*commonHandler).handle(_, {{0xc22ed7051e28c2ca, 0xd63e9b96, 0x65dca0}, {0x553392, 0xf}, 0xfffffffffffffffc, 0x50b325, {{{0x551252, 0x3}, ...}, ...}, ...})
+	/usr/local/go/src/log/slog/handler.go:311 +0x665
+log/slog.(*TextHandler).Handle(_, {_, _}, {{0xc22ed7051e28c2ca, 0xd63e9b96, 0x65dca0}, {0x553392, 0xf}, 0xfffffffffffffffc, 0x50b325, ...})
+	/usr/local/go/src/log/slog/text_handler.go:95 +0x3f
+log/slog.(*Logger).log(0xc00001c210, {0x588cd8, 0x67d8c0}, 0xfffffffffffffffc, {0x553392, 0xf}, {0xc000151a60, 0x4, 0x4})
+	/usr/local/go/src/log/slog/logger.go:256 +0x1e4
+log/slog.(*Logger).Debug(...)
+	/usr/local/go/src/log/slog/logger.go:199
+github.com/ehrlich-b/go-ublk/internal/uring.(*minimalRing).submitOnlyCmd(0xc000074460, 0xc000151b08)
+	/home/behrlich/repos/go-ublk/internal/uring/minimal.go:821 +0x196
+github.com/ehrlich-b/go-ublk/internal/uring.(*minimalRing).SubmitIOCmd(0xc000074460, 0xc0107521, 0xc01166fda0, 0x800000000000001b)
+	/home/behrlich/repos/go-ublk/internal/uring/minimal.go:581 +0x265
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).submitCommitAndFetch(0xc000074500, 0x1b, {0x0, 0x0}, {0x151e38?, 0xc0?, 0x50b1ac?, 0xc00001c210?})
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:733 +0x3e6
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).handleIORequest(0xc000074500, 0x1b, {0x0, 0x8, 0x6d810, 0x7dad219b0000})
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:686 +0xbc5
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).processIOAndCommit(0xc000074500, 0x1b)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:566 +0x2bf
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).handleCompletion(0xc000074500, 0x1b, 0x0?, 0x0)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:514 +0x7d6
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).processRequests(0xc000074500)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:451 +0x2c9
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).ioLoop(0xc000074500)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:265 +0x21e
+created by github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).Start in goroutine 1
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:165 +0x1a5
+
+goroutine 33 [syscall]:
+os/signal.signal_recv()
+	/usr/local/go/src/runtime/sigqueue.go:152 +0x29
+os/signal.loop()
+	/usr/local/go/src/os/signal/signal_unix.go:23 +0x13
+created by os/signal.Notify.func1.1 in goroutine 1
+	/usr/local/go/src/os/signal/signal.go:152 +0x1f
+
+
+=== GOROUTINE PROFILE ===
+goroutine 34 [running]:
+runtime/pprof.writeGoroutineStacks({0x5883d8, 0xc011a2c000})
+	/usr/local/go/src/runtime/pprof/pprof.go:764 +0x6a
+runtime/pprof.writeGoroutine({0x5883d8?, 0xc011a2c000?}, 0x1c?)
+	/usr/local/go/src/runtime/pprof/pprof.go:753 +0x25
+runtime/pprof.(*Profile).WriteTo(0x551b50?, {0x5883d8?, 0xc011a2c000?}, 0x1c?)
+	/usr/local/go/src/runtime/pprof/pprof.go:377 +0x14b
+main.main.func2()
+	/home/behrlich/repos/go-ublk/cmd/ublk-mem/main.go:128 +0x385
+created by main.main in goroutine 1
+	/home/behrlich/repos/go-ublk/cmd/ublk-mem/main.go:110 +0xca9
+
+goroutine 1 [chan receive]:
+main.main()
+	/home/behrlich/repos/go-ublk/cmd/ublk-mem/main.go:139 +0xd1b
+
+goroutine 10 [runnable, locked to thread]:
+syscall.Syscall(0x1, 0x2, 0xc0101a2000, 0xa9)
+	/usr/local/go/src/syscall/syscall_linux.go:73 +0x25
+syscall.write(0xc00005e180?, {0xc0101a2000?, 0x55124f?, 0x3?})
+	/usr/local/go/src/syscall/zsyscall_linux_amd64.go:964 +0x3b
+syscall.Write(...)
+	/usr/local/go/src/syscall/syscall_unix.go:211
+internal/poll.ignoringEINTRIO(...)
+	/usr/local/go/src/internal/poll/fd_unix.go:745
+internal/poll.(*FD).Write(0xc00005e180, {0xc0101a2000, 0xa9, 0x400})
+	/usr/local/go/src/internal/poll/fd_unix.go:381 +0x394
+os.(*File).write(...)
+	/usr/local/go/src/os/file_posix.go:46
+os.(*File).Write(0xc000040048, {0xc0101a2000?, 0xa9, 0x555025?})
+	/usr/local/go/src/os/file.go:195 +0x4e
+log/slog.(*commonHandler).handle(_, {{0xc22ed7051e5439fd, 0xd66a12c8, 0x65dca0}, {0x555025, 0x15}, 0xfffffffffffffffc, 0x50a13e, {{{0x55124c, 0x3}, ...}, ...}, ...})
+	/usr/local/go/src/log/slog/handler.go:313 +0x6c4
+log/slog.(*TextHandler).Handle(_, {_, _}, {{0xc22ed7051e5439fd, 0xd66a12c8, 0x65dca0}, {0x555025, 0x15}, 0xfffffffffffffffc, 0x50a13e, ...})
+	/usr/local/go/src/log/slog/text_handler.go:95 +0x3f
+log/slog.(*Logger).log(0xc00001c210, {0x588cd8, 0x67d8c0}, 0xfffffffffffffffc, {0x555025, 0x15}, {0xc000151b98, 0x6, 0x6})
+	/usr/local/go/src/log/slog/logger.go:256 +0x1e4
+log/slog.(*Logger).Debug(...)
+	/usr/local/go/src/log/slog/logger.go:199
+github.com/ehrlich-b/go-ublk/internal/uring.(*minimalRing).SubmitIOCmd(0xc000074460, 0xc0107521, 0xc011b78a30, 0x800000000000001d)
+	/home/behrlich/repos/go-ublk/internal/uring/minimal.go:549 +0x1d1
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).submitCommitAndFetch(0xc000074500, 0x1d, {0x0, 0x0}, {0x151e38?, 0xc0?, 0x50b1ac?, 0xc00001c210?})
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:733 +0x3e6
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).handleIORequest(0xc000074500, 0x1d, {0x0, 0x8, 0x2a650, 0x7dad219d0000})
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:686 +0xbc5
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).processIOAndCommit(0xc000074500, 0x1d)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:566 +0x2bf
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).handleCompletion(0xc000074500, 0x1d, 0x0?, 0x0)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:514 +0x7d6
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).processRequests(0xc000074500)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:451 +0x2c9
+github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).ioLoop(0xc000074500)
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:265 +0x21e
+created by github.com/ehrlich-b/go-ublk/internal/queue.(*Runner).Start in goroutine 1
+	/home/behrlich/repos/go-ublk/internal/queue/runner.go:165 +0x1a5
+
+goroutine 33 [syscall]:
+os/signal.signal_recv()
+	/usr/local/go/src/runtime/sigqueue.go:152 +0x29
+os/signal.loop()
+	/usr/local/go/src/os/signal/signal_unix.go:23 +0x13
+created by os/signal.Notify.func1.1 in goroutine 1
+	/usr/local/go/src/os/signal/signal.go:152 +0x1f

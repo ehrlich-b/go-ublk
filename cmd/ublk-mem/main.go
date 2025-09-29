@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"syscall"
@@ -100,6 +102,36 @@ func main() {
 	fmt.Printf("  sudo mkdir -p /mnt/ublk\n")
 	fmt.Printf("  sudo mount %s /mnt/ublk\n", device.Path)
 	fmt.Printf("\nPress Ctrl+C to stop...\n")
+	fmt.Printf("Send SIGUSR1 (kill -USR1 %d) to dump goroutine stacks\n", os.Getpid())
+
+	// Set up SIGUSR1 handler for stack trace dumps
+	stackDumpCh := make(chan os.Signal, 1)
+	signal.Notify(stackDumpCh, syscall.SIGUSR1)
+	go func() {
+		for range stackDumpCh {
+			logger.Info("=== GOROUTINE STACK TRACE DUMP ===")
+			buf := make([]byte, 1024*1024) // 1MB buffer
+			n := runtime.Stack(buf, true)   // true = all goroutines
+			fmt.Fprintf(os.Stderr, "\n=== FULL GOROUTINE STACK DUMP ===\n")
+			fmt.Fprintf(os.Stderr, "%s\n", buf[:n])
+			fmt.Fprintf(os.Stderr, "=== END STACK DUMP ===\n\n")
+
+			// Also dump to a file
+			filename := fmt.Sprintf("ublk-stacks-%d.txt", time.Now().Unix())
+			if f, err := os.Create(filename); err == nil {
+				fmt.Fprintf(f, "Goroutine stack dump at %s\n", time.Now().Format(time.RFC3339))
+				fmt.Fprintf(f, "Process ID: %d\n\n", os.Getpid())
+				f.Write(buf[:n])
+
+				// Also dump goroutine profile
+				fmt.Fprintf(f, "\n\n=== GOROUTINE PROFILE ===\n")
+				pprof.Lookup("goroutine").WriteTo(f, 2)
+
+				f.Close()
+				logger.Info("stack trace written to file", "file", filename)
+			}
+		}
+	}()
 
 	// Wait for signal
 	sigCh := make(chan os.Signal, 1)

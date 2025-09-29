@@ -472,5 +472,64 @@ suite:
 	@$(MAKE) vm-benchmark
 	@echo "✅ Full test suite completed successfully!"
 
+# Debug hang with stack traces
+.PHONY: vm-hang-debug
+
+vm-hang-debug: ublk-mem vm-copy
+	@echo "🔍 Running hang debug test with stack trace capture..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-hang-debug.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@./vm-ssh.sh 'cd ~/ublk-test && chmod +x ./test-hang-debug.sh && ./test-hang-debug.sh'
+	@echo "Fetching stack trace files..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no "$(VM_USER)@$(VM_HOST):~/ublk-test/ublk-stacks-*.txt" . 2>/dev/null || echo "No stack trace files found"
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "sudo cat /root/ublk-test/ublk-stacks-*.txt 2>/dev/null" || echo "No root-owned stack files"
+
+# Race test variants - run tests 5 times with 30s timeout
+.PHONY: vm-simple-e2e-race vm-e2e-race vm-benchmark-race
+
+vm-simple-e2e-race: ublk-mem vm-copy
+	@echo "🏁 Running vm-simple-e2e 5 times (30s timeout each)..."
+	@for i in 1 2 3 4 5; do \
+		echo ""; \
+		echo "=== Test $$i/5 ==="; \
+		if timeout 30 $(MAKE) vm-simple-e2e; then \
+			echo "✅ PASS"; \
+		else \
+			echo "❌ FAIL"; \
+			exit 1; \
+		fi; \
+	done
+	@echo ""; \
+	echo "✅ All 5 runs passed!"
+
+vm-e2e-race: ublk-mem vm-copy
+	@echo "🏁 Running vm-e2e 5 times (30s timeout each)..."
+	@for i in 1 2 3 4 5; do \
+		echo ""; \
+		echo "=== Test $$i/5 ==="; \
+		if timeout 30 $(MAKE) vm-e2e; then \
+			echo "✅ PASS"; \
+		else \
+			echo "❌ FAIL"; \
+			exit 1; \
+		fi; \
+	done
+	@echo ""; \
+	echo "✅ All 5 runs passed!"
+
+vm-benchmark-race: ublk-mem vm-copy
+	@echo "🏁 Running vm-benchmark 5 times (30s timeout each)..."
+	@for i in 1 2 3 4 5; do \
+		echo ""; \
+		echo "=== Test $$i/5 ==="; \
+		if timeout 30 $(MAKE) vm-benchmark; then \
+			echo "✅ PASS"; \
+		else \
+			echo "❌ FAIL"; \
+			exit 1; \
+		fi; \
+	done
+	@echo ""; \
+	echo "✅ All 5 runs passed!"
+
 # FORCE target to ensure rebuilds
 FORCE:

@@ -31,9 +31,6 @@ const (
 	IORING_OFF_SQ_RING = 0
 	IORING_OFF_CQ_RING = 0x8000000
 	IORING_OFF_SQES    = 0x10000000
-
-	// SQE flags
-	IOSQE_FIXED_FILE = 1 << 0 // Use registered file descriptors
 )
 
 // SQE128 structure for URING_CMD
@@ -548,12 +545,6 @@ func (r *minimalResult) Error() error     { return r.err }
 
 func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
 	// Submit URING_CMD for data-plane to this ring's fd (expected to be /dev/ublkc<ID>)
-	logger := logging.Default()
-	logger.Debug("submitting IO command",
-		"cmd", fmt.Sprintf("0x%x", cmd),
-		"qid", ioCmd.QID,
-		"tag", ioCmd.Tag)
-
 	// Verify struct packing is correct (must be exactly 16 bytes)
 	ioCmdSize := unsafe.Sizeof(*ioCmd)
 	if ioCmdSize != 16 {
@@ -563,8 +554,7 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	// Prepare SQE with the minimal fields the kernel expects
 	sqe := &sqe128{}
 	sqe.opcode = kernelUringCmdOpcode()
-	sqe.flags = IOSQE_FIXED_FILE // Use registered file (matches C implementation)
-	sqe.fd = 0                   // Index 0 in registered files array
+	sqe.fd = int32(r.targetFd)
 	sqe.setCmdOp(cmd)
 	sqe.userData = userData
 
@@ -792,8 +782,6 @@ func (r *minimalRing) submitOnly(toSubmit uint32) (submitted uint32, errno sysca
 
 // submitOnlyCmd submits a command SQE without waiting for completion
 func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
-	logger := logging.Default()
-
 	// Get SQ head and tail
 	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
 	sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
@@ -818,15 +806,9 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	oldTail := *sqTail
 	newTail := oldTail + 1
 
-	// Memory barrier to ensure SQE writes are visible before tail update
 	runtime.KeepAlive(sqe)
-	// Force memory synchronization - ensures kernel sees SQE data before tail pointer
-	_ = atomic.LoadUint32(sqTail)
-	// Use atomic store to ensure the tail update is visible to the kernel
 	atomic.StoreUint32(sqTail, newTail)
 	runtime.KeepAlive(sqTail)
-
-	logger.Debug("updated SQ tail", "old", oldTail, "new", newTail)
 
 	// Submit without waiting
 	submitted, errno := r.submitOnly(1)

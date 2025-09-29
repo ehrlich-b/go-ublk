@@ -4,14 +4,15 @@ package logging
 import (
 	"context"
 	"io"
-	"log/slog"
 	"os"
 	"sync"
+
+	"github.com/rs/zerolog"
 )
 
-// Logger wraps slog.Logger with ublk-specific structured fields
+// Logger wraps zerolog.Logger with ublk-specific structured fields
 type Logger struct {
-	*slog.Logger
+	zlog     zerolog.Logger
 	deviceID *int
 }
 
@@ -24,10 +25,10 @@ var (
 type LogLevel int
 
 const (
-	LevelDebug LogLevel = LogLevel(slog.LevelDebug)
-	LevelInfo  LogLevel = LogLevel(slog.LevelInfo)
-	LevelWarn  LogLevel = LogLevel(slog.LevelWarn)
-	LevelError LogLevel = LogLevel(slog.LevelError)
+	LevelDebug LogLevel = LogLevel(zerolog.DebugLevel)
+	LevelInfo  LogLevel = LogLevel(zerolog.InfoLevel)
+	LevelWarn  LogLevel = LogLevel(zerolog.WarnLevel)
+	LevelError LogLevel = LogLevel(zerolog.ErrorLevel)
 )
 
 // Config holds logging configuration
@@ -46,27 +47,89 @@ func DefaultConfig() *Config {
 	}
 }
 
-// NewLogger creates a new structured logger
+// asyncWriter wraps an io.Writer with an async buffered channel
+// This prevents blocking in hot paths
+type asyncWriter struct {
+	out    io.Writer
+	ch     chan []byte
+	done   chan struct{}
+	closed bool
+	mu     sync.Mutex
+}
+
+func newAsyncWriter(w io.Writer, bufferSize int) *asyncWriter {
+	aw := &asyncWriter{
+		out:  w,
+		ch:   make(chan []byte, bufferSize),
+		done: make(chan struct{}),
+	}
+	go aw.run()
+	return aw
+}
+
+func (aw *asyncWriter) run() {
+	defer close(aw.done)
+	for msg := range aw.ch {
+		aw.out.Write(msg)
+	}
+}
+
+func (aw *asyncWriter) Write(p []byte) (n int, err error) {
+	aw.mu.Lock()
+	if aw.closed {
+		aw.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	aw.mu.Unlock()
+
+	// Make a copy since p might be reused
+	msg := make([]byte, len(p))
+	copy(msg, p)
+
+	// Non-blocking write - drop if buffer full (better than blocking)
+	select {
+	case aw.ch <- msg:
+		return len(p), nil
+	default:
+		// Buffer full - drop message to avoid blocking
+		return len(p), nil
+	}
+}
+
+func (aw *asyncWriter) Close() error {
+	aw.mu.Lock()
+	if !aw.closed {
+		aw.closed = true
+		close(aw.ch)
+	}
+	aw.mu.Unlock()
+	<-aw.done
+	return nil
+}
+
+// NewLogger creates a new structured logger with async writes
 func NewLogger(config *Config) *Logger {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{
-		Level:     slog.Level(config.Level),
-		AddSource: config.Level <= LevelDebug,
-	}
+	// Wrap output in async writer with 1000 message buffer
+	asyncOut := newAsyncWriter(config.Output, 1000)
 
+	var zlog zerolog.Logger
 	switch config.Format {
 	case "json":
-		handler = slog.NewJSONHandler(config.Output, opts)
+		zlog = zerolog.New(asyncOut).With().Timestamp().Logger()
 	default:
-		handler = slog.NewTextHandler(config.Output, opts)
+		// Console format with colors
+		consoleWriter := zerolog.ConsoleWriter{Out: asyncOut, NoColor: false}
+		zlog = zerolog.New(consoleWriter).With().Timestamp().Logger()
 	}
 
+	zlog = zlog.Level(zerolog.Level(config.Level))
+
 	return &Logger{
-		Logger: slog.New(handler),
+		zlog: zlog,
 	}
 }
 
@@ -97,7 +160,7 @@ func SetDefault(logger *Logger) {
 // WithDevice returns a logger with device ID context
 func (l *Logger) WithDevice(deviceID int) *Logger {
 	return &Logger{
-		Logger:   l.With("device_id", deviceID),
+		zlog:     l.zlog.With().Int("device_id", deviceID).Logger(),
 		deviceID: &deviceID,
 	}
 }
@@ -105,7 +168,7 @@ func (l *Logger) WithDevice(deviceID int) *Logger {
 // WithQueue returns a logger with queue context
 func (l *Logger) WithQueue(queueID int) *Logger {
 	return &Logger{
-		Logger:   l.With("queue_id", queueID),
+		zlog:     l.zlog.With().Int("queue_id", queueID).Logger(),
 		deviceID: l.deviceID,
 	}
 }
@@ -113,7 +176,7 @@ func (l *Logger) WithQueue(queueID int) *Logger {
 // WithRequest returns a logger with request context
 func (l *Logger) WithRequest(tag uint16, opType string) *Logger {
 	return &Logger{
-		Logger:   l.With("tag", tag, "op", opType),
+		zlog:     l.zlog.With().Uint16("tag", tag).Str("op", opType).Logger(),
 		deviceID: l.deviceID,
 	}
 }
@@ -121,9 +184,88 @@ func (l *Logger) WithRequest(tag uint16, opType string) *Logger {
 // WithError returns a logger with error context
 func (l *Logger) WithError(err error) *Logger {
 	return &Logger{
-		Logger:   l.With("error", err),
+		zlog:     l.zlog.With().Err(err).Logger(),
 		deviceID: l.deviceID,
 	}
+}
+
+// Standard logging methods
+func (l *Logger) Debug(msg string, args ...any) {
+	event := l.zlog.Debug()
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			key := args[i].(string)
+			event = event.Interface(key, args[i+1])
+		}
+	}
+	event.Msg(msg)
+}
+
+func (l *Logger) Info(msg string, args ...any) {
+	event := l.zlog.Info()
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			key := args[i].(string)
+			event = event.Interface(key, args[i+1])
+		}
+	}
+	event.Msg(msg)
+}
+
+func (l *Logger) Warn(msg string, args ...any) {
+	event := l.zlog.Warn()
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			key := args[i].(string)
+			event = event.Interface(key, args[i+1])
+		}
+	}
+	event.Msg(msg)
+}
+
+func (l *Logger) Error(msg string, args ...any) {
+	event := l.zlog.Error()
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			key := args[i].(string)
+			event = event.Interface(key, args[i+1])
+		}
+	}
+	event.Msg(msg)
+}
+
+// Context-aware logging
+func (l *Logger) DebugContext(ctx context.Context, msg string, args ...any) {
+	l.Debug(msg, args...)
+}
+
+func (l *Logger) InfoContext(ctx context.Context, msg string, args ...any) {
+	l.Info(msg, args...)
+}
+
+func (l *Logger) WarnContext(ctx context.Context, msg string, args ...any) {
+	l.Warn(msg, args...)
+}
+
+func (l *Logger) ErrorContext(ctx context.Context, msg string, args ...any) {
+	l.Error(msg, args...)
+}
+
+// Printf-style logging for compatibility
+func (l *Logger) Debugf(format string, args ...any) {
+	l.zlog.Debug().Msgf(format, args...)
+}
+
+func (l *Logger) Infof(format string, args ...any) {
+	l.zlog.Info().Msgf(format, args...)
+}
+
+func (l *Logger) Warnf(format string, args ...any) {
+	l.zlog.Warn().Msgf(format, args...)
+}
+
+func (l *Logger) Errorf(format string, args ...any) {
+	l.zlog.Error().Msgf(format, args...)
 }
 
 // Control plane logging methods
