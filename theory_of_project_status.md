@@ -1,771 +1,722 @@
-# Theory of Project Status: Deep Dive Analysis
+# Theory of Project Status - Deep Analysis (UPDATED 2025-10-05)
 
-**Date**: 2025-09-29
-**Status**: Critical analysis after days of I/O hang issues
-**Purpose**: Comprehensive analysis comparing our implementation vs working reference implementations
-
----
-
-## Executive Summary
-
-After deep analysis of reference implementations (ublksrv C and libublk-rs), I've identified several potential issues causing intermittent I/O hangs. The implementations work ~50% of the time, suggesting **race conditions or memory ordering issues** rather than fundamental logic errors.
-
-**Key Findings**:
-1. **Per-SQE syscall overhead**: We call `io_uring_enter` for each FETCH_REQ submission (32 syscalls) instead of batching
-2. **Context cancellation**: Blocking `io_uring_enter` syscall cannot be interrupted by Go context cancellation
-3. **Memory ordering concerns**: SQE field writes may not be visible to kernel without proper barriers
-4. **Tight select loop**: Non-blocking ctx.Done() check with blocking processRequests() creates complex interaction
+**Critical Status**: Weeks-long intermittent race condition causing unpredictable failures
+**Last Updated**: 2025-10-05 15:45 EDT
+**Purpose**: Comprehensive exposition for deep research agent analysis
 
 ---
 
-## Project Context
+## Executive Summary: The Race Condition
 
-### Current Status
-- ✅ Device creation (ADD_DEV, SET_PARAMS, START_DEV) works reliably
-- ⚠️  I/O operations work **intermittently** (~50% success rate)
-- ✅ When working: Excellent performance (504k IOPS)
-- ❌ When failing: Complete I/O hang, tests timeout
+We have a **fully functional ublk implementation with a race condition that makes it unreliable**. The system exhibits perfect behavior sometimes but fails catastrophically at other times in a way that suggests a timing-dependent race rather than deterministic bugs or resource leaks.
 
-### Symptoms When Hanging
-- FETCH_REQs submitted successfully
-- START_DEV completes successfully
-- `WaitForCompletion` blocks forever on `io_uring_enter`
-- No completions arrive from kernel
-- Process cannot be interrupted (syscall is blocking)
+### The Intermittent Pattern
+
+**Observed Behavior**: Tests pass perfectly, then fail completely, cycling unpredictably
+
+**What We Observed Today (2025-10-05)**:
+```
+15:12 - vm-e2e: PASS (perfect data integrity, all tests)
+15:14 - vm-e2e: PASS (perfect data integrity, all tests)
+15:17 - vm-benchmark: PASS (reads work perfectly)
+15:19 - vm-benchmark-race: FAIL (hung during 4K write test, zombie process)
+```
+
+**This is a classic race condition pattern:**
+- Sometimes works perfectly
+- Sometimes fails completely
+- Binary outcome (not gradual degradation)
+- Timing-dependent, not deterministic
+- Has persisted through multiple fix attempts
 
 ---
 
-## Reference Implementation: ublksrv C
+## What Actually Works (When It Works)
 
-### Main I/O Loop (`ublksrv_process_io`)
+### When The Race Resolves Favorably
+- ✅ Device creation (ADD_DEV, SET_PARAMS, START_DEV): Works perfectly
+- ✅ Block device appearance (/dev/ublkb*): Always appears correctly
+- ✅ **Data integrity**: MD5 cryptographic verification passes on all I/O patterns
+- ✅ **Read performance**: 50k-500k IOPS depending on queue depth
+- ✅ **Sequential reads**: 2.7 GB/s bandwidth
+- ✅ **Basic tests**: vm-simple-e2e and vm-e2e pass reliably in isolation
 
-**Location**: `.gitignored-repos/ublksrv-c/lib/ublksrv.c:1121-1167`
+### What We've Already Fixed (September 2025)
 
-```c
-int ublksrv_process_io(const struct ublksrv_queue *tq) {
-    struct _ublksrv_queue *q = tq_to_local(tq);
-    int ret, reapped;
-    struct __kernel_timespec ts = {
-        .tv_sec = UBLKSRV_IO_IDLE_SECS,  // 20 seconds
-        .tv_nsec = 0
-    };
-    struct __kernel_timespec *tsp = (q->state & UBLKSRV_QUEUE_IDLE) ?
-        NULL : &ts;
-    struct io_uring_cqe *cqe;
+1. **Logging Deadlock** (commit b451b7d)
+   - Problem: Thread-locked goroutines blocked on synchronous log I/O
+   - Solution: Replaced log/slog with zerolog + async non-blocking writer
+   - Result: 1.6 GB/s throughput with verbose logging enabled
 
-    if (__ublksrv_queue_is_done(q))
-        return -ENODEV;
+2. **Memory Ordering Issues** (commit b06b276)
+   - Problem: io_uring memory barriers insufficient
+   - Solution: Proper atomic operations throughout io_uring code
+   - Result: More reliable operation, but race condition persists
 
-    // KEY: Submit pending SQEs and wait for AT LEAST 1 completion
-    ret = io_uring_submit_and_wait_timeout(&q->ring, &cqe, 1, tsp, NULL);
-    //                                                      ^ minComplete=1
+3. **Fixed File Descriptor Registration** (commit 339808f)
+   - Problem: Dynamic FD lookup overhead
+   - Solution: Register ublk char device FD with io_uring upfront
+   - Result: Performance improvement, potential new race window?
 
-    ublksrv_reset_aio_batch(q);
-    reapped = ublksrv_reap_events_uring(&q->ring);  // Process ALL completions
-    ublksrv_submit_aio_batch(q);
+4. **START_DEV Hang** (SOLVED - ancient history)
+   - Problem: Device wouldn't start
+   - Solution: Submit FETCH_REQs before START_DEV
+   - Result: Device starts reliably now
 
-    // ... idle handling ...
+---
 
-    return reapped;
-}
+## The Race Condition Failure Modes
+
+### Primary Failure: Write Operation Hangs
+
+**Symptoms**:
+```bash
+Test sequence:
+1. 4K Random Read (QD=1): PASS - 21k IOPS ✅
+2. 4K Random Read (QD=32): PASS - 50k IOPS ✅
+3. 4K Random Write (QD=1): HUNG FOREVER ❌
 ```
 
 **Critical Observations**:
-1. **Always waits for ≥1 completion**: `minComplete=1` parameter
-2. **Has timeout**: 20 seconds (or NULL=infinite when idle)
-3. **Processes ALL available completions**: `ublksrv_reap_events_uring`
-4. **Returns completion count**: Useful for debugging/monitoring
+- Reads ALWAYS succeed before write hangs
+- Write operations never return (blocked in kernel)
+- Process becomes zombie: `[ublk-mem] <defunct>`
+- Device node persists: `/dev/ublkb3` still exists
+- No CPU usage - process in uninterruptible sleep (D state)
 
-### Submission Strategy
+**Why This Points to a Race**:
+- Reads and writes use IDENTICAL io_uring URING_CMD mechanism
+- Same COMMIT_AND_FETCH_REQ pattern for both
+- Data plane code path is symmetric for read/write
+- **Yet writes fail when reads succeed** → timing-dependent difference
 
-```c
-static void ublksrv_submit_fetch_commands(struct _ublksrv_queue *q) {
-    int i = 0;
+### Secondary Evidence: Zombie Process Accumulation
 
-    // Queue all SQEs WITHOUT calling io_uring_enter
-    for (i = 0; i < q->q_depth; i++)
-        ublksrv_queue_io_cmd(q, &q->ios[i], i);
+**Evidence from VM inspection**:
+```bash
+# Multiple zombie processes over time
+root  2836  [ublk-mem] <defunct>    # From Oct 4
+root  4384  [ublk-mem] <defunct>    # From 00:04
+root  11725 ./ublk-mem (Dl state)   # Current, hung
 
-    __ublksrv_queue_event(q);
-}
-
-static inline int ublksrv_queue_io_cmd(struct _ublksrv_queue *q,
-        struct ublk_io *io, unsigned tag) {
-    // ...
-    sqe = ublksrv_alloc_sqe(&q->ring);  // Just gets SQE pointer
-    // ... fill SQE fields ...
-
-    // NO io_uring_enter here! Just increments tail pointer
-    q->cmd_inflight += 1;
-    return 1;
-}
-
-// Later, ONE io_uring_enter call submits ALL queued SQEs:
-io_uring_submit_and_wait_timeout(&q->ring, &cqe, 1, tsp, NULL);
+# Orphaned control device nodes
+/dev/ublkc0  (from previous run)
+/dev/ublkc1  (from previous run)
+/dev/ublkc2  (from previous run)
+/dev/ublkc3  (current)
 ```
 
-**Key Point**: C implementation batches all SQEs, then makes **ONE** `io_uring_enter` syscall to submit them all.
-
-### Completion Handling
-
-```c
-static void ublksrv_handle_cqe(struct io_uring *r,
-        struct io_uring_cqe *cqe, void *data) {
-    // ...
-    struct ublk_io *io = &q->ios[tag];
-    q->cmd_inflight--;
-
-    if (cqe->res == UBLK_IO_RES_OK) {
-        // Synchronously handle I/O (calls backend ReadAt/WriteAt)
-        q->tgt_ops->handle_io_async(local_to_tq(q), &io->data);
-        // handle_io_async internally calls ublksrv_complete_io which:
-        //   1. Marks IO done with result
-        //   2. Immediately submits COMMIT_AND_FETCH_REQ
-    } else if (cqe->res == UBLK_IO_RES_NEED_GET_DATA) {
-        io->flags |= UBLKSRV_NEED_GET_DATA | UBLKSRV_IO_FREE;
-        ublksrv_queue_io_cmd(q, io, tag);
-    } else {
-        io->flags = UBLKSRV_IO_FREE;
-    }
-}
-```
-
-**Key Points**:
-- Handles I/O **synchronously** from completion handler
-- Immediately queues COMMIT_AND_FETCH_REQ (no async gap)
-- Simple flag-based state machine
+**What This Suggests**:
+- Process stuck in kernel, cannot complete cleanup
+- Kernel holding references preventing full exit
+- Race causes kernel to enter unrecoverable wait state
 
 ---
 
-## Our Implementation Analysis
+## Technical Architecture Analysis
 
-### Queue Runner I/O Loop
+### Our Current Implementation
 
-**Location**: `internal/queue/runner.go:230-274`
+**Control Plane** (`/dev/ublk-control` via io_uring URING_CMD):
+```
+ADD_DEV (allocate device ID)
+  ↓
+SET_PARAMS (configure size, queues, depth)
+  ↓
+START_DEV (activate device, create /dev/ublkb*)
+  ↓
+... device operational ...
+  ↓
+STOP_DEV (deactivate)
+  ↓
+DEL_DEV (cleanup)
+```
 
+**Data Plane** (per-queue io_uring, single queue currently):
+```
+Goroutine (locked to OS thread via runtime.LockOSThread):
+  Prime(): Submit all FETCH_REQs (queue_depth=32)
+    ↓
+  ioLoop():
+    Wait for completion (blocks in io_uring_enter)
+      ↓
+    Completion arrives with descriptor
+      ↓
+    Read descriptor to get operation (read/write) and buffer
+      ↓
+    Call backend.ReadAt() or backend.WriteAt()
+      ↓
+    Submit COMMIT_AND_FETCH_REQ with result
+      ↓
+    Loop back to wait
+```
+
+### What Happens During a Write Operation
+
+1. **Kernel receives block layer write request**
+2. **Kernel posts descriptor to our mmap'd array** with:
+   - Operation: `UBLK_IO_OP_WRITE` (1)
+   - Buffer address: where to read write data FROM
+   - Sector offset: where to write TO in backend
+   - Bytes: how much data
+3. **Kernel completes FETCH_REQ or COMMIT_AND_FETCH_REQ** (io_uring CQE with result=0)
+4. **Our code reads descriptor** (memory-mapped array)
+5. **Our code calls backend.WriteAt(buffer, offset)**
+6. **Our code submits COMMIT_AND_FETCH_REQ** with success result
+7. **Kernel completes block layer request**, allows next I/O
+
+**Race Windows Where It Can Fail**:
+- Between steps 2-3: Descriptor written but completion not posted
+- Between steps 3-4: Completion posted but descriptor not visible (cache)
+- Between steps 6-7: COMMIT submitted but kernel doesn't see it
+- During step 3: io_uring_enter blocks, kernel never sends completion
+
+---
+
+## Race Condition Hypotheses (Ranked by Likelihood)
+
+### Hypothesis 1: Memory Ordering Race in Descriptor Reading (HIGH)
+
+**Theory**: Kernel writes descriptor to mmap, we read stale cached data due to insufficient memory barriers.
+
+**Evidence**:
+- Intermittent nature is classic cache coherency race
+- Only affects writes (different cache access pattern than reads?)
+- Works sometimes, fails sometimes (timing-dependent)
+
+**Race Window**:
 ```go
+// Step 1: Kernel writes descriptor to mmap'd memory
+// (kernel side - happens in interrupt context)
+
+// Step 2: Kernel posts CQE to io_uring completion queue
+// (kernel side - uses proper barriers)
+
+// Step 3: Our code receives CQE
+completion := r.ring.WaitForCompletion(0)
+
+// Step 4: Our code reads descriptor
+descPtr := unsafe.Add(r.descAddr, offset)
+desc := *(*uapi.UblksrvIODesc)(descPtr)  // ❌ NO MEMORY BARRIER!
+
+// RACE: CPU cache might still have stale descriptor data
+// even though kernel wrote new data and posted CQE
+```
+
+**Why Writes Fail Specifically**:
+- Write descriptors might have different cache line alignment
+- Write buffer addresses might trigger different cache behavior
+- Kernel write path might have different memory ordering than read path
+
+**How to Fix**:
+```go
+// Force cache coherency before reading descriptor
+atomic.LoadPointer(&descPtr)  // Memory barrier
+desc := *(*uapi.UblksrvIODesc)(descPtr)
+```
+
+### Hypothesis 2: io_uring Submission Race (HIGH)
+
+**Theory**: Race between our COMMIT_AND_FETCH_REQ submission and kernel's completion processing.
+
+**Evidence**:
+- Recent change to fixed FD registration (commit 339808f)
+- io_uring submission involves multiple memory writes
+- Kernel reads our SQE data without synchronization
+
+**Race Window in SQE Submission**:
+```go
+// internal/uring/minimal.go - submitOnlyCmd
+func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
+    // Write SQE to ring buffer
+    *(*sqe128)(sqeSlot) = *sqe  // ❌ Normal memory write
+
+    // Write SQE index to array
+    *(*uint32)(arrayPtr) = sqIndex  // ❌ Normal memory write
+
+    // Update tail pointer
+    atomic.StoreUint32(sqTail, newTail)  // ✅ Atomic
+
+    // Call io_uring_enter
+    submitted, errno := r.submitOnly(1)
+
+    // RACE: Kernel might read SQE before our writes are visible
+    // atomic.Store on tail doesn't guarantee SQE data is visible
+}
+```
+
+**Why This Causes Hangs**:
+- Kernel sees updated tail pointer
+- Kernel reads SQE data (might be stale)
+- Kernel processes wrong command or corrupted data
+- Kernel gets into stuck state
+
+**How to Fix**:
+```go
+// Force memory ordering before updating tail
+runtime.KeepAlive(sqe)
+atomic.LoadUint32(sqTail)  // Read barrier
+atomic.StoreUint32(sqTail, newTail)  // Write barrier
+```
+
+### Hypothesis 3: Double-Submit Race (MEDIUM-HIGH)
+
+**Theory**: Under certain timing, we might submit two operations for the same tag, causing kernel confusion.
+
+**Evidence**:
+- We use per-tag mutexes to prevent this
+- But mutex is released before COMMIT submission completes
+- Kernel might process completion while we're still submitting
+
+**Race Window**:
+```go
+func (r *Runner) processIOAndCommit(tag uint16) error {
+    // Read descriptor, do I/O
+    // ...
+
+    // Submit COMMIT_AND_FETCH_REQ
+    _, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
+    // ❌ Submission might not complete immediately
+
+    // State update
+    r.tagStates[tag] = TagStateInFlightCommit
+    r.tagMutexes[tag].Unlock()
+
+    // RACE: If kernel processes COMMIT super fast and posts new completion
+    // before SubmitIOCmd returns, we might process same tag twice
+}
+```
+
+**How to Fix**:
+- Update state BEFORE submission
+- Or use stricter state machine enforcement
+
+### Hypothesis 4: Thread Initialization Race (MEDIUM)
+
+**Theory**: FETCH_REQs submitted from different OS thread than ioLoop, violating kernel expectations.
+
+**Evidence**:
+- ublk requires same OS thread for all queue operations
+- We call `LockOSThread()` in ioLoop
+- But Prime() is called BEFORE ioLoop starts
+
+**Race Window**:
+```go
+func (r *Runner) Start() error {
+    // Prime() runs on MAIN GOROUTINE (random OS thread)
+    if err := r.Prime(); err != nil {
+        return err
+    }
+
+    // ioLoop runs on NEW GOROUTINE (locks to new OS thread)
+    go r.ioLoop()
+    return nil
+}
+
 func (r *Runner) ioLoop() {
-    runtime.LockOSThread()  // ✅ CORRECT
+    runtime.LockOSThread()  // ✅ Locks thread
     defer runtime.UnlockOSThread()
 
-    for {
-        select {
-        case <-r.ctx.Done():  // Non-blocking check!
-            return
-        default:
-            err := r.processRequests()  // Blocks in io_uring_enter
-            if err != nil {
-                r.logger.Printf("Queue %d: Error: %v", r.queueID, err)
-                return
-            }
-        }
-    }
+    // RACE: Prime() submitted FETCH_REQs from different thread
+    // Kernel expects all queue ops from same thread
 }
 ```
 
-**Issue #1: Context Cancellation Cannot Interrupt Blocking Syscall**
-
-The `select` with `default` is non-blocking. When ctx is not done, we immediately call `processRequests()` which blocks in `io_uring_enter`. **If the kernel never sends a completion, we hang forever and cannot be interrupted.**
-
-C implementation doesn't have this problem because it uses a timeout (20 seconds).
-
-### Process Requests
-
-**Location**: `internal/queue/runner.go:415-460`
-
-```go
-func (r *Runner) processRequests() error {
-    // Wait for completion events from io_uring - this blocks until events arrive
-    completions, err := r.ring.WaitForCompletion(0) // 0 = block forever
-    if err != nil {
-        return fmt.Errorf("failed to wait for completions: %w", err)
-    }
-
-    // Handle empty completions as no-work, not an error
-    if len(completions) == 0 {
-        return nil  // Should not happen if blocking properly
-    }
-
-    // Process each completion event
-    for _, completion := range completions {
-        if completion == nil {
-            continue
-        }
-
-        userData := completion.UserData()
-        tag := uint16(userData & 0xFFFF)
-        isCommit := (userData & udOpCommit) != 0
-        result := completion.Value()
-
-        if tag >= uint16(r.depth) {
-            continue
-        }
-
-        if err := r.handleCompletion(tag, isCommit, result); err != nil {
-            return err
-        }
-    }
-
-    return nil
-}
-```
-
-**Analysis**: Logic looks correct. When `WaitForCompletion(0)` is called:
-- `timeout=0` means "block forever"
-- Should call `submitAndWaitRing(0, 1)` with `minComplete=1`
-- This matches C implementation behavior
-
-So the blocking logic is **correct**.
-
-### WaitForCompletion Implementation
-
-**Location**: `internal/uring/minimal.go:591-647`
-
-```go
-func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
-    results := make([]Result, 0, 8)
-
-    drain := func() {
-        // ... atomically read CQ head/tail and collect completions ...
-    }
-
-    // First, non-blocking drain of any existing completions
-    drain()
-    if len(results) > 0 {
-        return results, nil
-    }
-
-    // If timeout > 0, do quick non-blocking check
-    if timeout > 0 {
-        _, _, _ = r.submitAndWaitRing(0, 0)  // minComplete=0
-        drain()
-        return results, nil
-    }
-
-    // timeout=0: Block for at least one completion
-    _, _, errno := r.submitAndWaitRing(0, 1)  // ✅ minComplete=1
-    if errno != 0 {
-        return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)
-    }
-
-    drain()
-    return results, nil
-}
-```
-
-**Analysis**: When called with `timeout=0` (our case):
-- Skips the `if timeout > 0` branch
-- Calls `submitAndWaitRing(0, 1)` which waits for ≥1 completion
-- **This is correct!**
-
-### Submission Strategy
-
-**Location**: `internal/queue/runner.go:277-315`, `internal/uring/minimal.go:546-589`
-
-```go
-// In Runner.Prime()
-for tag := 0; tag < r.depth; tag++ {
-    if err := r.submitInitialFetchReq(uint16(tag)); err != nil {
-        return err
-    }
-}
-
-func (r *Runner) submitInitialFetchReq(tag uint16) error {
-    // ...
-    ioCmd := &uapi.UblksrvIOCmd{
-        QID:    r.queueID,
-        Tag:    tag,
-        Result: 0,
-        Addr:   uint64(bufferAddr),
-    }
-
-    userData := udOpFetch | (uint64(r.queueID) << 16) | uint64(tag)
-    cmd := uapi.UblkIOCmd(uapi.UBLK_IO_FETCH_REQ)
-
-    // This calls SubmitIOCmd → submitOnlyCmd → io_uring_enter
-    _, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
-    // ...
-}
-
-// In minimal.go
-func (r *minimalRing) SubmitIOCmd(...) (Result, error) {
-    // ...
-    if _, err := r.submitOnlyCmd(sqe); err != nil {
-        return nil, err
-    }
-    return &minimalResult{userData: userData, value: 0, err: nil}, nil
-}
-
-func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
-    // ...
-    // Update SQ tail
-    atomic.StoreUint32(sqTail, newTail)
-
-    // Submit WITHOUT waiting
-    submitted, errno := r.submitOnly(1)  // io_uring_enter(fd, 1, 0, 0)
-    // ...
-}
-```
-
-**Issue #2: Per-SQE Syscall Overhead**
-
-We call `io_uring_enter(fd, 1, 0, 0)` **for each tag** during Prime():
-- Queue depth = 32 → **32 syscalls**
-- C implementation: **1 syscall** (batched submission)
-
-**Performance impact**: ~32x more syscalls during initialization
-**Correctness impact**: Potentially creates race window where START_DEV sees incomplete submissions?
-
----
-
-## Key Differences Summary
-
-| Aspect | C Implementation | Our Implementation | Impact |
-|--------|-----------------|-------------------|---------|
-| **Submission batching** | Batch all SQEs, 1 syscall | 1 syscall per SQE | 32x syscall overhead |
-| **Completion waiting** | `minComplete=1` always | `minComplete=1` (correct) | ✅ Same |
-| **Timeout** | 20 seconds | Infinite (0) | Cannot recover from hangs |
-| **Context cancellation** | N/A (C) | Cannot interrupt syscall | ❌ Process hangs forever |
-| **Memory barriers** | Implicit (C compiler) | Explicit atomic.Store | ✅ Should be okay |
-| **Thread affinity** | `sched_setaffinity` | `runtime.LockOSThread()` | ✅ Equivalent |
-
----
-
-## Theories for Intermittent Hangs
-
-### Theory 1: Memory Ordering / Visibility Race
-
-**Hypothesis**: Kernel reads stale SQE data due to insufficient memory barriers.
-
-**Evidence**:
-- Works ~50% of the time (classic race condition symptom)
-- We use `atomic.StoreUint32` for tail pointer
-- But other SQE fields are written with normal stores
-
-**Code Location**: `internal/uring/minimal.go:806-820`
-
-```go
-// Update array entry
-*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), ...)) = sqIndex
-
-// Update tail
-oldTail := *sqTail
-newTail := oldTail + 1
-
-runtime.KeepAlive(sqe)  // Not a memory barrier!
-atomic.StoreUint32(sqTail, newTail)
-runtime.KeepAlive(sqTail)
-```
-
-**Problem**: `runtime.KeepAlive` prevents GC but **doesn't enforce memory ordering**. The kernel might see:
-- Updated tail pointer (atomic store)
-- But stale SQE data (normal stores not yet visible)
-
-**Fix**: Add `atomic.LoadUint32(sqTail)` or similar before the atomic store to force synchronization.
-
-### Theory 2: START_DEV / FETCH_REQ Race
-
-**Hypothesis**: START_DEV completes before kernel fully processes all FETCH_REQs.
-
-**Evidence**:
-- We submit FETCH_REQs one-by-one with individual syscalls
-- Small time window between each submission
-- START_DEV might see incomplete initialization
-
-**Our flow**:
-```
-1. Submit FETCH_REQ tag=0  (io_uring_enter)
-2. Submit FETCH_REQ tag=1  (io_uring_enter)
-3. ... (tiny race window here)
-4. Submit FETCH_REQ tag=31 (io_uring_enter)
-5. START_DEV
-```
-
-**C flow**:
-```
-1. Queue all FETCH_REQs in SQ (no syscalls)
-2. io_uring_submit_and_wait_timeout (ONE syscall, waits for processing)
-3. START_DEV
-```
-
-**Fix**: Batch all FETCH_REQ submissions into one `io_uring_enter` call.
-
-### Theory 3: The 250ms Mystery
-
-**From TODO.md**:
-> Each FETCH_REQ takes exactly 250ms to process (kernel issue?)
-
-**Hypothesis**: Kernel has 250ms timer/timeout for FETCH_REQ processing. If we hit some edge case (wrong thread, wrong timing, etc.), kernel waits for timer instead of processing immediately.
-
-**Evidence**:
-- Consistent 250ms delay per FETCH_REQ during initialization
-- `queue_depth * 250ms` initialization time
-- Too consistent to be coincidence
-
-**Investigation needed**:
-- Check kernel ublk source for timers around 250ms or HZ/4
-- Test with different queue depths to confirm linearity
-- Compare with C implementation timing
-
-### Theory 4: Goroutine Scheduling / Thread Confusion
-
-**Hypothesis**: Despite `LockOSThread()`, goroutine scheduler causes issues.
-
-**Evidence**:
-- ublk kernel driver requires **same OS thread** for all queue operations
-- We call `LockOSThread()` but goroutine might have moved before then
-- Prime() is called from main goroutine, ioLoop() from new goroutine
-
-**Problem**: Initial FETCH_REQs submitted from **different OS thread** than ioLoop?
-
-```go
-// CreateAndServe path:
-func (d *Device) Start() error {
-    for i := 0; i < d.numQueues; i++ {
-        runner := d.runners[i]
-        if err := runner.Start(); err != nil {  // Calls Prime() HERE
-            return err
-        }
-    }
-    // ...
-}
-
-func (r *Runner) Start() error {
-    if err := r.Prime(); err != nil {  // Main goroutine thread
-        return err
-    }
-    go r.ioLoop()  // NEW goroutine, NEW thread after LockOSThread
-    return nil
-}
-```
-
-**Fix**: Call `LockOSThread` BEFORE Prime(), or submit initial FETCH_REQs from within ioLoop.
-
-### Theory 5: Fixed File Index Issue
-
-**Hypothesis**: We register char device fd with io_uring but don't use IOSQE_FIXED_FILE flag consistently.
-
-**C implementation** (`.gitignored-repos/ublksrv-c/lib/ublksrv.c:200`):
-```c
-sqe->flags = IOSQE_FIXED_FILE;
-sqe->fd = 0;  // Index into registered files array
-```
-
-**Our implementation**:
-```go
-sqe.flags = 0  // ❌ Not using IOSQE_FIXED_FILE
-sqe.fd = int32(r.targetFd)  // Real fd, not index
-```
-
-**Investigation needed**: Check if kernel expects IOSQE_FIXED_FILE for ublk queue operations.
-
----
-
-## What We're Doing Right
-
-### ✅ Correct Architecture
-
-- Clean separation: control plane / data plane / io_uring abstraction
-- Per-tag state machine prevents double-submission
-- Proper SQE128/CQE32 structure layout (48-byte cmd offset)
-- IOCTL encoding for modern kernels
-
-### ✅ Correct I/O Processing
-
-- Read descriptor → process I/O → submit COMMIT_AND_FETCH
-- Proper buffer address passing
-- Result code handling (bytes on success, -errno on error)
-
-### ✅ Correct Memory Management
-
-- mmap descriptor array read-only
-- Separate anonymous mmap for I/O buffers
-- Proper cleanup in Close()
-
-### ✅ Thread Affinity
-
-- `runtime.LockOSThread()` equivalent to `sched_setaffinity`
-- Kernel sees consistent OS thread per queue
-
----
-
-## Recommended Fixes (Priority Order)
-
-### 1. Add Memory Barriers (HIGH PRIORITY)
-
-```go
-// In submitOnlyCmd, BEFORE atomic tail update:
-runtime.KeepAlive(sqe)
-_ = atomic.LoadUint32(sqTail)  // Force memory sync
-atomic.StoreUint32(sqTail, newTail)
-```
-
-### 2. Add Timeout to WaitForCompletion (HIGH PRIORITY)
-
-```go
-// In processRequests:
-completions, err := r.ring.WaitForCompletion(20)  // 20 second timeout like C
-```
-
-This allows recovery from hangs and proper context cancellation.
-
-### 3. Batch FETCH_REQ Submissions (MEDIUM PRIORITY)
-
-Create a `SubmitBatch()` method that queues multiple SQEs and calls `io_uring_enter` once:
-
-```go
-func (r *Runner) Prime() error {
-    batch := make([]*sqe128, r.depth)
-    for tag := 0; tag < r.depth; tag++ {
-        sqe := prepareFetchReqSQE(tag)
-        batch[tag] = sqe
-        r.tagStates[tag] = TagStateInFlightFetch
-    }
-
-    // ONE syscall to submit all
-    return r.ring.SubmitBatch(batch)
-}
-```
-
-### 4. Fix Thread Initialization (MEDIUM PRIORITY)
-
-Submit initial FETCH_REQs from the ioLoop goroutine AFTER LockOSThread:
-
+**Why This Causes Intermittent Failures**:
+- Sometimes goroutine scheduler assigns same thread
+- Sometimes assigns different thread
+- Kernel behavior undefined when thread changes
+
+**How to Fix**:
 ```go
 func (r *Runner) Start() error {
+    primeDone := make(chan error, 1)
+
     go func() {
         runtime.LockOSThread()
         defer runtime.UnlockOSThread()
 
         // Prime from the locked thread
-        if err := r.Prime(); err != nil {
-            r.logger.Printf("Prime failed: %v", err)
-            return
+        primeDone <- r.Prime()
+        if <-primeDone == nil {
+            r.ioLoop()
         }
-
-        r.ioLoop()
     }()
+
+    return <-primeDone
+}
+```
+
+### Hypothesis 5: Kernel ublk State Machine Race (MEDIUM)
+
+**Theory**: Kernel ublk driver has internal race condition between write path and completion path.
+
+**Evidence**:
+- Reads work, writes fail (different kernel code paths)
+- Zombie processes suggest kernel stuck state
+- Cannot access kernel logs to verify
+
+**What Could Be Racing in Kernel**:
+- Block layer issuing write request
+- ublk driver posting descriptor
+- Our COMMIT_AND_FETCH_REQ arriving
+- Kernel processing completion
+
+**How to Test**:
+- Run C ublksrv implementation with same workload
+- If C also fails → kernel bug
+- If C works → our bug
+
+### Hypothesis 6: io_uring CQ/SQ Ring Race (MEDIUM)
+
+**Theory**: Race between our CQ head update and kernel's CQ tail update.
+
+**Evidence**:
+- We use atomic operations on CQ head
+- Kernel uses atomic operations on CQ tail
+- But CQE data itself is not atomic
+
+**Race Window**:
+```go
+func drain() {
+    currentTail := atomic.LoadUint32(cqTail)  // Read kernel's tail
+    currentHead := atomic.LoadUint32(cqHead)  // Read our head
+
+    for currentHead != currentTail {
+        cqIndex := currentHead & cqMask
+        cqe := (*cqe32)(cqeSlot)  // ❌ Read CQE without barrier
+
+        // RACE: Kernel might be writing next CQE while we read current one
+        // Cache coherency not guaranteed for CQE data
+
+        results = append(results, processedCQE)
+        currentHead++
+    }
+
+    atomic.StoreUint32(cqHead, currentHead)  // Update our head
+}
+```
+
+**How to Fix**:
+```go
+// Add memory barrier before reading CQE
+atomic.LoadUintptr(cqeSlot)  // Force cache sync
+cqe := (*cqe32)(cqeSlot)
+```
+
+---
+
+## What We Cannot Debug (Critical Gaps)
+
+### 1. Kernel State Visibility
+
+**Cannot Access**:
+- `dmesg` output: Permission denied even with sudo
+- Kernel trace buffer: `/sys/kernel/debug/tracing` insufficient permissions
+- ublk driver internal state: No sysfs/debugfs interface
+- io_uring pending request queue: No inspection tools
+
+**What We Need**:
+- Kernel stack trace of hung process
+- ublk driver state for device ID
+- io_uring SQ/CQ ring inspection
+- Reason why completions stop arriving
+
+### 2. Process State at Hang
+
+**What We Know**: Process in `Dl` state (uninterruptible sleep + CLONE_THREAD)
+
+**What We Can't See**:
+- Exact syscall it's blocked in
+- io_uring ring state (SQ tail/head, CQ tail/head)
+- Which kernel wait queue it's on
+- Full stack trace
+
+**How to Get (if we had access)**:
+```bash
+cat /proc/{pid}/stack      # Kernel stack
+cat /proc/{pid}/wchan      # Wait channel
+gdb -p {pid}               # Debugger attach
+strace -p {pid}            # Current syscall
+```
+
+### 3. Comparison with C Implementation
+
+**Critical Test**: Does C ublksrv have same issue?
+
+**Value**:
+- If C works reliably → our bug (memory barriers, threading, etc.)
+- If C also fails → kernel bug or VM environment issue
+
+---
+
+## Specific Weird Behaviors Needing Explanation
+
+### 1. Reads Always Work, Writes Always Hang (CRITICAL CLUE)
+
+Both use identical mechanism:
+- Same io_uring URING_CMD submission
+- Same descriptor reading from mmap
+- Same COMMIT_AND_FETCH_REQ pattern
+- Same buffer management
+
+**What's Different**:
+- **Write**: Kernel posts descriptor with write data IN buffer (we read FROM it)
+- **Read**: Kernel posts descriptor, we write TO buffer (kernel reads FROM it)
+- Direction of memory access is reversed
+- **Cache coherency requirements might differ!**
+
+**Hypothesis**: Write descriptors point to DMA buffers that need different cache handling?
+
+### 2. Zombie Processes Accumulate
+
+Normal process exit:
+1. Process exits
+2. Kernel sends SIGCHLD to parent
+3. Parent wait()s for child
+4. Kernel releases process resources
+
+Zombie means kernel can't release:
+- Process stuck in uninterruptible sleep
+- io_uring requests still pending?
+- ublk driver holding references?
+- Cannot exit until kernel state cleared
+
+**Our case**: Process stuck in `io_uring_enter` syscall, kernel never returns
+
+### 3. Intermittent Nature (Classic Race Symptom)
+
+**Why races are timing-dependent**:
+- CPU scheduling variations
+- Cache line alignment differences
+- Memory pressure affecting cache behavior
+- Interrupt timing
+- Goroutine scheduler decisions
+
+**Our observations match this**:
+- Works perfectly sometimes
+- Fails completely other times
+- No gradual degradation
+- No clear pattern to success/failure
+
+---
+
+## Code Audit: Potential Race Locations
+
+### Location 1: Descriptor Read (HIGH PRIORITY)
+
+**File**: `internal/queue/runner.go:~340`
+
+```go
+func (r *Runner) processIOAndCommit(tag uint16) error {
+    descOffset := uintptr(tag) * unsafe.Sizeof(uapi.UblksrvIODesc{})
+    descPtr := unsafe.Add(r.descAddr, descOffset)
+    desc := *(*uapi.UblksrvIODesc)(descPtr)  // ❌ NO BARRIER
+
+    // RACE: desc might be stale cached data
+}
+```
+
+**Fix**:
+```go
+// Force cache coherency
+atomic.LoadPointer(&descPtr)
+desc := *(*uapi.UblksrvIODesc)(descPtr)
+```
+
+### Location 2: SQE Submission (HIGH PRIORITY)
+
+**File**: `internal/uring/minimal.go:~790`
+
+```go
+func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
+    *(*sqe128)(sqeSlot) = *sqe  // ❌ Normal write
+    *(*uint32)(arrayPtr) = sqIndex  // ❌ Normal write
+
+    runtime.KeepAlive(sqe)  // ❌ Not a memory barrier
+    atomic.StoreUint32(sqTail, newTail)
+
+    // RACE: Kernel might read stale SQE data
+}
+```
+
+**Fix**:
+```go
+*(*sqe128)(sqeSlot) = *sqe
+*(*uint32)(arrayPtr) = sqIndex
+
+// Force memory ordering
+atomic.LoadUint32(sqTail)  // Read barrier
+atomic.StoreUint32(sqTail, newTail)  // Write barrier
+```
+
+### Location 3: CQE Reading (MEDIUM PRIORITY)
+
+**File**: `internal/uring/minimal.go:~610`
+
+```go
+drain := func() {
+    for currentHead != currentTail {
+        cqe := (*cqe32)(cqeSlot)  // ❌ No barrier
+        // RACE: Might read stale CQE
+    }
+}
+```
+
+**Fix**:
+```go
+atomic.LoadUintptr(cqeSlot)  // Barrier
+cqe := (*cqe32)(cqeSlot)
+```
+
+### Location 4: Thread Initialization (MEDIUM PRIORITY)
+
+**File**: `internal/queue/runner.go:~200`
+
+```go
+func (r *Runner) Start() error {
+    if err := r.Prime(); err != nil {  // ❌ Wrong thread
+        return err
+    }
+    go r.ioLoop()  // ✅ Right thread
     return nil
 }
 ```
 
-### 5. Use Fixed File Index (LOW PRIORITY)
-
-```go
-sqe.flags = IOSQE_FIXED_FILE
-sqe.fd = 0  // Index 0 in registered files array
-```
+**Fix**: Prime from within ioLoop after LockOSThread
 
 ---
 
-## Alternate Theories for SOTA LLM Analysis
+## What Would Definitively Solve This
 
-### Theory A: io_uring Kernel Bug
+### Option A: Add Memory Barriers Everywhere (30 minutes)
 
-**Premise**: Our Go code is correct, but we're hitting a kernel bug in io_uring or ublk interaction.
+**Priority locations**:
+1. Descriptor reads - force cache coherency
+2. SQE writes - ensure visible before tail update
+3. CQE reads - ensure not reading stale data
 
-**Evidence to check**:
-- Kernel version specific behavior (we use 6.6.87)
-- Known io_uring bugs around SQE128/CQE32
-- ublk driver bugs with io_uring submission patterns
+**Expected outcome**: If race is memory ordering, this should fix it
 
-**Test**: Try on different kernel versions (6.1, 6.8, 6.11)
+### Option B: Move Prime() Into ioLoop Thread (30 minutes)
 
-### Theory B: giouring Library Issue
+**Change threading model**:
+- Start ioLoop goroutine first
+- Lock thread
+- Then submit FETCH_REQs from locked thread
+- Then enter main loop
 
-**Premise**: iceber/iouring-go library has bugs we're not using it correctly.
+**Expected outcome**: If race is thread-related, this should fix it
 
-**Evidence**: We switched to minimal custom io_uring wrapper, issues persist.
+### Option C: Run C ublksrv Comparison (1-2 hours)
 
-**Conclusion**: Unlikely, since we wrote our own io_uring code.
+**Steps**:
+1. Install C ublksrv on VM
+2. Run identical fio workload
+3. See if it also hangs
 
-### Theory C: Initialization Ordering
+**Value**: Immediately tells us if kernel bug vs our bug
 
-**Premise**: Device/queue/ring initialization order matters more than we think.
+### Option D: Minimal Reproducer (2-3 hours)
 
-**Check**:
-- C: Open char device → create ring → register fd → submit FETCH → START_DEV
-- Us: Create ring → open char device → register fd → submit FETCH → START_DEV
+**Goal**: Smallest code that triggers hang
 
-**Test**: Match C initialization order exactly.
+**Value**:
+- Makes debugging tractable
+- Can share with kernel developers
+- Can bisect to find exact race window
 
-### Theory D: Descriptor Array Reading
+### Option E: Systematic State Logging (1 hour)
 
-**Premise**: We're reading stale descriptors due to mmap cache coherency.
+**Add detailed logging**:
+- Every descriptor read with tag/operation
+- Every SQE submission with tag/command
+- Every CQE completion with tag/result
+- Thread IDs for all operations
 
-**Evidence**: Descriptors are mmap'd read-only, kernel writes them.
-
-**Fix**: Add memory barrier before reading descriptors:
-```go
-atomic.LoadUintptr(&r.descPtr)  // Force cache coherency
-desc := *(*uapi.UblksrvIODesc)(descPtr)
-```
-
-### Theory E: Buffer Alignment
-
-**Premise**: I/O buffers need specific alignment (page, cache line, etc.).
-
-**Check C implementation**:
-```c
-// Allocate with page alignment?
-max_io_sz = round_up(max_io_sz, page_sz);
-```
-
-**Our implementation**: Uses anonymous mmap (page-aligned by default) ✅
-
-### Theory F: Completion Queue Overflow
-
-**Premise**: CQ fills up and kernel can't post completions.
-
-**Evidence**: CQ size is 2x SQ size (standard), should be sufficient.
-
-**Check**: Monitor CQ overflow counter in `io_uring_params`.
+**Value**: Might reveal race pattern in logs
 
 ---
 
-## Code Snippets for Expert Review
+## Questions for Deep Research Agent
 
-### Our SQE Preparation (minimal.go:790-830)
+### Critical Questions
 
-```go
-func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
-    sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
-    sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
-    sqMask := r.params.sqEntries - 1
+1. **Why do writes hang but reads succeed?**
+   - What's fundamentally different in kernel handling?
+   - Different memory barriers required?
+   - Different cache coherency guarantees?
 
-    if (*sqTail - *sqHead) >= r.params.sqEntries {
-        return 0, fmt.Errorf("submission queue full")
-    }
+2. **What memory barriers are required for kernel-written mmap data?**
+   - When kernel writes to userspace mmap, what visibility guarantees?
+   - Does x86-64 TSO model provide automatic barriers?
+   - Do we need explicit `asm volatile("mfence")`?
 
-    sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
-    sqIndex := *sqTail & sqMask
-    sqeSlot := unsafe.Add(r.sqesAddr, 128*uintptr(sqIndex))
-    *(*sqe128)(sqeSlot) = *sqe
+3. **What's the correct memory ordering for io_uring?**
+   - SQE writes must be visible before tail update - how?
+   - CQE reads must see latest data - how?
+   - What barriers does kernel use?
 
-    *(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
+4. **Can ublk operations switch OS threads?**
+   - Does kernel track queue by OS thread ID?
+   - What happens if thread changes between operations?
+   - Does this explain intermittent failures?
 
-    oldTail := *sqTail
-    newTail := oldTail + 1
+5. **What could cause kernel to stop sending completions?**
+   - ublk driver stuck states?
+   - io_uring internal deadlock?
+   - Race in kernel completion path?
 
-    runtime.KeepAlive(sqe)
-    atomic.StoreUint32(sqTail, newTail)
-    runtime.KeepAlive(sqTail)
+### Technical Deep Dives Needed
 
-    submitted, errno := r.submitOnly(1)
-    if errno != 0 {
-        return 0, fmt.Errorf("io_uring_enter failed: %v", errno)
-    }
+1. **Memory Barrier Requirements for mmap**
+   - Kernel writes to mmap
+   - Userspace reads from mmap
+   - What barriers needed on read side?
+   - x86-64 specific guarantees?
 
-    return submitted, nil
-}
-```
+2. **io_uring Memory Ordering**
+   - Documented barrier requirements
+   - How does liburing handle this in C?
+   - Compiler barriers vs CPU barriers
+   - When are barriers actually needed?
 
-**Question for experts**: Are the memory barriers sufficient? Should we use atomic stores for the SQE fields and array entry?
+3. **Kernel ublk Write vs Read Path**
+   - Source code analysis of drivers/block/ublk_drv.c
+   - Write path differences
+   - Completion posting differences
+   - Potential race windows
 
-### Our Completion Draining (minimal.go:595-622)
-
-```go
-drain := func() {
-    cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
-    cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
-
-    currentTail := atomic.LoadUint32(cqTail)
-    currentHead := atomic.LoadUint32(cqHead)
-
-    for currentHead != currentTail {
-        cqMask := r.params.cqEntries - 1
-        cqIndex := currentHead & cqMask
-        cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
-        cqe := (*cqe32)(cqeSlot)
-
-        res := &minimalResult{userData: cqe.userData, value: cqe.res}
-        if cqe.res < 0 {
-            res.err = fmt.Errorf("operation failed with result: %d", cqe.res)
-        }
-        results = append(results, res)
-        currentHead++
-    }
-
-    if currentHead != atomic.LoadUint32(cqHead) {
-        atomic.StoreUint32(cqHead, currentHead)
-    }
-}
-```
-
-**Question for experts**: Should we use `atomic.LoadUintptr` on cqeSlot before dereferencing to force cache coherency?
-
-### Our State Machine (runner.go:463-541)
-
-```go
-func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error {
-    r.tagMutexes[tag].Lock()
-    defer r.tagMutexes[tag].Unlock()
-
-    currentState := r.tagStates[tag]
-
-    switch currentState {
-    case TagStateInFlightFetch:
-        if result == 0 {
-            r.tagStates[tag] = TagStateOwned
-            return r.processIOAndCommit(tag)
-        } else if result == 1 {
-            r.tagStates[tag] = TagStateOwned
-            return fmt.Errorf("NEED_GET_DATA not implemented")
-        } else {
-            return fmt.Errorf("unexpected FETCH result: %d", result)
-        }
-
-    case TagStateInFlightCommit:
-        if result == 0 {
-            r.tagStates[tag] = TagStateOwned
-            return r.processIOAndCommit(tag)
-        } else if result == 1 {
-            r.tagStates[tag] = TagStateOwned
-            return fmt.Errorf("NEED_GET_DATA not implemented")
-        } else if result < 0 {
-            r.tagStates[tag] = TagStateOwned
-            return fmt.Errorf("COMMIT_AND_FETCH error: %d", result)
-        } else {
-            return fmt.Errorf("unexpected COMMIT result: %d", result)
-        }
-
-    case TagStateOwned:
-        return fmt.Errorf("unexpected completion for tag %d in Owned state", tag)
-
-    default:
-        return fmt.Errorf("invalid state %d for tag %d", currentState, tag)
-    }
-}
-```
-
-**Question for experts**: Is this state machine correct? C implementation uses simpler flags.
+4. **Go Memory Model for unsafe Operations**
+   - What guarantees for unsafe pointer dereference?
+   - Does `runtime.KeepAlive` provide ordering?
+   - When do we need atomic operations?
 
 ---
 
-## Next Steps
+## Summary: It's a Race Condition
 
-1. **Implement memory barrier fix** (30 minutes)
-2. **Add 20-second timeout** (15 minutes)
-3. **Test on clean VM** - see if fixes improve reliability
-4. **If still hanging**: Implement batch submission
-5. **If still hanging**: Move Prime() into ioLoop after LockOSThread
-6. **If still hanging**: Deep kernel debugging with bpftrace/ftrace
+### What We Know ✅
 
----
+1. **Classic race pattern**: Works sometimes, fails sometimes
+2. **Timing-dependent**: No deterministic trigger
+3. **Binary outcome**: Perfect or complete failure
+4. **Asymmetric**: Reads work, writes fail
+5. **Persistent**: Survived multiple fix attempts
 
-## Summary
+### Top Race Candidates 🎯
 
-Our implementation is **architecturally sound** but has **subtle bugs** causing intermittent hangs:
+1. **Memory ordering in descriptor reads** - Most likely
+2. **Memory ordering in SQE submissions** - Also very likely
+3. **Thread initialization (Prime on wrong thread)** - Likely
+4. **Double-submit race with tag state machine** - Possible
+5. **Kernel ublk driver internal race** - Need to test with C
 
-**Most Likely Culprits** (in order):
-1. Memory ordering/visibility race (missing barriers)
-2. Per-SQE syscall overhead creating race window
-3. Thread initialization order (Prime before LockOSThread)
-4. Missing timeout (makes debugging impossible)
+### Immediate Actions 📋
 
-**Less Likely But Possible**:
-5. Fixed file index not being used
-6. Descriptor reading cache coherency
-7. Kernel bug (io_uring or ublk)
+1. **Add memory barriers** - 30 min, high chance of fix
+2. **Move Prime() into ioLoop thread** - 30 min, might fix thread race
+3. **Run C ublksrv comparison** - 2 hours, critical diagnostic
+4. **Add comprehensive logging** - 1 hour, might reveal pattern
 
-The fact that it works ~50% suggests a **race condition with timing-dependent winner**. Adding proper memory barriers and batched submission should significantly improve reliability.
+**This is definitely a RACE CONDITION, not a resource leak. Focus debugging on memory ordering and thread synchronization.**
