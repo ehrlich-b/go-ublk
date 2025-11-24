@@ -357,6 +357,9 @@ func (r *minimalRing) submitToRing(sqe *sqe128) error {
 	// Update array entry
 	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
 
+	// CRITICAL: Store fence before tail update to ensure SQE is visible to kernel
+	Sfence()
+
 	// Update tail atomically
 	atomic.StoreUint32(sqTail, *sqTail+1)
 
@@ -711,17 +714,13 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	oldTail := *sqTail
 	newTail := oldTail + 1
 
-	// Memory barrier to ensure SQE writes are visible before tail update
-	runtime.KeepAlive(sqe)
-
-	// Force memory synchronization
-	_ = atomic.LoadUint32(sqTail)
+	// CRITICAL: Full store fence to ensure SQE writes are visible to kernel
+	// before we update the tail. runtime.KeepAlive and atomic operations
+	// do NOT provide this guarantee for non-atomic stores.
+	Sfence()
 
 	// Use atomic store to ensure the tail update is visible to the kernel
 	atomic.StoreUint32(sqTail, newTail)
-
-	// Another memory barrier after tail update
-	runtime.KeepAlive(sqTail)
 
 	logger.Debug("updated SQ tail", "old", oldTail, "new", newTail)
 
@@ -802,13 +801,15 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	// Update array entry
 	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
 
-	// Update tail with the same ordering guarantees as submitAndWait
+	// Update tail with proper memory ordering
 	oldTail := *sqTail
 	newTail := oldTail + 1
 
-	runtime.KeepAlive(sqe)
+	// CRITICAL: Full store fence to ensure SQE writes are visible to kernel
+	// before we update the tail. This is the key fix for the race condition.
+	Sfence()
+
 	atomic.StoreUint32(sqTail, newTail)
-	runtime.KeepAlive(sqTail)
 
 	// Submit without waiting
 	submitted, errno := r.submitOnly(1)
@@ -831,14 +832,20 @@ func (r *minimalRing) processCompletion() (Result, error) {
 	currentTail := atomic.LoadUint32(cqTail)
 	currentHead := *cqHead
 
-	// Check if we have completions
-	if currentHead == currentTail {
-		// Retry with small delay if first check fails (memory ordering fix)
-		runtime.Gosched()
+	// Check if we have completions, with a retry loop for memory visibility
+	const maxRetries = 5
+	const retryDelay = 10 * time.Microsecond
+	for i := 0; i < maxRetries; i++ {
 		currentTail = atomic.LoadUint32(cqTail)
-		if currentHead == currentTail {
-			return nil, fmt.Errorf("no completions available")
+		if currentHead != currentTail {
+			break
 		}
+		time.Sleep(retryDelay)
+	}
+
+	if currentHead == currentTail {
+		logger.Warn("no completions available after retries")
+		return nil, fmt.Errorf("no completions available after retries")
 	}
 
 	// Get CQE
