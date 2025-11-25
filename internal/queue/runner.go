@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -48,6 +49,13 @@ type Runner struct {
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
 }
+
+const (
+	descOpFlagsOffset     = uintptr(0)
+	descNrSectorsOffset   = uintptr(4)
+	descStartSectorOffset = uintptr(8)
+	descAddrOffset        = uintptr(16)
+)
 
 
 type Config struct {
@@ -156,13 +164,13 @@ func (r *Runner) Start() error {
 		r.logger.Printf("Starting queue %d for device %d", r.queueID, r.devID)
 	}
 
-	// Submit initial FETCH_REQs before starting the I/O loop
-	if err := r.Prime(); err != nil {
+	startErr := make(chan error, 1)
+	go r.ioLoop(startErr)
+
+	err := <-startErr
+	if err != nil {
 		return fmt.Errorf("failed to prime queue %d: %w", r.queueID, err)
 	}
-
-	// Start the I/O loop in a goroutine
-	go r.ioLoop()
 	return nil
 }
 
@@ -227,7 +235,7 @@ func (r *Runner) Close() error {
 }
 
 // ioLoop is the main I/O processing loop
-func (r *Runner) ioLoop() {
+func (r *Runner) ioLoop(started chan<- error) {
 	// Pin to OS thread for ublk thread affinity requirement
 	// ublk_drv records one thread per queue and rejects commands from different threads
 	runtime.LockOSThread()
@@ -239,17 +247,28 @@ func (r *Runner) ioLoop() {
 
 	// Check if we're in stub mode
 	if r.charFd == -1 || r.ring == nil {
+		if started != nil {
+			started <- nil
+		}
 		r.stubLoop()
+		return
+	}
+
+	// Submit initial FETCH_REQs from the pinned thread to honor kernel expectations
+	primeErr := r.Prime()
+	if started != nil {
+		started <- primeErr
+	}
+	if primeErr != nil {
+		if r.logger != nil {
+			r.logger.Printf("Queue %d: Failed to prime queue: %v", r.queueID, primeErr)
+		}
 		return
 	}
 
 	// Queue is ready - the io_uring exists and is associated with the char device
 	if r.logger != nil {
 		r.logger.Printf("Queue %d: Queue io_uring ready", r.queueID)
-	}
-
-	// FETCH_REQs were already submitted in Start(), just log that we're ready
-	if r.logger != nil {
 		r.logger.Printf("Queue %d: I/O loop ready for processing", r.queueID)
 	}
 
@@ -540,12 +559,23 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 	}
 }
 
+// loadDescriptor reads a descriptor with acquire semantics to avoid stale data.
+func (r *Runner) loadDescriptor(tag uint16) uapi.UblksrvIODesc {
+	descSize := unsafe.Sizeof(uapi.UblksrvIODesc{})
+	base := unsafe.Add(unsafe.Pointer(r.descPtr), uintptr(tag)*descSize)
+
+	return uapi.UblksrvIODesc{
+		OpFlags:     atomic.LoadUint32((*uint32)(base)),
+		NrSectors:   atomic.LoadUint32((*uint32)(unsafe.Add(base, descNrSectorsOffset))),
+		StartSector: atomic.LoadUint64((*uint64)(unsafe.Add(base, descStartSectorOffset))),
+		Addr:        atomic.LoadUint64((*uint64)(unsafe.Add(base, descAddrOffset))),
+	}
+}
+
 // processIOAndCommit reads descriptor, processes I/O, and submits COMMIT_AND_FETCH_REQ
 func (r *Runner) processIOAndCommit(tag uint16) error {
-	// Read descriptor for this tag
-	descSize := int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
-	descPtr := unsafe.Add(unsafe.Pointer(r.descPtr), uintptr(tag)*uintptr(descSize))
-	desc := *(*uapi.UblksrvIODesc)(descPtr)
+	// Read descriptor for this tag using atomic loads to avoid stale cache lines
+	desc := r.loadDescriptor(tag)
 
 	if r.logger != nil {
 		r.logger.Debugf("processIOAndCommit: tag=%d, OpFlags=0x%x, NrSectors=%d, StartSector=%d, Addr=0x%x",
