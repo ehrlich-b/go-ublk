@@ -2,7 +2,7 @@
 
 ## Current Status: Stable Working Prototype
 
-go-ublk is a pure Go implementation of Linux ublk (userspace block device).
+go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 **What works:**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
@@ -20,26 +20,53 @@ go-ublk is a pure Go implementation of Linux ublk (userspace block device).
 
 ---
 
-## Phase 1: Stabilization (Current)
+## Phase 0: Code Cleanup (IMMEDIATE)
 
-### 1.1 Code Cleanup
-- [ ] Remove debug logging to /tmp/ublk-fatal-error.log from runner.go
-- [ ] Remove stderr debug print from cmd/ublk-mem/main.go
-- [ ] Clean up untracked debug scripts and notes
-- [ ] Ensure all tests pass after cleanup
+**See [docs/REVIEW.md](docs/REVIEW.md) for detailed file-by-file analysis.**
 
-### 1.2 Architecture Decision: io_uring
+### 0.1 Delete Dead Code (~400-500 lines)
+- [ ] Delete `internal/uring/iouring.go` (unused `giouring` build tag)
+- [ ] Delete from runner.go: `NewStubRunner`, `NewWaitingRunner`, `stubLoop`
+- [ ] Delete from runner.go: `waitAndStartDataPlane`, `initializeDataPlane`
+- [ ] Delete from control.go: `StartDataPlane` (deprecated)
+- [ ] Delete from control.go: `StartDeviceAsync` (unused)
+- [ ] Delete from errors.go: unused constructors (`NewDeviceError`, `NewQueueError`, `NewErrorWithErrno`)
+- [ ] Delete from logger.go: unused domain methods (`ControlStart`, `IOStart`, `RingSubmit`, etc.)
+
+### 0.2 Fix Bugs
+- [ ] Fix `directUnmarshal` in marshal.go (wrong pointer arithmetic)
+- [ ] Fix `waitLive` in backend.go (always returns nil)
+- [ ] Fix `device.queues` mismatch (stores 0, creates 1)
+
+### 0.3 Consolidate Interfaces
+- [ ] Remove `internal/interfaces` package (use public interfaces everywhere)
+- [ ] Remove `Logger = interfaces.Logger` alias in interfaces.go
+- [ ] Merge `ctrl.DeviceParams` with public `DeviceParams`
+
+### 0.4 Environment Variable Hacks
+- [ ] Remove `UBLK_DEVINFO_LEN` env var hack in control.go
+- [ ] Remove `UBLK_CTRL_ENC` if still present
+
+### 0.5 Documentation
+- [ ] Document magic timing constants (why 100ms? why 500ms?)
+- [ ] Move hot-path logging to debug level
+
+---
+
+## Phase 1: Stabilization
+
+### 1.1 io_uring Architecture
 **Decision: Keep io_uring internal** (internal/uring)
 
 Rationale:
+- Pure Go implementation using `golang.org/x/sys/unix` syscalls
+- Memory barriers via `atomic.AddInt64` (LOCK XADD on x86-64)
 - Tightly coupled to ublk's URING_CMD requirements
-- Uses Cgo for memory barriers (not pure Go)
 - Interface types are ublk-specific (UblksrvCtrlCmd, UblksrvIOCmd)
-- No external demand for standalone io_uring-go yet
 
-The code is well-abstracted behind the `Ring` interface. If demand emerges for standalone io_uring-go, we can fork and generalize later.
+The code is well-abstracted behind the `Ring` interface.
 
-### 1.3 Testing Infrastructure
+### 1.2 Testing Infrastructure
 - [ ] Add `make test-unit` to CI/pre-commit
 - [ ] Add race detector to VM tests: `go test -race`
 - [ ] Document VM testing setup for contributors
@@ -49,9 +76,9 @@ The code is well-abstracted behind the `Ring` interface. If demand emerges for s
 ## Phase 2: API Polish
 
 ### 2.1 Structured Error Handling
-- [ ] Create `UblkError` type with errno mapping
+- [x] Create `Error` type with errno mapping (exists but over-engineered)
+- [ ] Simplify to single error type (remove legacy `UblkError`)
 - [ ] Support `errors.Is()` and `errors.As()`
-- [ ] Actionable error messages with recovery hints
 
 ### 2.2 Device Lifecycle API
 Current API is monolithic:
@@ -68,7 +95,7 @@ device.Close()                                // full cleanup
 ```
 
 ### 2.3 Observability
-- [ ] Add atomic counters: ops/sec, bytes read/written, errors
+- [ ] Wire up existing Metrics to I/O loop (currently allocated but not populated)
 - [ ] Expose metrics interface (compatible with Prometheus)
 - [ ] Add latency histogram (P50, P99, P999)
 
@@ -83,7 +110,7 @@ Currently single queue limits scaling:
 - [ ] Benchmark linear scaling
 
 ### 3.2 Memory Optimization
-- [ ] Buffer pool to eliminate >64KB dynamic allocation
+- [ ] Buffer pool to eliminate >64KB dynamic allocation on hot path
 - [ ] Consider registered buffers for zero-copy
 - [ ] Profile and optimize hot paths
 
@@ -150,6 +177,6 @@ Major bugs fixed during development:
 3. **SQE128 layout** - cmd area starts at byte 48, 80 bytes total
 4. **Logging deadlock** - Thread-locked goroutines can't block on I/O
 5. **EINTR handling** - Retry io_uring_enter on signal interruption
-6. **Memory barriers** - Mfence after loading cqTail for CQE visibility
+6. **Memory barriers** - Sfence before SQ tail update for SQE visibility
 
 All core functionality now works reliably.

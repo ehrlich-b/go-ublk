@@ -3,9 +3,10 @@
 ## Anchor Documents
 
 - `README.md` - Project overview and usage
-- `TODO.md` - Production roadmap and current tasks
-- `STYLE.md` - Code style guide (naming, formatting, patterns)
+- `TODO.md` - Production roadmap and cleanup tasks
 - `CLAUDE.md` - This file
+- `docs/STYLE.md` - Code style guide (naming, formatting, patterns)
+- `docs/REVIEW.md` - Detailed code review with cleanup recommendations
 
 ## Project Status: Stable Working Prototype
 
@@ -42,9 +43,11 @@ make vm-stress          # 10x alternating e2e + benchmark
 
 ```
 go-ublk/
-├── *.go              # Public API
+├── *.go              # Public API (ublk package)
 ├── backend/          # Backend implementations (mem.go)
 ├── cmd/ublk-mem/     # Memory-backed device CLI
+├── docs/             # Documentation (STYLE.md, REVIEW.md, etc.)
+├── scripts/          # Shell scripts (vm-ssh.sh, etc.)
 └── internal/
     ├── ctrl/         # Control plane (device lifecycle)
     ├── queue/        # Data plane (I/O processing, runner.go)
@@ -54,7 +57,7 @@ go-ublk/
 
 **Key design decisions:**
 - **Pure Go** - no cgo, builds with `CGO_ENABLED=0`
-- io_uring stays internal (see TODO.md section 1.2 for rationale)
+- io_uring stays internal (see TODO.md section 1.1 for rationale)
 - Single queue currently, multi-queue planned
 
 ## Critical Files
@@ -68,10 +71,11 @@ go-ublk/
 
 ## Development Workflow
 
-1. Read `STYLE.md` for coding conventions
-2. Run `make test-unit` before committing
-3. Use `make vm-e2e` to verify I/O functionality
-4. Use `make vm-stress` to verify stability after significant changes
+1. Read `docs/STYLE.md` for coding conventions
+2. Read `docs/REVIEW.md` for known issues and cleanup tasks
+3. Run `make test-unit` before committing
+4. Use `make vm-e2e` to verify I/O functionality
+5. Use `make vm-stress` to verify stability after significant changes
 
 ## Technical Constraints
 
@@ -93,8 +97,8 @@ go-ublk/
 
 ```bash
 # SSH to test VM
-./vm-ssh.sh "command"     # Run command
-./vm-ssh.sh               # Interactive shell
+scripts/vm-ssh.sh "command"     # Run command
+scripts/vm-ssh.sh               # Interactive shell
 ```
 
 ## References
