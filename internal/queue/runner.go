@@ -36,11 +36,11 @@ const (
 
 // Runner handles I/O for a single ublk queue
 type Runner struct {
-	devID       uint32
+	deviceID       uint32
 	queueID     uint16
 	depth       int
 	backend     interfaces.Backend
-	charFd      int
+	charDeviceFd      int
 	ring        uring.Ring
 	descPtr     uintptr // mmap'd descriptor array
 	bufPtr      uintptr // I/O buffer base
@@ -162,11 +162,11 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	runner := &Runner{
-		devID:       config.DevID,
+		deviceID:       config.DevID,
 		queueID:     config.QueueID,
 		depth:       config.Depth,
 		backend:     config.Backend,
-		charFd:      fd,
+		charDeviceFd:      fd,
 		ring:        ring,
 		descPtr:     descPtr,
 		bufPtr:      bufPtr,
@@ -186,7 +186,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 // Start begins processing I/O requests
 func (r *Runner) Start() error {
 	if r.logger != nil {
-		r.logger.Printf("Starting queue %d for device %d", r.queueID, r.devID)
+		r.logger.Printf("Starting queue %d for device %d", r.queueID, r.deviceID)
 	}
 
 	startErr := make(chan error, 1)
@@ -202,7 +202,7 @@ func (r *Runner) Start() error {
 // Prime submits initial FETCH_REQ commands to fill the queue.
 // Can now handle START_DEV in progress by checking for EOPNOTSUPP.
 func (r *Runner) Prime() error {
-	if r.charFd < 0 || r.ring == nil {
+	if r.charDeviceFd < 0 || r.ring == nil {
 		return fmt.Errorf("runner not initialized")
 	}
 
@@ -251,9 +251,9 @@ func (r *Runner) Close() error {
 		r.bufPtr = 0
 	}
 
-	if r.charFd >= 0 {
-		syscall.Close(r.charFd)
-		r.charFd = -1
+	if r.charDeviceFd >= 0 {
+		syscall.Close(r.charDeviceFd)
+		r.charDeviceFd = -1
 	}
 
 	return nil
@@ -287,7 +287,7 @@ func (r *Runner) ioLoop(started chan<- error) {
 	}
 
 	// Check if we're in stub mode
-	if r.charFd == -1 || r.ring == nil {
+	if r.charDeviceFd == -1 || r.ring == nil {
 		if started != nil {
 			started <- nil
 		}
@@ -782,11 +782,11 @@ func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Runner{
-		devID:      config.DevID,
+		deviceID:      config.DevID,
 		queueID:    config.QueueID,
 		depth:      config.Depth,
 		backend:    config.Backend,
-		charFd:     -1,  // No real device
+		charDeviceFd:     -1,  // No real device
 		ring:       nil, // No real ring
 		descPtr:    0,
 		bufPtr:     0,

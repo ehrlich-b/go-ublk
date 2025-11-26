@@ -162,8 +162,8 @@ func TestRunnerCreation(t *testing.T) {
 	}
 
 	// Check initial state
-	if runner.devID != 0 {
-		t.Errorf("Expected devID=0, got %d", runner.devID)
+	if runner.deviceID != 0 {
+		t.Errorf("Expected deviceID=0, got %d", runner.deviceID)
 	}
 
 	if runner.queueID != 0 {

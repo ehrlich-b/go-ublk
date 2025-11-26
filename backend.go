@@ -16,14 +16,14 @@ import (
 )
 
 // waitLive waits for a ublk device to transition to LIVE state
-func waitLive(devID uint32, timeout time.Duration) error {
+func waitLive(deviceID uint32, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	// Give kernel time to process START_DEV
 	time.Sleep(constants.DeviceStartupDelay)
 
 	// Check if block device exists
-	blockPath := fmt.Sprintf("/dev/ublkb%d", devID)
+	blockPath := fmt.Sprintf("/dev/ublkb%d", deviceID)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(blockPath); err == nil {
 			return nil
@@ -188,15 +188,15 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	ctrlParams := convertToCtrlParams(params)
 
 	// Create device using control plane
-	devID, err := ctrl.AddDevice(&ctrlParams)
+	deviceID, err := ctrl.AddDevice(&ctrlParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add device: %v", err)
 	}
 
 	// Set parameters
-	err = ctrl.SetParams(devID, &ctrlParams)
+	err = ctrl.SetParams(deviceID, &ctrlParams)
 	if err != nil {
-		ctrl.DeleteDevice(devID)
+		ctrl.DeleteDevice(deviceID)
 		return nil, fmt.Errorf("failed to set parameters: %v", err)
 	}
 
@@ -218,9 +218,9 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 	// Create Device struct
 	device := &Device{
-		ID:        devID,
-		Path:      fmt.Sprintf("/dev/ublkb%d", devID),
-		CharPath:  fmt.Sprintf("/dev/ublkc%d", devID),
+		ID:        deviceID,
+		Path:      fmt.Sprintf("/dev/ublkb%d", deviceID),
+		CharPath:  fmt.Sprintf("/dev/ublkc%d", deviceID),
 		Backend:   params.Backend,
 		queues:    numQueues, // Store actual queue count, not params value
 		depth:     params.QueueDepth,
@@ -239,13 +239,13 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	logger := logging.Default()
 
 	// Open character device once (kernel only allows single open)
-	charPath := fmt.Sprintf("/dev/ublkc%d", devID)
-	charFd := -1
+	charPath := fmt.Sprintf("/dev/ublkc%d", deviceID)
+	charDeviceFd := -1
 	for i := 0; i < constants.CharDeviceOpenRetries; i++ { // Retry for up to 5s waiting for udev
 		var err error
-		charFd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
+		charDeviceFd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
 		if err == nil {
-			logger.Info("opened char device for multi-queue", "fd", charFd, "path", charPath)
+			logger.Info("opened char device for multi-queue", "fd", charDeviceFd, "path", charPath)
 			break
 		}
 		if err != syscall.ENOENT {
@@ -253,22 +253,22 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if charFd < 0 {
-		ctrl.DeleteDevice(devID)
+	if charDeviceFd < 0 {
+		ctrl.DeleteDevice(deviceID)
 		return nil, fmt.Errorf("character device did not appear: %s", charPath)
 	}
 
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
 		runnerConfig := queue.Config{
-			DevID:       devID,
+			DevID:       deviceID,
 			QueueID:     uint16(i),
 			Depth:       params.QueueDepth,
 			Backend:     params.Backend,
 			Logger:      options.Logger,
 			Observer:    observer,
 			CPUAffinity: params.CPUAffinity,
-			CharFd:      charFd, // Share the fd (runner will dup it)
+			CharFd:      charDeviceFd, // Share the fd (runner will dup it)
 		}
 
 		runner, err := queue.NewRunner(device.ctx, runnerConfig)
@@ -279,7 +279,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 					device.runners[j].Close()
 				}
 			}
-			ctrl.DeleteDevice(devID)
+			ctrl.DeleteDevice(deviceID)
 			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
 		}
 		device.runners[i] = runner
@@ -292,7 +292,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 					device.runners[j].Close()
 				}
 			}
-			ctrl.DeleteDevice(devID)
+			ctrl.DeleteDevice(deviceID)
 			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
 		}
 	}
@@ -301,14 +301,14 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	time.Sleep(constants.QueueInitDelay)
 
 	// Submit START_DEV after FETCH_REQs are in place
-	err = ctrl.StartDevice(devID)
+	err = ctrl.StartDevice(deviceID)
 	if err != nil {
 		for j := 0; j < len(device.runners); j++ {
 			if device.runners[j] != nil {
 				device.runners[j].Close()
 			}
 		}
-		ctrl.DeleteDevice(devID)
+		ctrl.DeleteDevice(deviceID)
 		return nil, fmt.Errorf("failed to START_DEV: %v", err)
 	}
 
@@ -359,15 +359,15 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	ctrlParams := convertToCtrlParams(params)
 
 	// Create device using control plane
-	devID, err := controller.AddDevice(&ctrlParams)
+	deviceID, err := controller.AddDevice(&ctrlParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add device: %v", err)
 	}
 
 	// Set parameters
-	err = controller.SetParams(devID, &ctrlParams)
+	err = controller.SetParams(deviceID, &ctrlParams)
 	if err != nil {
-		controller.DeleteDevice(devID)
+		controller.DeleteDevice(deviceID)
 		return nil, fmt.Errorf("failed to set parameters: %v", err)
 	}
 
@@ -388,9 +388,9 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 
 	// Create Device struct
 	device := &Device{
-		ID:        devID,
-		Path:      fmt.Sprintf("/dev/ublkb%d", devID),
-		CharPath:  fmt.Sprintf("/dev/ublkc%d", devID),
+		ID:        deviceID,
+		Path:      fmt.Sprintf("/dev/ublkb%d", deviceID),
+		CharPath:  fmt.Sprintf("/dev/ublkc%d", deviceID),
 		Backend:   params.Backend,
 		queues:    numQueues,
 		depth:     params.QueueDepth,

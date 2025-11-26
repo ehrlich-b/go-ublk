@@ -88,14 +88,14 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 		"dev_id", devInfo.DevID)
 
 	// Marshal device info (64-byte format matches kernel 6.6+)
-	infoBuf := uapi.Marshal(devInfo)
+	deviceInfoBytes := uapi.Marshal(devInfo)
 
 	// Build control header (48-byte variant)
 	cmd := &uapi.UblksrvCtrlCmd{
 		DevID:      devInfo.DevID,
 		QueueID:    0xFFFF,
-		Len:        uint16(len(infoBuf)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&infoBuf[0]))),
+		Len:        uint16(len(deviceInfoBytes)),
+		Addr:       uint64(uintptr(unsafe.Pointer(&deviceInfoBytes[0]))),
 		Data:       0,
 		DevPathLen: 0,
 		Pad:        0,
@@ -108,7 +108,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 		"len", cmd.Len,
 		"addr", fmt.Sprintf("0x%x", cmd.Addr))
 
-	c.logger.Debug("device info buffer", "size", len(infoBuf), "data", fmt.Sprintf("%x", infoBuf))
+	c.logger.Debug("device info buffer", "size", len(deviceInfoBytes), "data", fmt.Sprintf("%x", deviceInfoBytes))
 
 	// Use ioctl encoding - required by modern kernels (6.11+)
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV)
@@ -124,14 +124,14 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 	}
 
 	// Ensure device info buffer stays alive until after kernel copies it
-	runtime.KeepAlive(infoBuf)
+	runtime.KeepAlive(deviceInfoBytes)
 
-	info := uapi.UnmarshalCtrlDevInfo(infoBuf)
+	info := uapi.UnmarshalCtrlDevInfo(deviceInfoBytes)
 	c.logger.Info("device created", "dev_id", info.DevID)
 	return info.DevID, nil
 }
 
-func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
+func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 	c.logger.Debug("setting device parameters",
 		"logical_bs", params.LogicalBlockSize,
 		"max_io", params.MaxIOSize,
@@ -177,7 +177,7 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 		"first_16_bytes", fmt.Sprintf("%x", buf[:16]))
 
 	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
+		DevID:      deviceID,
 		QueueID:    0xFFFF,
 		Len:        uint16(len(buf)),
 		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
@@ -202,10 +202,10 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 	return nil
 }
 
-func (c *Controller) StartDevice(devID uint32) error {
-	c.logger.Debug("starting device", "dev_id", devID)
+func (c *Controller) StartDevice(deviceID uint32) error {
+	c.logger.Debug("starting device", "dev_id", deviceID)
 	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
+		DevID:      deviceID,
 		QueueID:    0xFFFF,
 		Len:        0,
 		Addr:       0,
@@ -229,9 +229,9 @@ func (c *Controller) StartDevice(devID uint32) error {
 	return nil
 }
 
-func (c *Controller) StopDevice(devID uint32) error {
+func (c *Controller) StopDevice(deviceID uint32) error {
 	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
+		DevID:      deviceID,
 		QueueID:    0xFFFF,
 		Len:        0,
 		Addr:       0,
@@ -253,9 +253,9 @@ func (c *Controller) StopDevice(devID uint32) error {
 	return nil
 }
 
-func (c *Controller) DeleteDevice(devID uint32) error {
+func (c *Controller) DeleteDevice(deviceID uint32) error {
 	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
+		DevID:      deviceID,
 		QueueID:    0xFFFF,
 		Len:        0,
 		Addr:       0,
@@ -277,11 +277,11 @@ func (c *Controller) DeleteDevice(devID uint32) error {
 	return nil
 }
 
-func (c *Controller) GetDeviceInfo(devID uint32) (*uapi.UblksrvCtrlDevInfo, error) {
+func (c *Controller) GetDeviceInfo(deviceID uint32) (*uapi.UblksrvCtrlDevInfo, error) {
 	buf := make([]byte, 80)
 
 	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
+		DevID:      deviceID,
 		QueueID:    0xFFFF,
 		Len:        uint16(len(buf)),
 		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
@@ -306,12 +306,12 @@ func (c *Controller) GetDeviceInfo(devID uint32) (*uapi.UblksrvCtrlDevInfo, erro
 }
 
 // GetParams retrieves current device parameters (including devt majors/minors when available)
-func (c *Controller) GetParams(devID uint32) (*uapi.UblkParams, error) {
+func (c *Controller) GetParams(deviceID uint32) (*uapi.UblkParams, error) {
 	// Allocate a buffer big enough for common parameter sets (basic + devt)
 	buf := make([]byte, 128)
 
 	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
+		DevID:      deviceID,
 		QueueID:    0xFFFF,
 		Len:        uint16(len(buf)),
 		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),

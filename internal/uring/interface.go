@@ -167,13 +167,13 @@ func (r *stubRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userD
 	switch cmd {
 	case uapi.UBLK_CMD_ADD_DEV:
 		// Return a device ID (simulate kernel assigning device ID)
-		devID := ctrlCmd.DevID
-		if devID == 0xFFFFFFFF { // -1 means auto-assign
-			devID = 0 // Assign device ID 0
+		deviceID := ctrlCmd.DevID
+		if deviceID == 0xFFFFFFFF { // -1 means auto-assign
+			deviceID = 0 // Assign device ID 0
 		}
 		return &stubResult{
 			userData: userData,
-			value:    int32(devID),
+			value:    int32(deviceID),
 			err:      nil,
 		}, nil
 	case uapi.UBLK_CMD_SET_PARAMS:
