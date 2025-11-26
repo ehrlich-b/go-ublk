@@ -145,6 +145,33 @@ vm-benchmark: ublk-mem vm-copy
 		"set -e; cd $(VM_DIR) && chmod +x ./test-benchmark.sh && ./test-benchmark.sh"
 	@echo "✅ VM benchmark completed"
 
+# Stress test: 10 alternating vm-e2e and vm-benchmark runs
+vm-stress: ublk-mem
+	@echo "🔥 Running 10x alternating vm-e2e / vm-benchmark stress test..."
+	@$(MAKE) vm-reset
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		echo ""; \
+		echo "========== ITERATION $$i/10 =========="; \
+		echo "--- vm-e2e ---"; \
+		if ! timeout 60 $(MAKE) vm-e2e > /tmp/alt_e2e_$$i.log 2>&1; then \
+			echo "FAILED: vm-e2e on iteration $$i"; \
+			tail -20 /tmp/alt_e2e_$$i.log; \
+			exit 1; \
+		fi; \
+		grep -E "(PASS|All tests passed)" /tmp/alt_e2e_$$i.log | tail -1 || true; \
+		echo "vm-e2e: PASS"; \
+		echo "--- vm-benchmark ---"; \
+		if ! timeout 180 $(MAKE) vm-benchmark > /tmp/alt_bench_$$i.log 2>&1; then \
+			echo "FAILED: vm-benchmark on iteration $$i"; \
+			tail -30 /tmp/alt_bench_$$i.log; \
+			exit 1; \
+		fi; \
+		grep -E "IOPS=" /tmp/alt_bench_$$i.log | tail -1 || true; \
+		echo "vm-benchmark: PASS"; \
+	done
+	@echo ""
+	@echo "========== ALL 10 ALTERNATING TESTS PASSED =========="
+
 vm-simple-benchmark: ublk-mem vm-copy
 	@echo "📊 Running simple benchmark with debugging on VM..."
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-benchmark-simple.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/

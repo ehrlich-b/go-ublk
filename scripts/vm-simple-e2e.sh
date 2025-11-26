@@ -64,6 +64,13 @@ trap cleanup EXIT
 echo "=== INITIAL CLEANUP ==="
 cleanup_force
 
+# Ensure ublk driver is loaded so /dev/ublk-control exists
+echo "Ensuring ublk_drv kernel module is loaded..."
+if ! sudo modprobe ublk_drv 2>/dev/null; then
+    echo "ERROR: Failed to load ublk_drv kernel module"
+    exit 1
+fi
+
 # Start ublk device in background with MAXIMUM verbosity
 echo "Starting ublk-mem with maximum verbosity..."
 echo "All logs will go to stdout for immediate visibility"
@@ -73,13 +80,18 @@ echo "Started ublk-mem with PID $UBLK_PID"
 
 # Add PID to kernel trace filtering
 echo "Adding PID $UBLK_PID to kernel trace filter for precise monitoring..."
-/tmp/add_pid_filter.sh $UBLK_PID
+if [ -x /tmp/add_pid_filter.sh ]; then
+    /tmp/add_pid_filter.sh $UBLK_PID
+else
+    echo "  (helper /tmp/add_pid_filter.sh not present; skipping trace filter setup)"
+fi
 
 # DON'T clear trace buffer - we want to see ALL operations from device creation onwards
 echo "Keeping trace buffer to capture device creation + I/O operations..."
 # sudo bash -c ': > /sys/kernel/tracing/trace'  # DISABLED - we want all traces!
 
 # Wait for device to appear (much shorter timeout)
+DEVICE=""
 echo "Waiting for device to appear..."
 for i in $(seq 1 10); do
     if [ -b /dev/ublkb* ] 2>/dev/null; then

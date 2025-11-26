@@ -1,32 +1,20 @@
-//go:build linux && cgo
-
 package uring
 
-/*
-#include <stdint.h>
+import "sync/atomic"
 
-// x86-64 store fence to ensure all prior stores are globally visible
-static inline void sfence_impl(void) {
-    __asm__ __volatile__("sfence" ::: "memory");
-}
+// barrierDummy is used for atomic operations that provide memory barrier semantics.
+// On x86-64, atomic.AddInt64 compiles to LOCK XADD which has full fence semantics.
+var barrierDummy int64
 
-// x86-64 full memory fence to ensure all prior memory operations are complete
-static inline void mfence_impl(void) {
-    __asm__ __volatile__("mfence" ::: "memory");
-}
-*/
-import "C"
-
-// Sfence issues a store fence (x86 SFENCE instruction).
-// This ensures all prior stores are globally visible before any subsequent
-// stores. Required for io_uring SQE visibility before updating the tail.
+// Sfence issues a store fence equivalent.
+// atomic.AddInt64 with 0 compiles to LOCK XADD on x86-64, which provides
+// full memory fence semantics with no contention and minimal overhead (~20 cycles).
 func Sfence() {
-	C.sfence_impl()
+	atomic.AddInt64(&barrierDummy, 0)
 }
 
-// Mfence issues a full memory fence (x86 MFENCE instruction).
-// This ensures all prior memory operations are complete before any
-// subsequent memory operations.
+// Mfence issues a full memory fence equivalent.
+// Same implementation as Sfence - LOCK XADD provides full fence on x86-64.
 func Mfence() {
-	C.mfence_impl()
+	atomic.AddInt64(&barrierDummy, 0)
 }
