@@ -131,10 +131,8 @@ func (m *Memory) Discard(offset, length int64) error {
 		m.shards[i].Lock()
 	}
 
-	// Zero out the discarded region
-	for i := offset; i < end; i++ {
-		m.data[i] = 0
-	}
+	// Zero out the discarded region (Go 1.21+)
+	clear(m.data[offset:end])
 
 	for i := startShard; i <= endShard; i++ {
 		m.shards[i].Unlock()

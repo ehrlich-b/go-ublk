@@ -1,7 +1,5 @@
 # TODO.md - Production Roadmap
 
-**See also:** [review_todo.md](review_todo.md) - Comprehensive micro-level code review and cleanup tasks
-
 ---
 
 ## ✅ PERFORMANCE TARGET ACHIEVED
@@ -47,8 +45,6 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 ---
 
 ## Phase 0: Code Cleanup ✅ COMPLETED
-
-**See [review_todo.md](review_todo.md) for detailed cleanup status.**
 
 ### 0.1 Delete Dead Code ✅ DONE
 - [x] Deleted unused `giouring` build tag files

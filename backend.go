@@ -35,8 +35,6 @@ func waitLive(devID uint32, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for device %s to appear", blockPath)
 }
 
-// Backend interfaces are now defined in interfaces.go
-
 // Device represents a ublk block device
 type Device struct {
 	// ID is the device ID assigned by the kernel

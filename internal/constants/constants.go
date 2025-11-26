@@ -4,28 +4,43 @@ import "time"
 
 // Default configuration constants
 const (
-	// DefaultQueueDepth is the default I/O queue depth per queue
+	// DefaultQueueDepth is the default I/O queue depth per queue.
+	// 128 provides good throughput for most workloads while keeping memory
+	// overhead reasonable (128 tags * 64KB buffers = 8MB per queue).
 	DefaultQueueDepth = 128
 
-	// DefaultLogicalBlockSize is the default logical block size in bytes
+	// DefaultLogicalBlockSize is the default logical block size in bytes.
+	// 512 bytes matches standard disk sector size and is universally supported
+	// by Linux block layer and all filesystems.
 	DefaultLogicalBlockSize = 512
 
-	// DefaultMaxIOSize is the default maximum I/O size in bytes (1MB)
+	// DefaultMaxIOSize is the default maximum I/O size in bytes (1MB).
+	// 1MB is the Linux kernel's default max_sectors_kb for most devices,
+	// providing good throughput without excessive memory copy overhead.
 	DefaultMaxIOSize = 1 << 20
 
-	// DefaultDiscardAlignment is the default discard alignment in bytes
+	// DefaultDiscardAlignment is the default discard alignment in bytes.
+	// 4096 bytes (4KB) aligns with modern disk physical sector size and
+	// filesystem block size, ensuring efficient discard operations.
 	DefaultDiscardAlignment = 4096
 
-	// DefaultDiscardGranularity is the default discard granularity in bytes
+	// DefaultDiscardGranularity is the default discard granularity in bytes.
+	// 4096 bytes (4KB) matches filesystem block size, ensuring discards
+	// don't split filesystem blocks and cause fragmentation.
 	DefaultDiscardGranularity = 4096
 
-	// DefaultMaxDiscardSectors is the default maximum sectors per discard
+	// DefaultMaxDiscardSectors is the default maximum sectors per discard.
+	// 0xffffffff (max uint32) indicates unlimited discard size, allowing
+	// the kernel to send large discard requests for better efficiency.
 	DefaultMaxDiscardSectors = 0xffffffff
 
-	// DefaultMaxDiscardSegments is the default maximum segments per discard
+	// DefaultMaxDiscardSegments is the default maximum segments per discard.
+	// 256 segments balances supporting scattered discards with kernel
+	// memory overhead for tracking discard bio segments.
 	DefaultMaxDiscardSegments = 256
 
-	// AutoAssignDeviceID indicates the kernel should auto-assign a device ID
+	// AutoAssignDeviceID is passed to ADD_DEV to let the kernel auto-assign
+	// a device ID. This is the kernel's API contract (-1 means auto-assign).
 	AutoAssignDeviceID = -1
 )
 

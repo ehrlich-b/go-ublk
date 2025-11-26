@@ -344,7 +344,7 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	}
 
 	// Addr must point to the data buffer for this tag
-	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
+	bufferAddr := r.bufPtr + uintptr(int(tag)*constants.IOBufferSizePerTag)
 
 	// Use pre-allocated ioCmd to avoid heap allocation
 	ioCmd := &r.ioCmds[tag]
@@ -549,7 +549,7 @@ func (r *Runner) handleNeedGetData(tag uint16) error {
 		r.logger.Debugf("Queue %d: NEED_GET_DATA for tag %d", r.queueID, tag)
 	}
 
-	bufAddr := r.bufPtr + uintptr(int(tag)*64*1024)
+	bufAddr := r.bufPtr + uintptr(int(tag)*constants.IOBufferSizePerTag)
 	ioCmd := &uapi.UblksrvIOCmd{
 		QID:  r.queueID,
 		Tag:  tag,
@@ -698,7 +698,7 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	}
 
 	// Addr must point to the data buffer for next I/O
-	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
+	bufferAddr := r.bufPtr + uintptr(int(tag)*constants.IOBufferSizePerTag)
 
 	// Use pre-allocated ioCmd to avoid heap allocation
 	ioCmd := &r.ioCmds[tag]

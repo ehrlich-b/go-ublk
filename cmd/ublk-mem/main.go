@@ -59,14 +59,13 @@ func main() {
 	params := ublk.DefaultParams(memBackend)
 	if *minimal {
 		// Use minimal parameters for testing
-		params.QueueDepth = 1                      // Absolute minimum
-		params.NumQueues = 1                       // Single queue for minimal mode
-		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
+		params.QueueDepth = 1 // Absolute minimum
+		params.NumQueues = 1  // Single queue for minimal mode
 	} else {
 		params.QueueDepth = *queueDepth
-		params.NumQueues = *numQueues              // 0 = auto-detect based on CPU count
-		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
+		params.NumQueues = *numQueues // 0 = auto-detect based on CPU count
 	}
+	params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size for all modes
 
 	// Critical for kernel 6.11+: use ioctl-encoded control commands
 	// This sets UBLK_F_CMD_IOCTL_ENCODE in the feature flags sent at ADD_DEV.

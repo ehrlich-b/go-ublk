@@ -3,10 +3,9 @@
 ## Anchor Documents
 
 - `README.md` - Project overview and usage
-- `TODO.md` - Production roadmap and cleanup tasks
+- `TODO.md` - Production roadmap
 - `STYLE.md` - Code style and visual consistency rules
 - `CLAUDE.md` - This file
-- `docs/REVIEW.md` - Detailed code review with cleanup recommendations
 
 ## Project Status: Stable Working Prototype
 
@@ -71,7 +70,7 @@ go-ublk/
 
 ## Development Workflow
 
-1. Read `docs/REVIEW.md` for known issues and cleanup tasks
+1. Check `TODO.md` for current roadmap and priorities
 2. Run `make test-unit` before committing
 3. Use `make vm-e2e` to verify I/O functionality
 4. Use `make vm-stress` to verify stability after significant changes
