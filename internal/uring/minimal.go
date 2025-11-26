@@ -269,13 +269,6 @@ func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCm
 	logger := logging.Default()
 	logger.Debug("submitting async ctrl command", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
 
-	// Keep the buffer alive until kernel copies it
-	var bufferPtr unsafe.Pointer
-	if ctrlCmd.Addr != 0 {
-		bufferPtr = unsafe.Pointer(uintptr(ctrlCmd.Addr))
-		defer runtime.KeepAlive(bufferPtr)
-	}
-
 	// Create URING_CMD SQE for control operations (same as synchronous version)
 	sqe := &sqe128{}
 
@@ -471,14 +464,6 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 
 	// Log the actual command being used
 	logger.Debug("using command", "cmd", cmd)
-
-	// Keep the buffer alive until kernel copies it
-	// The kernel needs to access this memory during the syscall
-	var bufferPtr unsafe.Pointer
-	if ctrlCmd.Addr != 0 {
-		bufferPtr = unsafe.Pointer(uintptr(ctrlCmd.Addr))
-		defer runtime.KeepAlive(bufferPtr)
-	}
 
 	// Create URING_CMD SQE for control operations
 	// The 32-byte ublksrv_ctrl_cmd is placed in the SQE cmd area

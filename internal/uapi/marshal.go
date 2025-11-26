@@ -203,12 +203,12 @@ func unmarshalParams(data []byte, params *UblkParams) error {
 // directMarshal performs direct memory copy for marshaling
 func directMarshal(v interface{}) []byte {
 	// Dereference the interface to get actual struct pointer
-	ptr := reflect.ValueOf(v).Pointer()
+	ptr := reflect.ValueOf(v).UnsafePointer()
 	size := int(reflect.TypeOf(v).Elem().Size())
 
 	// Create a copy of the bytes from the actual struct
 	buf := make([]byte, size)
-	src := (*[1 << 20]byte)(unsafe.Pointer(ptr))
+	src := (*[1 << 20]byte)(ptr)
 	copy(buf, src[:size])
 
 	return buf
@@ -217,7 +217,7 @@ func directMarshal(v interface{}) []byte {
 // directUnmarshal performs direct memory copy for unmarshaling
 func directUnmarshal(data []byte, v interface{}) error {
 	// Get the actual pointer and size from the interface (must be a pointer type)
-	ptr := reflect.ValueOf(v).Pointer()
+	ptr := reflect.ValueOf(v).UnsafePointer()
 	size := int(reflect.TypeOf(v).Elem().Size())
 
 	if len(data) < size {
@@ -225,7 +225,7 @@ func directUnmarshal(data []byte, v interface{}) error {
 	}
 
 	// Direct memory copy to the struct
-	dst := (*[1 << 20]byte)(unsafe.Pointer(ptr))
+	dst := (*[1 << 20]byte)(ptr)
 	copy(dst[:size], data[:size])
 
 	return nil
