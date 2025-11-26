@@ -11,6 +11,8 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
@@ -34,18 +36,19 @@ const (
 
 // Runner handles I/O for a single ublk queue
 type Runner struct {
-	devID    uint32
-	queueID  uint16
-	depth    int
-	backend  interfaces.Backend
-	charFd   int
-	ring     uring.Ring
-	descPtr  uintptr // mmap'd descriptor array
-	bufPtr   uintptr // I/O buffer base
-	ctx      context.Context
-	cancel   context.CancelFunc
-	logger   interfaces.Logger
-	observer interfaces.Observer // Metrics observer (may be nil)
+	devID       uint32
+	queueID     uint16
+	depth       int
+	backend     interfaces.Backend
+	charFd      int
+	ring        uring.Ring
+	descPtr     uintptr // mmap'd descriptor array
+	bufPtr      uintptr // I/O buffer base
+	ctx         context.Context
+	cancel      context.CancelFunc
+	logger      interfaces.Logger
+	observer    interfaces.Observer // Metrics observer (may be nil)
+	cpuAffinity []int               // CPU affinity mask (nil = no affinity)
 	// Per-tag state tracking for proper serialization
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
@@ -60,12 +63,14 @@ const (
 
 
 type Config struct {
-	DevID    uint32
-	QueueID  uint16
-	Depth    int
-	Backend  interfaces.Backend
-	Logger   interfaces.Logger
-	Observer interfaces.Observer // Metrics observer (may be nil)
+	DevID       uint32
+	QueueID     uint16
+	Depth       int
+	Backend     interfaces.Backend
+	Logger      interfaces.Logger
+	Observer    interfaces.Observer // Metrics observer (may be nil)
+	CPUAffinity []int               // Optional CPU affinity (nil = no affinity)
+	CharFd      int                 // Character device fd (if 0, will open device)
 }
 
 // NewRunner creates a new queue runner
@@ -74,36 +79,46 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		config.Logger.Debugf("creating queue runner for device %d queue %d", config.DevID, config.QueueID)
 	}
 
-	// The character device (/dev/ublkcN) should exist after ADD_DEV.
-	// We may need to retry briefly until udev creates the node.
-	charPath := uapi.UblkDevicePath(config.DevID)
-	if config.Logger != nil {
-		config.Logger.Debugf("opening character device %s", charPath)
-	}
-
 	var fd int
 	var err error
-	// Wait up to ~5s for udev to create the character device after ADD_DEV.
-	// udev typically creates the node in <100ms, but slow systems or high
-	// udev queue depth can cause delays. 50 * 100ms = 5s is generous.
-	const maxRetries = 50
-	const retryDelayNs = 100 * 1_000_000 // 100ms in nanoseconds
-	for i := 0; i < maxRetries; i++ {
-		fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
-		if err == nil {
-			if config.Logger != nil {
-				config.Logger.Debugf("opened %s successfully, fd=%d", charPath, fd)
+
+	// Use provided fd or open the character device
+	if config.CharFd > 0 {
+		// Use the provided fd (duplicate it so each queue has its own)
+		fd, err = syscall.Dup(config.CharFd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dup char fd: %v", err)
+		}
+	} else {
+		// The character device (/dev/ublkcN) should exist after ADD_DEV.
+		// We may need to retry briefly until udev creates the node.
+		charPath := uapi.UblkDevicePath(config.DevID)
+		if config.Logger != nil {
+			config.Logger.Debugf("opening character device %s", charPath)
+		}
+
+		// Wait up to ~5s for udev to create the character device after ADD_DEV.
+		// udev typically creates the node in <100ms, but slow systems or high
+		// udev queue depth can cause delays. 50 * 100ms = 5s is generous.
+		const maxRetries = 50
+		const retryDelayNs = 100 * 1_000_000 // 100ms in nanoseconds
+		for i := 0; i < maxRetries; i++ {
+			fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
+			if err == nil {
+				if config.Logger != nil {
+					config.Logger.Debugf("opened %s successfully, fd=%d", charPath, fd)
+				}
+				break
 			}
-			break
+			if err != syscall.ENOENT {
+				return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+			}
+			ts := syscall.Timespec{Sec: 0, Nsec: retryDelayNs}
+			syscall.Nanosleep(&ts, nil)
 		}
-		if err != syscall.ENOENT {
-			return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+		if err != nil {
+			return nil, fmt.Errorf("character device did not appear: %s", charPath)
 		}
-		ts := syscall.Timespec{Sec: 0, Nsec: retryDelayNs}
-		syscall.Nanosleep(&ts, nil)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("character device did not appear: %s", charPath)
 	}
 
 	// Create io_uring for this queue
@@ -145,20 +160,21 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	runner := &Runner{
-		devID:      config.DevID,
-		queueID:    config.QueueID,
-		depth:      config.Depth,
-		backend:    config.Backend,
-		charFd:     fd,
-		ring:       ring,
-		descPtr:    descPtr,
-		bufPtr:     bufPtr,
-		ctx:        ctx,
-		cancel:     cancel,
-		logger:     config.Logger,
-		observer:   config.Observer,
-		tagStates:  make([]TagState, config.Depth),
-		tagMutexes: make([]sync.Mutex, config.Depth),
+		devID:       config.DevID,
+		queueID:     config.QueueID,
+		depth:       config.Depth,
+		backend:     config.Backend,
+		charFd:      fd,
+		ring:        ring,
+		descPtr:     descPtr,
+		bufPtr:      bufPtr,
+		ctx:         ctx,
+		cancel:      cancel,
+		logger:      config.Logger,
+		observer:    config.Observer,
+		cpuAffinity: config.CPUAffinity,
+		tagStates:   make([]TagState, config.Depth),
+		tagMutexes:  make([]sync.Mutex, config.Depth),
 	}
 
 	return runner, nil
@@ -246,6 +262,22 @@ func (r *Runner) ioLoop(started chan<- error) {
 	// ublk_drv records one thread per queue and rejects commands from different threads
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
+	// Set CPU affinity if configured
+	// Uses round-robin assignment: queue N -> CPU (CPUAffinity[N % len(CPUAffinity)])
+	if len(r.cpuAffinity) > 0 {
+		cpuIdx := r.cpuAffinity[int(r.queueID)%len(r.cpuAffinity)]
+		var mask unix.CPUSet
+		mask.Set(cpuIdx)
+		if err := unix.SchedSetaffinity(0, &mask); err != nil {
+			if r.logger != nil {
+				r.logger.Printf("Queue %d: Failed to set CPU affinity to CPU %d: %v", r.queueID, cpuIdx, err)
+			}
+			// Continue without affinity - not fatal
+		} else if r.logger != nil {
+			r.logger.Debugf("Queue %d: Set CPU affinity to CPU %d", r.queueID, cpuIdx)
+		}
+	}
 
 	if r.logger != nil {
 		r.logger.Debugf("Queue %d: Starting I/O loop (pinned to OS thread)", r.queueID)

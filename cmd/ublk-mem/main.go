@@ -21,9 +21,10 @@ import (
 
 func main() {
 	var (
-		sizeStr = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
-		verbose = flag.Bool("v", false, "Verbose output")
-		minimal = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
+		sizeStr   = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
+		verbose   = flag.Bool("v", false, "Verbose output")
+		minimal   = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
+		numQueues = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
 	)
 	flag.Parse()
 
@@ -41,12 +42,12 @@ func main() {
 	params := ublk.DefaultParams(memBackend)
 	if *minimal {
 		// Use minimal parameters for testing
-		params.QueueDepth = 1                     // Absolute minimum
-		params.NumQueues = 1                      // Single queue
+		params.QueueDepth = 1                      // Absolute minimum
+		params.NumQueues = 1                       // Single queue for minimal mode
 		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
 	} else {
 		params.QueueDepth = 32
-		params.NumQueues = 1
+		params.NumQueues = *numQueues              // 0 = auto-detect based on CPU count
 		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
 	}
 
@@ -97,6 +98,7 @@ func main() {
 	fmt.Printf("Device created: %s\n", device.Path)
 	fmt.Printf("Character device: %s\n", device.CharPath)
 	fmt.Printf("Size: %s (%d bytes)\n", formatSize(size), size)
+	fmt.Printf("Queues: %d\n", device.NumQueues())
 	fmt.Printf("\nYou can now use the device:\n")
 	fmt.Printf("  sudo mkfs.ext4 %s\n", device.Path)
 	fmt.Printf("  sudo mkdir -p /mnt/ublk\n")

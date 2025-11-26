@@ -129,9 +129,9 @@ VM_DIR=~/ublk-test
 VM_PASS=$(shell cat /tmp/devvm_pwd.txt)
 
 vm-copy: ublk-mem
-	@echo "📦 Copying ublk-mem and tests to VM..."
+	@echo "📦 Copying ublk-mem to VM..."
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true; rm -f $(VM_DIR)/ublk-mem"
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no ublk-mem test-e2e.sh test-benchmark.sh test-benchmark-simple.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@echo "✓ Copied."
 
 vm-run: ublk-mem vm-copy
@@ -186,9 +186,9 @@ vm-stress: ublk-mem
 
 vm-simple-benchmark: ublk-mem vm-copy
 	@echo "📊 Running simple benchmark with debugging on VM..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-benchmark-simple.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-quick-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-benchmark-simple.sh && timeout 60 ./test-benchmark-simple.sh"
+		"set -e; cd $(VM_DIR) && chmod +x ./vm-quick-bench.sh && timeout 120 ./vm-quick-bench.sh"
 	@echo "✅ VM simple benchmark completed"
 
 .PHONY: vm-e2e-80 vm-e2e-64 vm-e2e-80-raw vm-e2e-64-raw vm-run-env
@@ -222,21 +222,21 @@ vm-run-env: ublk-mem vm-copy
 .PHONY: vm-enable-logs vm-dump-logs
 vm-enable-logs:
 	@echo "🪵 Enabling maximal kernel logging on VM (io_uring + ublk + tracing)..."
-	@./vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
+	@scripts/vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
 
 vm-dump-logs:
 	@echo "📤 Dumping kernel logs and tracing buffers (last ~2k lines)..."
-	@./vm-ssh.sh 'bash -s' < scripts/vm-dump-logs.sh
+	@scripts/vm-ssh.sh 'bash -s' < scripts/vm-dump-logs.sh
 
 .PHONY: vm-debug vm-fetch-latest-logs
 vm-debug: ublk-mem vm-copy
 	@echo "🧪 Running deep debug on VM (strace + kernel tracing) ..."
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-debug-run.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
-	@./vm-ssh.sh 'bash -lc "cd ~/ublk-test && chmod +x ./vm-debug-run.sh && ./vm-debug-run.sh"'
+	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-test && chmod +x ./vm-debug-run.sh && ./vm-debug-run.sh"'
 
 vm-fetch-latest-logs:
 	@echo "📥 Fetching latest ublk-debug archive from VM home..."
-	@./vm-ssh.sh 'bash -lc "ls -1t ~ | grep ^ublk-debug- | head -1"' > build/.last_log 2>/dev/null || true
+	@scripts/vm-ssh.sh 'bash -lc "ls -1t ~ | grep ^ublk-debug- | head -1"' > build/.last_log 2>/dev/null || true
 	@[ -s build/.last_log ] && echo "Latest: $$(cat build/.last_log)" || (echo "No log archives found" && exit 1)
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST):~/$$(cat build/.last_log) build/
 	@echo "✓ Logs downloaded to build/$$(cat build/.last_log)"
@@ -244,14 +244,14 @@ vm-fetch-latest-logs:
 .PHONY: vm-install-go
 vm-install-go:
 	@echo "🛠️  Installing Go toolchain and build deps on VM..."
-	@./vm-ssh.sh 'bash -lc "sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Check-Valid-Until=false -o Acquire::AllowInsecureRepositories=true update -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go build-essential linux-libc-dev"'
-	@./vm-ssh.sh 'bash -lc "go version || echo go not found"'
+	@scripts/vm-ssh.sh 'bash -lc "sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Check-Valid-Until=false -o Acquire::AllowInsecureRepositories=true update -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go build-essential linux-libc-dev"'
+	@scripts/vm-ssh.sh 'bash -lc "go version || echo go not found"'
 	@echo "✓ VM Go installation step attempted"
 
 .PHONY: vm-fix-time
 vm-fix-time:
 	@echo "🕒 Attempting to sync VM time for apt validity..."
-	@./vm-ssh.sh 'bash -lc "sudo timedatectl set-ntp true || true; sudo systemctl restart systemd-timesyncd || true; sleep 3; timedatectl || true"'
+	@scripts/vm-ssh.sh 'bash -lc "sudo timedatectl set-ntp true || true; sudo systemctl restart systemd-timesyncd || true; sleep 3; timedatectl || true"'
 	@echo "✓ VM time sync attempted"
 
 .PHONY: vm-src-copy vm-build-e2e
@@ -260,13 +260,13 @@ vm-src-copy:
 	@mkdir -p build
 	@tar --exclude='./build' -czf build/ublk-src.tgz .
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no build/ublk-src.tgz $(VM_USER)@$(VM_HOST):~/
-	@./vm-ssh.sh 'bash -lc "rm -rf ~/ublk-src && mkdir -p ~/ublk-src && tar -xzf ~/ublk-src.tgz -C ~/ublk-src"'
+	@scripts/vm-ssh.sh 'bash -lc "rm -rf ~/ublk-src && mkdir -p ~/ublk-src && tar -xzf ~/ublk-src.tgz -C ~/ublk-src"'
 	@echo "✓ Source copied to VM"
 
 vm-build-e2e: vm-src-copy
 	@echo "🧰 Building on VM with cgo to use VM kernel headers..."
-	@./vm-ssh.sh 'bash -lc "cd ~/ublk-src && CGO_ENABLED=1 go build -o ublk-mem ./cmd/ublk-mem"'
-	@./vm-ssh.sh 'bash -lc "cd ~/ublk-src && chmod +x ./test-e2e.sh && sudo ./test-e2e.sh"'
+	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && CGO_ENABLED=1 go build -o ublk-mem ./cmd/ublk-mem"'
+	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && chmod +x ./test-e2e.sh && sudo ./test-e2e.sh"'
 
 # Run benchmarks
 benchmark:
@@ -418,7 +418,7 @@ minimal_test: minimal_test.c
 
 vm-minimal: minimal_test
 	sshpass -p "$$(cat /tmp/devvm_pwd.txt)" scp minimal_test behrlich@192.168.4.79:~/
-	./vm-ssh.sh "sudo ./minimal_test"
+	scripts/vm-ssh.sh "sudo ./minimal_test"
 
 # Copy entire repo to VM (excluding .git, build artifacts, etc.)
 vm-scp-all:
@@ -442,7 +442,7 @@ vm-scp-all:
 		-e "sshpass -p '$(VM_PASS)' ssh -o StrictHostKeyChecking=no" \
 		./ $(VM_USER)@$(VM_HOST):~/go-ublk/
 	@echo "✓ Repo copied to ~/go-ublk on VM"
-	@echo "💡 Run: ./vm-ssh.sh \"cd go-ublk && make build\" to build on VM"
+	@echo "💡 Run: scripts/vm-ssh.sh \"cd go-ublk && make build\" to build on VM"
 
 # --- Enhanced Debug Workflow ---
 .PHONY: vm-reset kernel-trace vm-simple-e2e
@@ -451,11 +451,11 @@ vm-scp-all:
 vm-reset:
 	@echo "🔄 Performing hard VM reset and clean environment setup..."
 	@echo "Step 1: Hard reset via sysrq..."
-	@timeout 3 ./vm-ssh.sh 'echo "Triggering hard reset..." && sudo bash -c "echo 1 > /proc/sys/kernel/sysrq && echo b > /proc/sysrq-trigger"' || echo "Reset triggered (expected timeout)"
+	@timeout 3 scripts/vm-ssh.sh 'sudo sh -c "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"' || echo "Reset triggered (expected timeout)"
 	@echo "Step 2: Waiting for VM to restart..."
 	@for i in $$(seq 1 30); do \
 		sleep 2; \
-		if ./vm-ssh.sh 'echo "VM is up"' >/dev/null 2>&1; then \
+		if scripts/vm-ssh.sh 'echo "VM is up"' >/dev/null 2>&1; then \
 			echo "✓ VM responsive after $$((i*2)) seconds"; \
 			break; \
 		fi; \
@@ -464,43 +464,43 @@ vm-reset:
 	@echo "Step 3: Waiting for system to fully initialize..."
 	@sleep 5
 	@echo "Step 4: Cleaning up any existing ublk devices..."
-	@./vm-ssh.sh 'sudo pkill -9 ublk-mem 2>/dev/null || true; sudo rm -f /dev/ublkb* /dev/ublkc* 2>/dev/null || true'
+	@scripts/vm-ssh.sh 'sudo pkill -9 ublk-mem 2>/dev/null || true; sudo rm -f /dev/ublkb* /dev/ublkc* 2>/dev/null || true'
 	@echo "Step 5: Reloading ublk module..."
-	@./vm-ssh.sh 'sudo modprobe -r ublk_drv 2>/dev/null || true; sudo modprobe ublk_drv'
+	@scripts/vm-ssh.sh 'sudo modprobe -r ublk_drv 2>/dev/null || true; sudo modprobe ublk_drv'
 	@echo "Step 6: Setting up enhanced kernel tracing..."
-	@./vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
+	@scripts/vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
 	@echo "Step 7: Verifying trace setup..."
-	@./vm-ssh.sh 'echo "Active kprobes:"; sudo cat /sys/kernel/tracing/kprobe_events | head -10 || echo "No kprobes set"'
+	@scripts/vm-ssh.sh 'echo "Active kprobes:"; sudo cat /sys/kernel/tracing/kprobe_events | head -10 || echo "No kprobes set"'
 	@echo "✅ VM reset and tracing setup complete"
 
 # Read kernel trace buffer
 kernel-trace:
 	@echo "📋 Reading kernel trace buffer..."
-	@./vm-ssh.sh 'sudo cat /sys/kernel/tracing/trace' | tail -n 50
+	@scripts/vm-ssh.sh 'sudo cat /sys/kernel/tracing/trace' | tail -n 50
 
 # Simple single read/write test with maximum verbosity
 vm-simple-e2e: ublk-mem vm-copy
 	@echo "🧪 Running simple single I/O test with maximum verbosity..."
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
 	@echo "Test will timeout after 60 seconds if hanging..."
-	@timeout 60 ./vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh' || \
+	@timeout 60 scripts/vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh' || \
 	 (echo "❌ Overall test timed out - checking VM state..." && \
 	  echo "=== FINAL KERNEL TRACE ===" && \
 	  make kernel-trace && \
 	  echo "=== FINAL DMESG ===" && \
-	  ./vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
+	  scripts/vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
 
 # FIO test to debug Direct I/O vs Buffered I/O issue
 vm-fio-simple-e2e: ublk-mem vm-copy
 	@echo "🧪 Running FIO debug test (buffered vs direct I/O)..."
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-fio-simple-e2e.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
 	@echo "Test will timeout after 60 seconds if hanging..."
-	@timeout 60 ./vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-fio-simple-e2e.sh && ./vm-fio-simple-e2e.sh' || \
+	@timeout 60 scripts/vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-fio-simple-e2e.sh && ./vm-fio-simple-e2e.sh' || \
 	 (echo "❌ Overall test timed out - checking VM state..." && \
 	  echo "=== FINAL KERNEL TRACE ===" && \
 	  make kernel-trace && \
 	  echo "=== FINAL DMESG ===" && \
-	  ./vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
+	  scripts/vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
 
 # Full test suite - runs build, reset VM, and all tests
 suite:
@@ -523,7 +523,7 @@ suite:
 vm-hang-debug: ublk-mem vm-copy
 	@echo "🔍 Running hang debug test with stack trace capture..."
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-hang-debug.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@./vm-ssh.sh 'cd ~/ublk-test && chmod +x ./test-hang-debug.sh && ./test-hang-debug.sh'
+	@scripts/vm-ssh.sh 'cd ~/ublk-test && chmod +x ./test-hang-debug.sh && ./test-hang-debug.sh'
 	@echo "Fetching stack trace files..."
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no "$(VM_USER)@$(VM_HOST):~/ublk-test/ublk-stacks-*.txt" . 2>/dev/null || echo "No stack trace files found"
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "sudo cat /root/ublk-test/ublk-stacks-*.txt 2>/dev/null" || echo "No root-owned stack files"

@@ -297,10 +297,10 @@ func BenchmarkMockBackendWrite(b *testing.B) {
 }
 
 func TestDeviceStateInspection(t *testing.T) {
-	// Test nil device
+	// Test nil device - nil is equivalent to closed (doesn't exist)
 	var device *Device
-	if device.State() != DeviceStateStopped {
-		t.Error("Nil device should be in stopped state")
+	if device.State() != DeviceStateClosed {
+		t.Error("Nil device should be in closed state")
 	}
 	if device.IsRunning() {
 		t.Error("Nil device should not be running")
@@ -375,5 +375,205 @@ func TestDeviceInfo(t *testing.T) {
 	}
 	if info.Size != 1024*1024 {
 		t.Errorf("Info.Size = %d, want %d", info.Size, 1024*1024)
+	}
+}
+
+// TestDeviceLifecycleStates tests the state transitions for the staged lifecycle API.
+// Note: We can't test actual device creation in unit tests (requires root + kernel module),
+// but we can test the state machine logic.
+func TestDeviceLifecycleStates(t *testing.T) {
+	backend := NewMockBackend(1024 * 1024)
+	options := &Options{}
+
+	// Test device states for manually constructed devices
+
+	// 1. Created state (before Start)
+	deviceCreated := &Device{
+		ID:        1,
+		Path:      "/dev/ublkb1",
+		CharPath:  "/dev/ublkc1",
+		Backend:   backend,
+		queues:    1,
+		depth:     32,
+		started:   false,
+		closed:    false,
+		options:   options,
+	}
+
+	if deviceCreated.State() != DeviceStateCreated {
+		t.Errorf("Device before Start should be in Created state, got %s", deviceCreated.State())
+	}
+	if deviceCreated.IsRunning() {
+		t.Error("Device before Start should not be running")
+	}
+
+	// 2. Running state (after Start)
+	ctx, cancel := context.WithCancel(context.Background())
+	deviceRunning := &Device{
+		ID:        2,
+		Path:      "/dev/ublkb2",
+		CharPath:  "/dev/ublkc2",
+		Backend:   backend,
+		queues:    1,
+		depth:     32,
+		started:   true,
+		closed:    false,
+		ctx:       ctx,
+		cancel:    cancel,
+		options:   options,
+	}
+
+	if deviceRunning.State() != DeviceStateRunning {
+		t.Errorf("Started device should be in Running state, got %s", deviceRunning.State())
+	}
+	if !deviceRunning.IsRunning() {
+		t.Error("Started device should be running")
+	}
+
+	// 3. Stopped state (context cancelled but not closed)
+	cancel() // Cancel the context
+	if deviceRunning.State() != DeviceStateStopped {
+		t.Errorf("Device with cancelled context should be in Stopped state, got %s", deviceRunning.State())
+	}
+	if deviceRunning.IsRunning() {
+		t.Error("Device with cancelled context should not be running")
+	}
+
+	// 4. Closed state
+	deviceClosed := &Device{
+		ID:        3,
+		Path:      "/dev/ublkb3",
+		CharPath:  "/dev/ublkc3",
+		Backend:   backend,
+		queues:    1,
+		depth:     32,
+		started:   false,
+		closed:    true,
+		options:   options,
+	}
+
+	if deviceClosed.State() != DeviceStateClosed {
+		t.Errorf("Closed device should be in Closed state, got %s", deviceClosed.State())
+	}
+	if deviceClosed.IsRunning() {
+		t.Error("Closed device should not be running")
+	}
+}
+
+// TestDeviceLifecycleAPIPreconditions tests that lifecycle methods enforce preconditions
+func TestDeviceLifecycleAPIPreconditions(t *testing.T) {
+	backend := NewMockBackend(1024 * 1024)
+	options := &Options{}
+
+	// Test Start on nil device
+	var nilDevice *Device
+	if err := nilDevice.Start(context.Background()); err == nil {
+		t.Error("Start on nil device should return error")
+	}
+
+	// Test Start on already started device
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedDevice := &Device{
+		ID:       1,
+		Backend:  backend,
+		started:  true,
+		closed:   false,
+		ctx:      ctx,
+		cancel:   cancel,
+		options:  options,
+	}
+	if err := startedDevice.Start(context.Background()); err == nil {
+		t.Error("Start on already started device should return error")
+	}
+
+	// Test Start on closed device
+	closedDevice := &Device{
+		ID:       2,
+		Backend:  backend,
+		started:  false,
+		closed:   true,
+		options:  options,
+	}
+	if err := closedDevice.Start(context.Background()); err == nil {
+		t.Error("Start on closed device should return error")
+	}
+
+	// Test Stop on nil device
+	if err := nilDevice.Stop(); err == nil {
+		t.Error("Stop on nil device should return error")
+	}
+
+	// Test Stop on not started device
+	notStartedDevice := &Device{
+		ID:       3,
+		Backend:  backend,
+		started:  false,
+		closed:   false,
+		options:  options,
+	}
+	if err := notStartedDevice.Stop(); err == nil {
+		t.Error("Stop on not started device should return error")
+	}
+
+	// Test Stop on closed device
+	if err := closedDevice.Stop(); err == nil {
+		t.Error("Stop on closed device should return error")
+	}
+
+	// Test Close on nil device
+	if err := nilDevice.Close(); err == nil {
+		t.Error("Close on nil device should return error")
+	}
+
+	// Test Close is idempotent (calling on already closed device returns nil)
+	if err := closedDevice.Close(); err != nil {
+		t.Errorf("Close on already closed device should return nil, got %v", err)
+	}
+}
+
+// TestDeviceInfoWithStates tests that DeviceInfo correctly reflects all states
+func TestDeviceInfoWithStates(t *testing.T) {
+	backend := NewMockBackend(1024 * 1024)
+
+	tests := []struct {
+		name          string
+		device        *Device
+		expectedState DeviceState
+	}{
+		{
+			name:          "nil device",
+			device:        nil,
+			expectedState: "", // Info() on nil returns empty struct
+		},
+		{
+			name: "created device",
+			device: &Device{
+				ID:      1,
+				Backend: backend,
+				started: false,
+				closed:  false,
+			},
+			expectedState: DeviceStateCreated,
+		},
+		{
+			name: "closed device",
+			device: &Device{
+				ID:      2,
+				Backend: backend,
+				started: false,
+				closed:  true,
+			},
+			expectedState: DeviceStateClosed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := tt.device.Info()
+			if info.State != tt.expectedState {
+				t.Errorf("Info.State = %s, want %s", info.State, tt.expectedState)
+			}
+		})
 	}
 }

@@ -9,14 +9,14 @@ Pure Go implementation of Linux ublk (userspace block driver).
 - ✅ **Device creation**: ADD_DEV, SET_PARAMS, START_DEV all working
 - ✅ **Block device**: /dev/ublkb0 created and functional
 - ✅ **Data integrity**: Perfect integrity with cryptographic MD5 verification
-- ✅ **Performance**: Excellent 504k IOPS write, 482k IOPS read
+- ✅ **Performance**: 80-110k IOPS (4K random, single queue QD=32)
 - ✅ **All I/O patterns**: Sequential, scattered, and multi-block operations verified
 - ✅ **End-to-end tested**: Comprehensive test suite passing
 
 **Latest test results:**
 - `make vm-simple-e2e`: ✅ PASS
 - `make vm-e2e`: ✅ **PASS** (all critical tests including data integrity)
-- Performance: 504k IOPS write, 482k IOPS read - **EXCELLENT**
+- Performance: 80k IOPS read, 110k IOPS write (single queue QD=32)
 - Data integrity: ✅ **VERIFIED** across all I/O patterns
 
 ## Installation
@@ -221,16 +221,19 @@ func TestMyFunction(t *testing.T) {
 
 ## Performance
 
-**Current Status (Functional Prototype):**
-- High-performance I/O: 1883 MiB/s read, 482k IOPS
-- Single queue implementation with room for multi-queue scaling
-- Performance competitive with kernel block devices
+**Current Status (Functional Prototype, Single Queue QD=32):**
+
+| Workload | go-ublk | Loop Device | Overhead |
+|----------|---------|-------------|----------|
+| 4K Random Read | 80k IOPS, 314 MiB/s | 210k IOPS, 820 MiB/s | 2.6x |
+| 4K Random Write | 110k IOPS, 430 MiB/s | 202k IOPS, 788 MiB/s | 1.8x |
+
+**Bottleneck:** Single-queue design limits parallelism. Multi-queue support needed for scaling.
 
 **Optimization roadmap:**
-- Multi-queue support with CPU affinity
+- Multi-queue support with CPU affinity (key for performance)
 - Buffer management optimization
 - Memory allocation profiling
-- Comparison benchmarks vs kernel loop device
 
 ## Testing
 

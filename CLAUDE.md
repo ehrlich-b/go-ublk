@@ -5,7 +5,6 @@
 - `README.md` - Project overview and usage
 - `TODO.md` - Production roadmap and cleanup tasks
 - `CLAUDE.md` - This file
-- `docs/STYLE.md` - Code style guide (naming, formatting, patterns)
 - `docs/REVIEW.md` - Detailed code review with cleanup recommendations
 
 ## Project Status: Stable Working Prototype
@@ -46,7 +45,7 @@ go-ublk/
 ├── *.go              # Public API (ublk package)
 ├── backend/          # Backend implementations (mem.go)
 ├── cmd/ublk-mem/     # Memory-backed device CLI
-├── docs/             # Documentation (STYLE.md, REVIEW.md, etc.)
+├── docs/             # Documentation (REVIEW.md, etc.)
 ├── scripts/          # Shell scripts (vm-ssh.sh, etc.)
 └── internal/
     ├── ctrl/         # Control plane (device lifecycle)
@@ -71,11 +70,10 @@ go-ublk/
 
 ## Development Workflow
 
-1. Read `docs/STYLE.md` for coding conventions
-2. Read `docs/REVIEW.md` for known issues and cleanup tasks
-3. Run `make test-unit` before committing
-4. Use `make vm-e2e` to verify I/O functionality
-5. Use `make vm-stress` to verify stability after significant changes
+1. Read `docs/REVIEW.md` for known issues and cleanup tasks
+2. Run `make test-unit` before committing
+3. Use `make vm-e2e` to verify I/O functionality
+4. Use `make vm-stress` to verify stability after significant changes
 
 ## Technical Constraints
 

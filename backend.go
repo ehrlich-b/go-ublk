@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/ehrlich-b/go-ublk/internal/constants"
@@ -58,7 +60,12 @@ type Device struct {
 	depth     int
 	blockSize int
 	started   bool
+	closed    bool
 	runners   []*queue.Runner
+
+	// Configuration preserved for Start()
+	params  DeviceParams
+	options *Options
 
 	// Metrics and observability
 	metrics  *Metrics
@@ -205,10 +212,10 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		observer = NewMetricsObserver(metrics)
 	}
 
-	// Determine actual number of queues (default to 1 if not specified)
+	// Determine actual number of queues (default to number of CPUs)
 	numQueues := params.NumQueues
 	if numQueues == 0 {
-		numQueues = 1 // Single queue for minimal implementation
+		numQueues = runtime.NumCPU()
 	}
 
 	// Create Device struct
@@ -227,17 +234,43 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 	device.ctx, device.cancel = context.WithCancel(ctx)
 
-	// Initialize queue runners before START_DEV
+	// Initialize and start queue runners before START_DEV
 	// The kernel waits for initial FETCH_REQ commands from all queues
+	// NOTE: The ublk character device can only be opened once (kernel enforces this)
+	// so we open it once and share the fd among all queues (each queue dups it)
+	logger := logging.Default()
+
+	// Open character device once (kernel only allows single open)
+	charPath := fmt.Sprintf("/dev/ublkc%d", devID)
+	var charFd int
+	for i := 0; i < 50; i++ { // Retry for up to 5s waiting for udev
+		var err error
+		charFd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
+		if err == nil {
+			logger.Info("opened char device for multi-queue", "fd", charFd, "path", charPath)
+			break
+		}
+		if err != syscall.ENOENT {
+			return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if charFd == 0 {
+		ctrl.DeleteDevice(devID)
+		return nil, fmt.Errorf("character device did not appear: %s", charPath)
+	}
+
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
 		runnerConfig := queue.Config{
-			DevID:    devID,
-			QueueID:  uint16(i),
-			Depth:    params.QueueDepth,
-			Backend:  params.Backend,
-			Logger:   options.Logger,
-			Observer: observer,
+			DevID:       devID,
+			QueueID:     uint16(i),
+			Depth:       params.QueueDepth,
+			Backend:     params.Backend,
+			Logger:      options.Logger,
+			Observer:    observer,
+			CPUAffinity: params.CPUAffinity,
+			CharFd:      charFd, // Share the fd (runner will dup it)
 		}
 
 		runner, err := queue.NewRunner(device.ctx, runnerConfig)
@@ -252,12 +285,11 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
 		}
 		device.runners[i] = runner
-	}
 
-	// Start queue runners and submit FETCH_REQs before START_DEV
-	for i := 0; i < numQueues; i++ {
-		if err := device.runners[i].Start(); err != nil {
-			for j := 0; j < len(device.runners); j++ {
+		// Start this runner immediately (submit FETCH_REQs)
+		// This must happen before creating the next queue
+		if err := runner.Start(); err != nil {
+			for j := 0; j <= i; j++ {
 				if device.runners[j] != nil {
 					device.runners[j].Close()
 				}
@@ -286,7 +318,6 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 	// Small delay to ensure kernel has processed FETCH_REQs before declaring ready
 	// The 250ms was too long, but there's a real race condition that needs timing
-	logger := logging.Default()
 	time.Sleep(1 * time.Millisecond) // Minimal delay instead of 250ms * queue_depth
 	logger.Info("device initialization complete")
 
@@ -297,6 +328,308 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	return device, nil
 }
 
+// Create creates a ublk device without starting I/O processing.
+// Use this when you need more control over the device lifecycle.
+// After Create, call Start() to begin serving I/O, Stop() to pause,
+// and Close() for full cleanup.
+//
+// Example:
+//
+//	device, err := ublk.Create(params, options)
+//	if err != nil {
+//	    return err
+//	}
+//	defer device.Close()
+//
+//	if err := device.Start(ctx); err != nil {
+//	    return err
+//	}
+//	// Device is now serving I/O
+func Create(params DeviceParams, options *Options) (*Device, error) {
+	if options == nil {
+		options = &Options{}
+	}
+
+	// Create controller
+	controller, err := createController()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create controller: %v", err)
+	}
+	defer controller.Close()
+
+	// Convert params to internal format
+	ctrlParams := convertToCtrlParams(params)
+
+	// Create device using control plane
+	devID, err := controller.AddDevice(&ctrlParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add device: %v", err)
+	}
+
+	// Set parameters
+	err = controller.SetParams(devID, &ctrlParams)
+	if err != nil {
+		controller.DeleteDevice(devID)
+		return nil, fmt.Errorf("failed to set parameters: %v", err)
+	}
+
+	// Initialize metrics and observer
+	metrics := NewMetrics()
+	var observer Observer = &NoOpObserver{}
+	if options.Observer != nil {
+		observer = options.Observer
+	} else {
+		observer = NewMetricsObserver(metrics)
+	}
+
+	// Determine actual number of queues (default to number of CPUs)
+	numQueues := params.NumQueues
+	if numQueues == 0 {
+		numQueues = runtime.NumCPU()
+	}
+
+	// Create Device struct
+	device := &Device{
+		ID:        devID,
+		Path:      fmt.Sprintf("/dev/ublkb%d", devID),
+		CharPath:  fmt.Sprintf("/dev/ublkc%d", devID),
+		Backend:   params.Backend,
+		queues:    numQueues,
+		depth:     params.QueueDepth,
+		blockSize: params.LogicalBlockSize,
+		started:   false,
+		closed:    false,
+		params:    params,
+		options:   options,
+		metrics:   metrics,
+		observer:  observer,
+	}
+
+	if options.Logger != nil {
+		options.Logger.Printf("Device created: %s (ID: %d) - call Start() to begin I/O", device.Path, device.ID)
+	}
+
+	return device, nil
+}
+
+// Start begins serving I/O requests for a device created with Create().
+// The context controls the lifetime of I/O processing.
+// Returns an error if the device is already started or has been closed.
+func (d *Device) Start(ctx context.Context) error {
+	if d == nil {
+		return ErrInvalidParameters
+	}
+	if d.closed {
+		return fmt.Errorf("device is closed")
+	}
+	if d.started {
+		return fmt.Errorf("device is already started")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	d.ctx, d.cancel = context.WithCancel(ctx)
+
+	// Initialize queue runners
+	d.runners = make([]*queue.Runner, d.queues)
+	for i := 0; i < d.queues; i++ {
+		runnerConfig := queue.Config{
+			DevID:       d.ID,
+			QueueID:     uint16(i),
+			Depth:       d.depth,
+			Backend:     d.Backend,
+			Logger:      d.options.Logger,
+			Observer:    d.observer,
+			CPUAffinity: d.params.CPUAffinity,
+		}
+
+		runner, err := queue.NewRunner(d.ctx, runnerConfig)
+		if err != nil {
+			// Cleanup already created runners
+			for j := 0; j < i; j++ {
+				if d.runners[j] != nil {
+					d.runners[j].Close()
+				}
+			}
+			d.runners = nil
+			return fmt.Errorf("failed to create queue runner %d: %v", i, err)
+		}
+		d.runners[i] = runner
+	}
+
+	// Start queue runners and submit FETCH_REQs before START_DEV
+	for i := 0; i < d.queues; i++ {
+		if err := d.runners[i].Start(); err != nil {
+			for j := 0; j < len(d.runners); j++ {
+				if d.runners[j] != nil {
+					d.runners[j].Close()
+				}
+			}
+			d.runners = nil
+			return fmt.Errorf("failed to start queue runner %d: %v", i, err)
+		}
+	}
+
+	// Give kernel time to see FETCH_REQs
+	time.Sleep(constants.QueueInitDelay)
+
+	// Create temporary controller for START_DEV
+	controller, err := createController()
+	if err != nil {
+		for j := 0; j < len(d.runners); j++ {
+			if d.runners[j] != nil {
+				d.runners[j].Close()
+			}
+		}
+		d.runners = nil
+		return fmt.Errorf("failed to create controller for start: %v", err)
+	}
+	defer controller.Close()
+
+	// Submit START_DEV after FETCH_REQs are in place
+	err = controller.StartDevice(d.ID)
+	if err != nil {
+		for j := 0; j < len(d.runners); j++ {
+			if d.runners[j] != nil {
+				d.runners[j].Close()
+			}
+		}
+		d.runners = nil
+		return fmt.Errorf("failed to START_DEV: %v", err)
+	}
+
+	d.started = true
+
+	// Small delay to ensure kernel has processed FETCH_REQs
+	logger := logging.Default()
+	time.Sleep(1 * time.Millisecond)
+	logger.Info("device started")
+
+	if d.options.Logger != nil {
+		d.options.Logger.Printf("Device %s started with %d queues", d.Path, d.queues)
+	}
+
+	return nil
+}
+
+// Stop stops I/O processing but keeps the device registered with the kernel.
+// Call Close() for full cleanup, or Start() to resume I/O processing.
+// Returns an error if the device is not started or has been closed.
+func (d *Device) Stop() error {
+	if d == nil {
+		return ErrInvalidParameters
+	}
+	if d.closed {
+		return fmt.Errorf("device is closed")
+	}
+	if !d.started {
+		return fmt.Errorf("device is not started")
+	}
+
+	// Cancel context to signal goroutines to stop
+	if d.cancel != nil {
+		d.cancel()
+	}
+
+	// Mark metrics as stopped
+	if d.metrics != nil {
+		d.metrics.Stop()
+	}
+
+	// Give goroutines a moment to see the cancellation
+	time.Sleep(10 * time.Millisecond)
+
+	// Stop queue runners
+	for _, runner := range d.runners {
+		if runner != nil {
+			runner.Close()
+		}
+	}
+	d.runners = nil
+
+	// Create controller to stop device
+	controller, err := createController()
+	if err != nil {
+		return fmt.Errorf("failed to create controller for stop: %v", err)
+	}
+	defer controller.Close()
+
+	// Stop device in kernel (device stays registered)
+	err = controller.StopDevice(d.ID)
+	if err != nil {
+		return fmt.Errorf("failed to stop device: %v", err)
+	}
+
+	d.started = false
+
+	if d.options != nil && d.options.Logger != nil {
+		d.options.Logger.Printf("Device %s stopped", d.Path)
+	}
+
+	return nil
+}
+
+// Close performs full cleanup: stops I/O (if running) and removes the device.
+// After Close(), the device cannot be reused.
+func (d *Device) Close() error {
+	if d == nil {
+		return ErrInvalidParameters
+	}
+	if d.closed {
+		return nil // Already closed, idempotent
+	}
+
+	// Stop first if running
+	if d.started {
+		// Cancel context
+		if d.cancel != nil {
+			d.cancel()
+		}
+
+		// Mark metrics as stopped
+		if d.metrics != nil {
+			d.metrics.Stop()
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Stop queue runners
+		for _, runner := range d.runners {
+			if runner != nil {
+				runner.Close()
+			}
+		}
+		d.runners = nil
+		d.started = false
+	}
+
+	// Create controller for cleanup
+	controller, err := createController()
+	if err != nil {
+		return fmt.Errorf("failed to create controller for close: %v", err)
+	}
+	defer controller.Close()
+
+	// Stop device if not already stopped
+	// Ignore error here - device might already be stopped
+	_ = controller.StopDevice(d.ID)
+
+	// Delete device from kernel
+	err = controller.DeleteDevice(d.ID)
+	if err != nil {
+		return fmt.Errorf("failed to delete device: %v", err)
+	}
+
+	d.closed = true
+
+	if d.options != nil && d.options.Logger != nil {
+		d.options.Logger.Printf("Device %s closed", d.Path)
+	}
+
+	return nil
+}
+
 // DeviceState represents the current state of a ublk device
 type DeviceState string
 
@@ -305,14 +638,20 @@ const (
 	DeviceStateCreated DeviceState = "created"
 	// DeviceStateRunning indicates the device is actively serving I/O
 	DeviceStateRunning DeviceState = "running"
-	// DeviceStateStopped indicates the device has been stopped
+	// DeviceStateStopped indicates the device has been stopped but is still registered
 	DeviceStateStopped DeviceState = "stopped"
+	// DeviceStateClosed indicates the device has been fully closed and removed
+	DeviceStateClosed DeviceState = "closed"
 )
 
 // State returns the current state of the device
 func (d *Device) State() DeviceState {
 	if d == nil {
-		return DeviceStateStopped
+		return DeviceStateClosed
+	}
+
+	if d.closed {
+		return DeviceStateClosed
 	}
 
 	if !d.started {
@@ -426,53 +765,11 @@ func (d *Device) MetricsSnapshot() MetricsSnapshot {
 
 // StopAndDelete stops the device and removes it from the system.
 // This should be called to cleanly shut down a ublk device.
+//
+// Deprecated: Use device.Close() instead for the same behavior.
+// StopAndDelete is kept for backward compatibility.
 func StopAndDelete(ctx context.Context, device *Device) error {
-	if device == nil {
-		return ErrInvalidParameters
-	}
-
-	// Cancel context first to signal all goroutines to stop
-	if device.cancel != nil {
-		device.cancel()
-	}
-
-	// Mark metrics as stopped
-	if device.metrics != nil {
-		device.metrics.Stop()
-	}
-
-	// Give goroutines a moment to see the cancellation
-	time.Sleep(10 * time.Millisecond)
-
-	// Stop and cleanup queue runners
-	for _, runner := range device.runners {
-		if runner != nil {
-			runner.Close()
-		}
-	}
-	device.runners = nil
-
-	// Create controller for cleanup
-	ctrl, err := createController()
-	if err != nil {
-		return fmt.Errorf("failed to create controller for cleanup: %v", err)
-	}
-	defer ctrl.Close()
-
-	// Stop device
-	err = ctrl.StopDevice(device.ID)
-	if err != nil {
-		return fmt.Errorf("failed to stop device: %v", err)
-	}
-
-	// Delete device
-	err = ctrl.DeleteDevice(device.ID)
-	if err != nil {
-		return fmt.Errorf("failed to delete device: %v", err)
-	}
-
-	device.started = false
-	return nil
+	return device.Close()
 }
 
 // createController creates a new control plane controller

@@ -8,15 +8,16 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
 - Block device: /dev/ublkb0 appears and accepts I/O
 - Data integrity: Verified via MD5 across all I/O patterns
-- Performance: ~500k IOPS (4K random read/write)
+- Performance: 80-110k IOPS (4K random, single queue QD=32)
 - Stability: Passes stress tests (10x alternating e2e + benchmark)
 
-**Performance baseline (2025-11-25):**
-| Workload | IOPS | Throughput |
-|----------|------|------------|
-| 4K Random Write | 504k | ~2.0 GB/s |
-| 4K Random Read | 482k | ~1.9 GB/s |
-| 128K Sequential | 9.5k | ~1.2 GB/s |
+**Performance baseline (2025-11-25, single queue, QD=32):**
+| Workload | go-ublk | Loop Device | Overhead |
+|----------|---------|-------------|----------|
+| 4K Random Read | 80k IOPS, 314 MiB/s | 210k IOPS, 820 MiB/s | 2.6x |
+| 4K Random Write | 110k IOPS, 430 MiB/s | 202k IOPS, 788 MiB/s | 1.8x |
+
+*Performance limited by single-queue design - multi-queue (Phase 3.1) needed for scaling.*
 
 ---
 
@@ -79,19 +80,22 @@ The code is well-abstracted behind the `Ring` interface.
 - [x] Simplify to single error type (removed legacy `UblkError` string type)
 - [x] Support `errors.Is()` and `errors.As()` via sentinel errors
 
-### 2.2 Device Lifecycle API
-Current API is monolithic:
-```go
-device, err := ublk.CreateAndServe(ctx, params, options)
-```
-
-Consider staged lifecycle for better control:
+### 2.2 Device Lifecycle API ✅ DONE
+Implemented staged lifecycle for better control:
 ```go
 device, err := ublk.Create(params, options)  // validate, allocate
 err = device.Start(ctx)                       // start I/O processing
 device.Stop()                                 // stop I/O, keep device
 device.Close()                                // full cleanup
 ```
+
+- [x] Implement `Create()` function for device creation without starting I/O
+- [x] Implement `Start()` method to begin I/O processing
+- [x] Implement `Stop()` method to stop I/O but keep device registered
+- [x] Implement `Close()` method for full cleanup
+- [x] Deprecate `StopAndDelete()` in favor of `Close()`
+- [x] Add `DeviceStateClosed` state for fully closed devices
+- [x] Add unit tests for lifecycle state machine
 
 ### 2.3 Observability ✅ DONE
 - [x] Wire up existing Metrics to I/O loop via Observer interface
@@ -102,11 +106,16 @@ device.Close()                                // full cleanup
 
 ## Phase 3: Performance
 
-### 3.1 Multi-Queue Support
-Currently single queue limits scaling:
-- [ ] Add NumQueues parameter
-- [ ] Per-queue goroutine with CPU affinity
-- [ ] Benchmark linear scaling
+### 3.1 Multi-Queue Support ✅ DONE
+- [x] Add NumQueues parameter (auto-detects CPU count when 0)
+- [x] Per-queue goroutine with CPU affinity support
+- [x] `--queues` CLI flag for ublk-mem
+- [x] Multi-queue device initialization (all queues start, START_DEV completes)
+- [x] Multi-queue I/O handling (reads and writes working)
+- [ ] Benchmark linear scaling (current: ~50-70k IOPS with 4 queues)
+
+**Implementation:** Character device opened once, fd shared via dup() to all queues.
+Each queue has its own io_uring ring and runs in a dedicated goroutine with LockOSThread().
 
 ### 3.2 Memory Optimization
 - [ ] Buffer pool to eliminate >64KB dynamic allocation on hot path
