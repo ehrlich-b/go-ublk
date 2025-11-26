@@ -3,14 +3,20 @@ package ublk
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"syscall"
+)
+
+const (
+	// NoQueue indicates that an error is not associated with a specific queue
+	NoQueue = -1
 )
 
 // Error represents a structured ublk error with context and errno mapping
 type Error struct {
 	Op     string        // Operation that failed (e.g., "CREATE_DEV", "START_DEV")
 	DevID  uint32        // Device ID (0 if not applicable)
-	Queue  int           // Queue number (-1 if not applicable)
+	Queue  int           // Queue number (NoQueue if not applicable)
 	Code   UblkErrorCode // High-level error category
 	Errno  syscall.Errno // Kernel errno (0 if not applicable)
 	Msg    string        // Human-readable message
@@ -43,7 +49,7 @@ func (e *Error) Error() string {
 	}
 
 	if len(parts) > 0 {
-		return fmt.Sprintf("ublk: %s (%s)", msg, fmt.Sprintf("%s", parts[0]))
+		return fmt.Sprintf("ublk: %s (%s)", msg, strings.Join(parts, ", "))
 	}
 
 	return fmt.Sprintf("ublk: %s", msg)
@@ -86,16 +92,16 @@ const (
 
 // Sentinel errors for use with errors.Is()
 var (
-	ErrNotImplemented     = &Error{Code: ErrCodeNotImplemented, Msg: "not implemented", Queue: -1}
-	ErrDeviceNotFound     = &Error{Code: ErrCodeDeviceNotFound, Msg: "device not found", Queue: -1}
-	ErrDeviceBusy         = &Error{Code: ErrCodeDeviceBusy, Msg: "device busy", Queue: -1}
-	ErrInvalidParameters  = &Error{Code: ErrCodeInvalidParameters, Msg: "invalid parameters", Queue: -1}
-	ErrKernelNotSupported = &Error{Code: ErrCodeKernelNotSupported, Msg: "kernel does not support ublk", Queue: -1}
-	ErrPermissionDenied   = &Error{Code: ErrCodePermissionDenied, Msg: "permission denied", Queue: -1}
-	ErrInsufficientMemory = &Error{Code: ErrCodeInsufficientMemory, Msg: "insufficient memory", Queue: -1}
-	ErrIOError            = &Error{Code: ErrCodeIOError, Msg: "I/O error", Queue: -1}
-	ErrTimeout            = &Error{Code: ErrCodeTimeout, Msg: "timeout", Queue: -1}
-	ErrDeviceOffline      = &Error{Code: ErrCodeDeviceOffline, Msg: "device offline", Queue: -1}
+	ErrNotImplemented     = &Error{Code: ErrCodeNotImplemented, Msg: "not implemented", Queue: NoQueue}
+	ErrDeviceNotFound     = &Error{Code: ErrCodeDeviceNotFound, Msg: "device not found", Queue: NoQueue}
+	ErrDeviceBusy         = &Error{Code: ErrCodeDeviceBusy, Msg: "device busy", Queue: NoQueue}
+	ErrInvalidParameters  = &Error{Code: ErrCodeInvalidParameters, Msg: "invalid parameters", Queue: NoQueue}
+	ErrKernelNotSupported = &Error{Code: ErrCodeKernelNotSupported, Msg: "kernel does not support ublk", Queue: NoQueue}
+	ErrPermissionDenied   = &Error{Code: ErrCodePermissionDenied, Msg: "permission denied", Queue: NoQueue}
+	ErrInsufficientMemory = &Error{Code: ErrCodeInsufficientMemory, Msg: "insufficient memory", Queue: NoQueue}
+	ErrIOError            = &Error{Code: ErrCodeIOError, Msg: "I/O error", Queue: NoQueue}
+	ErrTimeout            = &Error{Code: ErrCodeTimeout, Msg: "timeout", Queue: NoQueue}
+	ErrDeviceOffline      = &Error{Code: ErrCodeDeviceOffline, Msg: "device offline", Queue: NoQueue}
 )
 
 // Error constructors

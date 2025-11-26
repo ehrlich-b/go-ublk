@@ -28,14 +28,14 @@ The codebase implements a pure Go ublk driver that **works** (~500k IOPS, 1.6-2.
 
 #### `backend.go` (515 lines)
 
-**Purpose:** Main public API - Device struct, CreateAndServe, StopAndDelete
+**Purpose:** Main public API - Device struct, CreateAndServe, Close
 
 **Critical Functions:**
 
 | Function | Lines | Verdict | Notes |
 |----------|-------|---------|-------|
 | `CreateAndServe` | 162-296 | OK | Main entry point, works correctly |
-| `StopAndDelete` | 427-474 | OK | Cleanup works |
+| `Close` | 427-474 | OK | Cleanup works |
 | `convertToCtrlParams` | 482-512 | CLEANUP | Just copies fields - could be simpler |
 | `waitLive` | 17-34 | SUSPICIOUS | Always returns nil - dead logic? |
 | `createController` | 477-479 | TRIVIAL | One-liner, could inline |

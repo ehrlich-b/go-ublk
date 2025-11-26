@@ -20,7 +20,6 @@ const (
 type Controller struct {
 	controlFd int
 	ring      uring.Ring
-	useIoctl  bool
 	logger    *logging.Logger
 }
 
@@ -45,7 +44,6 @@ func NewController() (*Controller, error) {
 	return &Controller{
 		controlFd: fd,
 		ring:      ring,
-		useIoctl:  true,
 		logger:    logging.Default(),
 	}, nil
 }
@@ -112,8 +110,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 
 	c.logger.Debug("device info buffer", "size", len(infoBuf), "data", fmt.Sprintf("%x", infoBuf))
 
-	// ALWAYS use ioctl encoding - kernel 6.11+ requires it
-	c.useIoctl = true
+	// Use ioctl encoding - required by modern kernels (6.11+)
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
@@ -190,10 +187,7 @@ func (c *Controller) SetParams(devID uint32, params *DeviceParams) error {
 		Reserved:   0,
 	}
 
-	var op uint32 = uapi.UBLK_CMD_SET_PARAMS
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
+	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_SET_PARAMS)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
 		return fmt.Errorf("SET_PARAMS failed: %v", err)
@@ -220,10 +214,7 @@ func (c *Controller) StartDevice(devID uint32) error {
 		Pad:        0,
 		Reserved:   0,
 	}
-	var op uint32 = uapi.UBLK_CMD_START_DEV
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
+	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
 		return fmt.Errorf("START_DEV failed: %v", err)
@@ -249,10 +240,7 @@ func (c *Controller) StopDevice(devID uint32) error {
 		Pad:        0,
 		Reserved:   0,
 	}
-	var op uint32 = uapi.UBLK_CMD_STOP_DEV
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
+	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_STOP_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
 		return fmt.Errorf("STOP_DEV failed: %v", err)
@@ -276,10 +264,7 @@ func (c *Controller) DeleteDevice(devID uint32) error {
 		Pad:        0,
 		Reserved:   0,
 	}
-	var op uint32 = uapi.UBLK_CMD_DEL_DEV
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
+	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_DEL_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
 		return fmt.Errorf("DEL_DEV failed: %v", err)
@@ -306,10 +291,7 @@ func (c *Controller) GetDeviceInfo(devID uint32) (*uapi.UblksrvCtrlDevInfo, erro
 		Reserved:   0,
 	}
 
-	var op uint32 = uapi.UBLK_CMD_GET_DEV_INFO
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
+	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_DEV_INFO)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
 		return nil, fmt.Errorf("GET_DEV_INFO failed: %v", err)
@@ -339,10 +321,7 @@ func (c *Controller) GetParams(devID uint32) (*uapi.UblkParams, error) {
 		Reserved:   0,
 	}
 
-	var op uint32 = uapi.UBLK_CMD_GET_PARAMS
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
+	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_PARAMS)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
 		return nil, fmt.Errorf("GET_PARAMS failed: %v", err)

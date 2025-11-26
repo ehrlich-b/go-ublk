@@ -71,7 +71,7 @@ func TestIntegrationDeviceLifecycle(t *testing.T) {
 
 	// Clean up
 	defer func() {
-		if err := ublk.StopAndDelete(ctx, device); err != nil {
+		if err := device.Close(); err != nil {
 			t.Logf("Cleanup error (expected in test env): %v", err)
 		}
 	}()

@@ -58,6 +58,12 @@ const (
 	// to the kernel before we call START_DEV. Empirically, 100ms is
 	// sufficient; shorter delays risk START_DEV timeout on loaded systems.
 	QueueInitDelay = 100 * time.Millisecond
+
+	// CharDeviceOpenRetries is the number of times to retry opening the
+	// character device before giving up. With a 100ms sleep between retries,
+	// 50 retries = 5 seconds total timeout, which accounts for slow udev
+	// processing on heavily loaded systems.
+	CharDeviceOpenRetries = 50
 )
 
 // Memory allocation constants

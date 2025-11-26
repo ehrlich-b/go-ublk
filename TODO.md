@@ -1,5 +1,9 @@
 # TODO.md - Production Roadmap
 
+**See also:** [review_todo.md](review_todo.md) - Comprehensive micro-level code review and cleanup tasks
+
+---
+
 ## ✅ PERFORMANCE TARGET ACHIEVED
 
 **Target:** ~50% of loop device ✅ **EXCEEDED**
@@ -42,35 +46,38 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 ---
 
-## Phase 0: Code Cleanup (IMMEDIATE)
+## Phase 0: Code Cleanup ✅ COMPLETED
 
-**See [docs/REVIEW.md](docs/REVIEW.md) for detailed file-by-file analysis.**
+**See [review_todo.md](review_todo.md) for detailed cleanup status.**
 
-### 0.1 Delete Dead Code (~400-500 lines) ✅ DONE
-- [x] Delete `internal/uring/iouring.go` and `iouring_stub.go` (unused `giouring` build tag)
-- [x] Delete from runner.go: `NewWaitingRunner`, `waitAndStartDataPlane`, `initializeDataPlane`
-  - Note: `NewStubRunner` kept for unit tests, `stubLoop` kept for defensive stub fallback
-- [x] Delete from control.go: `StartDataPlane`, `StartDeviceAsync`, `AsyncStartHandle`
-- [x] Delete from errors.go: unused constructors (`NewDeviceError`, `NewQueueError`, `NewErrorWithErrno`)
-- [x] Delete from logger.go: unused domain methods (`ControlStart`, `ControlSuccess`, `ControlError`, `IOStart`, `IOComplete`, `IOError`, `RingSubmit`, `RingComplete`, `MemoryMap`, `MemoryUnmap`)
+### 0.1 Delete Dead Code ✅ DONE
+- [x] Deleted unused `giouring` build tag files
+- [x] Deleted unused logging domain methods (~100 lines)
+- [x] Deleted deprecated `StopAndDelete()` function - use `device.Close()` instead
+- [x] Removed hard-coded `useIoctl` field (always true, now always uses ioctl encoding)
+- [x] Fixed stub fallback to return errors instead of fake success
 
 ### 0.2 Fix Bugs ✅ DONE
-- [x] Fix `directUnmarshal` in marshal.go (use reflect like directMarshal)
-- [x] Fix `waitLive` in backend.go (return error on timeout instead of nil)
-- [x] Fix `device.queues` mismatch (calculate numQueues before creating Device struct)
+- [x] Fixed `directUnmarshal` in marshal.go (already using reflect correctly)
+- [x] Fixed `waitLive` in backend.go (returns error on timeout)
+- [x] Fixed `charFd` initialization bug (now correctly initialized to -1)
+- [x] Fixed error string formatting (now joins all context parts with commas)
 
-### 0.3 Consolidate Interfaces ✅ DONE
-- [x] Simplify `internal/interfaces` to just Backend, DiscardBackend, Logger (removed 75 lines)
-- [x] Define `Logger` directly in interfaces.go (removed alias and import)
-- [ ] Merge `ctrl.DeviceParams` with public `DeviceParams` (blocked by circular imports - intentionally separate)
+### 0.3 Code Quality Improvements ✅ DONE
+- [x] Added `const NoQueue = -1` for error queue sentinel value
+- [x] Added `const CharDeviceOpenRetries = 50` for device open retry count
+- [x] Added runtime check for `numLatencyBuckets` consistency with `LatencyBuckets`
+- [x] Simplified interfaces to Backend, DiscardBackend, Logger
+- [x] DeviceParams duplication intentionally kept (blocked by circular imports)
 
 ### 0.4 Environment Variable Hacks ✅ DONE
-- [x] Remove `UBLK_DEVINFO_LEN` env var hack in control.go
-- [x] `UBLK_CTRL_ENC` not present in Go code (only Makefile test variations)
+- [x] Removed `UBLK_DEVINFO_LEN` env var hack
+- [x] `UBLK_CTRL_ENC` only in Makefile (not in Go code)
 
 ### 0.5 Documentation ✅ DONE
-- [x] Document magic timing constants (why 100ms? why 500ms?)
-- [x] Move hot-path logging to debug level
+- [x] Documented all magic timing constants with WHY comments
+- [x] Hot-path logging moved to debug level
+- [x] All unit tests passing
 
 ---
 
@@ -115,6 +122,7 @@ device.Close()                                // full cleanup
 - [x] Implement `Stop()` method to stop I/O but keep device registered
 - [x] Implement `Close()` method for full cleanup
 - [x] Deprecate `StopAndDelete()` in favor of `Close()`
+- [x] Delete deprecated `StopAndDelete()` function - all code now uses `device.Close()`
 - [x] Add `DeviceStateClosed` state for fully closed devices
 - [x] Add unit tests for lifecycle state machine
 
@@ -167,6 +175,13 @@ Concurrent I/O to different memory regions no longer contends on a single mutex.
 - [ ] Fuzzing for UAPI marshal/unmarshal
 - [ ] Invariant assertions around unsafe operations
 - [ ] Graceful handling of kernel version differences
+- [ ] **Kernel compatibility testing matrix**
+  - [ ] Define minimum supported kernel version (6.1? 6.6?)
+  - [ ] Test on: Ubuntu 22.04 LTS (5.15), 24.04 LTS (6.8)
+  - [ ] Test on: Fedora 39 (6.6), Fedora 40 (6.8)
+  - [ ] Test on: Arch (latest stable), Debian stable
+  - [ ] Document ublk feature availability by kernel version
+  - [ ] CI matrix testing across kernel versions (GitHub Actions or similar)
 
 ### 4.2 Feature Completeness
 - [ ] NEED_GET_DATA path for kernel compatibility

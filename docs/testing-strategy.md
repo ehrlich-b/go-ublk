@@ -68,7 +68,7 @@ func TestDeviceLifecycle(t *testing.T) {
         },
     })
     require.NoError(t, err)
-    defer ublk.StopAndDelete(ctx, device)
+    defer device.Close()
     
     // Verify device exists
     _, err = os.Stat(device.Path)
@@ -173,7 +173,7 @@ func TestStressDeviceChurn(t *testing.T) {
         // Random operations
         time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
         
-        err = ublk.StopAndDelete(ctx, device)
+        err = device.Close()
         assert.NoError(t, err)
         
         cancel()

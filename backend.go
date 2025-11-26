@@ -242,8 +242,8 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 	// Open character device once (kernel only allows single open)
 	charPath := fmt.Sprintf("/dev/ublkc%d", devID)
-	var charFd int
-	for i := 0; i < 50; i++ { // Retry for up to 5s waiting for udev
+	charFd := -1
+	for i := 0; i < constants.CharDeviceOpenRetries; i++ { // Retry for up to 5s waiting for udev
 		var err error
 		charFd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
 		if err == nil {
@@ -255,7 +255,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if charFd == 0 {
+	if charFd < 0 {
 		ctrl.DeleteDevice(devID)
 		return nil, fmt.Errorf("character device did not appear: %s", charPath)
 	}
@@ -761,15 +761,6 @@ func (d *Device) MetricsSnapshot() MetricsSnapshot {
 		return MetricsSnapshot{}
 	}
 	return d.metrics.Snapshot()
-}
-
-// StopAndDelete stops the device and removes it from the system.
-// This should be called to cleanly shut down a ublk device.
-//
-// Deprecated: Use device.Close() instead for the same behavior.
-// StopAndDelete is kept for backward compatibility.
-func StopAndDelete(ctx context.Context, device *Device) error {
-	return device.Close()
 }
 
 // createController creates a new control plane controller

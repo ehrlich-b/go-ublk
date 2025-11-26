@@ -4,6 +4,7 @@
 
 - `README.md` - Project overview and usage
 - `TODO.md` - Production roadmap and cleanup tasks
+- `STYLE.md` - Code style and visual consistency rules
 - `CLAUDE.md` - This file
 - `docs/REVIEW.md` - Detailed code review with cleanup recommendations
 

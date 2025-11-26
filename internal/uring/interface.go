@@ -94,9 +94,8 @@ func NewRing(config Config) (Ring, error) {
 
 	ring, err := NewMinimalRing(config.Entries, config.FD)
 	if err != nil {
-		logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
-		logger.Warn("using stub ring - this breaks actual functionality")
-		return &stubRing{config: config}, nil
+		logger.Error("failed to create io_uring", "error", err)
+		return nil, err
 	}
 
 	logger.Info("created io_uring", "entries", config.Entries)

@@ -1,6 +1,7 @@
 package ublk
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -18,7 +19,14 @@ var LatencyBuckets = []uint64{
 	10_000_000_000, // 10s
 }
 
+// numLatencyBuckets must match len(LatencyBuckets) - verified at init time
 const numLatencyBuckets = 8
+
+func init() {
+	if len(LatencyBuckets) != numLatencyBuckets {
+		panic(fmt.Sprintf("numLatencyBuckets (%d) does not match len(LatencyBuckets) (%d)", numLatencyBuckets, len(LatencyBuckets)))
+	}
+}
 
 // Metrics tracks performance and operational statistics for ublk devices
 type Metrics struct {

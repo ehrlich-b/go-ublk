@@ -99,7 +99,7 @@ func main() {
 	}
 	defer func() {
 		logger.Info("stopping device")
-		if err := ublk.StopAndDelete(ctx, device); err != nil {
+		if err := device.Close(); err != nil {
 			logger.Error("error stopping device", "error", err)
 		} else {
 			logger.Info("device stopped successfully")
@@ -165,7 +165,7 @@ func main() {
 	// Try cleanup with a timeout
 	cleanupDone := make(chan bool)
 	go func() {
-		if err := ublk.StopAndDelete(context.Background(), device); err != nil {
+		if err := device.Close(); err != nil {
 			logger.Error("error stopping device", "error", err)
 		} else {
 			logger.Info("device stopped successfully")
