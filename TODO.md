@@ -106,16 +106,20 @@ device.Close()                                // full cleanup
 
 ## Phase 3: Performance
 
-### 3.1 Multi-Queue Support ✅ DONE
+### 3.1 Multi-Queue Support (Functional but Performance Regressed)
 - [x] Add NumQueues parameter (auto-detects CPU count when 0)
 - [x] Per-queue goroutine with CPU affinity support
 - [x] `--queues` CLI flag for ublk-mem
 - [x] Multi-queue device initialization (all queues start, START_DEV completes)
 - [x] Multi-queue I/O handling (reads and writes working)
-- [ ] Benchmark linear scaling (current: ~50-70k IOPS with 4 queues)
+- [ ] **BLOCKED**: Benchmark linear scaling shows regression:
+  - Single queue: 80-110k IOPS
+  - 4 queues: 47-59k IOPS (27-57% slower)
 
-**Implementation:** Character device opened once, fd shared via dup() to all queues.
-Each queue has its own io_uring ring and runs in a dedicated goroutine with LockOSThread().
+**Root Cause Unknown**: All queues appear to serialize through shared fd despite separate io_uring rings.
+Possible issues: kernel single-open serialization, missing queue-specific URING_CMD encoding, or incorrect multi-queue protocol.
+
+See `multiqueue_performance_prompt.md` for detailed debugging guidance.
 
 ### 3.2 Memory Optimization
 - [ ] Buffer pool to eliminate >64KB dynamic allocation on hot path
