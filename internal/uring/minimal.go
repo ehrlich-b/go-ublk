@@ -595,6 +595,13 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 
 		// Load tail with acquire semantics (kernel publishes with release)
 		currentTail := atomic.LoadUint32(cqTail)
+
+		// CRITICAL: Full memory barrier to ensure CQE data is visible
+		// after we see the updated tail from the kernel. The kernel does
+		// a release store to tail after writing CQE data, so we need an
+		// acquire barrier here to ensure we see that data.
+		Mfence()
+
 		currentHead := atomic.LoadUint32(cqHead)
 
 		for currentHead != currentTail {
@@ -633,8 +640,16 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 	}
 
 	// Block for at least one completion (only if no timeout)
-	_, _, errno := r.submitAndWaitRing(0, 1)
-	if errno != 0 {
+	// Retry on EINTR - signals can interrupt the syscall
+	for {
+		_, _, errno := r.submitAndWaitRing(0, 1)
+		if errno == 0 {
+			break
+		}
+		if errno == syscall.EINTR {
+			// Signal interrupted us, retry
+			continue
+		}
 		return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)
 	}
 
