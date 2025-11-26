@@ -94,12 +94,6 @@ func (m *mockBackend) setReadError(err error) {
 	m.readErr = err
 }
 
-func (m *mockBackend) setWriteError(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.writeErr = err
-}
-
 // Mock logger for testing
 type mockLogger struct {
 	messages []string
@@ -116,14 +110,6 @@ func (l *mockLogger) Debugf(format string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.messages = append(l.messages, format)
-}
-
-func (l *mockLogger) getMessages() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	result := make([]string, len(l.messages))
-	copy(result, l.messages)
-	return result
 }
 
 // Test TagState constants and transitions

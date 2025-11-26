@@ -4,7 +4,6 @@ package ublk
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"syscall"
 	"time"
@@ -14,26 +13,6 @@ import (
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/queue"
 )
-
-// waitLive waits for a ublk device to transition to LIVE state
-func waitLive(deviceID uint32, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-
-	// Give kernel time to process START_DEV
-	time.Sleep(constants.DeviceStartupDelay)
-
-	// Check if block device exists
-	blockPath := fmt.Sprintf("/dev/ublkb%d", deviceID)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(blockPath); err == nil {
-			return nil
-		}
-		time.Sleep(constants.DevicePollingInterval)
-	}
-
-	// Timeout waiting for device
-	return fmt.Errorf("timeout waiting for device %s to appear", blockPath)
-}
 
 // Device represents a ublk block device
 type Device struct {
@@ -196,13 +175,13 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	// Set parameters
 	err = ctrl.SetParams(deviceID, &ctrlParams)
 	if err != nil {
-		ctrl.DeleteDevice(deviceID)
+		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("failed to set parameters: %v", err)
 	}
 
 	// Initialize metrics and observer
 	metrics := NewMetrics()
-	var observer Observer = &NoOpObserver{}
+	var observer Observer
 	if options.Observer != nil {
 		observer = options.Observer
 	} else {
@@ -254,7 +233,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		time.Sleep(100 * time.Millisecond)
 	}
 	if charDeviceFd < 0 {
-		ctrl.DeleteDevice(deviceID)
+		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("character device did not appear: %s", charPath)
 	}
 
@@ -279,7 +258,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 					device.runners[j].Close()
 				}
 			}
-			ctrl.DeleteDevice(deviceID)
+			_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
 			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
 		}
 		device.runners[i] = runner
@@ -292,7 +271,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 					device.runners[j].Close()
 				}
 			}
-			ctrl.DeleteDevice(deviceID)
+			_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
 			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
 		}
 	}
@@ -308,7 +287,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 				device.runners[j].Close()
 			}
 		}
-		ctrl.DeleteDevice(deviceID)
+		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("failed to START_DEV: %v", err)
 	}
 
@@ -367,13 +346,13 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	// Set parameters
 	err = controller.SetParams(deviceID, &ctrlParams)
 	if err != nil {
-		controller.DeleteDevice(deviceID)
+		_ = controller.DeleteDevice(deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("failed to set parameters: %v", err)
 	}
 
 	// Initialize metrics and observer
 	metrics := NewMetrics()
-	var observer Observer = &NoOpObserver{}
+	var observer Observer
 	if options.Observer != nil {
 		observer = options.Observer
 	} else {

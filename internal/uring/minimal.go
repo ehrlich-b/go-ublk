@@ -14,12 +14,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// System call numbers for io_uring
-const (
-	__NR_io_uring_setup = 425
-	__NR_io_uring_enter = 426
-)
-
 // Minimal io_uring structures for URING_CMD operations only
 // Based on kernel include/uapi/linux/io_uring.h
 
@@ -67,11 +61,6 @@ func (sqe *sqe128) setCmdOp(cmdOp uint32) {
 	*(*uint32)(unsafe.Pointer(&sqe.union0[0])) = cmdOp
 	// __pad1 is at bytes 12-15 and MUST be zero
 	*(*uint32)(unsafe.Pointer(&sqe.union0[4])) = 0
-}
-
-// getCmdOp gets the cmd_op field from the union
-func (sqe *sqe128) getCmdOp() uint32 {
-	return *(*uint32)(unsafe.Pointer(&sqe.union0[0]))
 }
 
 // Minimal CQE (32-byte version)
@@ -227,7 +216,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	cqSize := params.cqOff.cqes + params.cqEntries*uint32(unsafe.Sizeof(cqe32{}))
 	cqAddr, err := unix.Mmap(int(ringFd), IORING_OFF_CQ_RING, int(cqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		unix.Munmap(sqAddr)
+		_ = unix.Munmap(sqAddr) // Cleanup, ignore error
 		syscall.Close(int(ringFd))
 		return nil, fmt.Errorf("failed to mmap CQ: %v", err)
 	}
@@ -235,8 +224,8 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	sqesSize := int(params.sqEntries) * int(unsafe.Sizeof(sqe128{}))
 	sqesAddr, err := unix.Mmap(int(ringFd), IORING_OFF_SQES, sqesSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		unix.Munmap(cqAddr)
-		unix.Munmap(sqAddr)
+		_ = unix.Munmap(cqAddr) // Cleanup, ignore error
+		_ = unix.Munmap(sqAddr) // Cleanup, ignore error
 		syscall.Close(int(ringFd))
 		return nil, fmt.Errorf("failed to mmap SQEs: %v", err)
 	}
@@ -923,10 +912,4 @@ func (r *minimalRing) processCompletion() (Result, error) {
 	atomic.StoreUint32(cqHead, currentHead+1)
 
 	return result, nil
-}
-
-// performControlOperation performs the actual kernel communication for control operations
-func (r *minimalRing) performControlOperation(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd) (int32, syscall.Errno) {
-	// Not used; URING_CMD is implemented via submitAndWait
-	return 0, syscall.ENOSYS
 }

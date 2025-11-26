@@ -72,7 +72,7 @@ func newAsyncWriter(w io.Writer, bufferSize int) *asyncWriter {
 func (aw *asyncWriter) run() {
 	defer close(aw.done)
 	for msg := range aw.ch {
-		aw.out.Write(msg)
+		_, _ = aw.out.Write(msg) // Best effort write to log output
 	}
 }
 

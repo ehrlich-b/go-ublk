@@ -57,7 +57,7 @@ func TestBackendInterface(t *testing.T) {
 	}
 
 	readBuf := make([]byte, len(testData))
-	n, err = backend.ReadAt(readBuf, 0)
+	_, err = backend.ReadAt(readBuf, 0)
 	if err != nil {
 		t.Errorf("ReadAt failed: %v", err)
 	}

@@ -1,8 +1,9 @@
 package backend
 
 import (
+	cryptorand "crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func BenchmarkMemoryBackend(b *testing.B) {
 		b.Run(formatSize(size), func(b *testing.B) {
 			backend := NewMemory(64 << 20) // 64MB backend
 			data := make([]byte, size)
-			rand.Read(data) // Random data to avoid compression optimizations
+			_, _ = cryptorand.Read(data) // Random data to avoid compression optimizations
 
 			b.Run("ReadAt", func(b *testing.B) {
 				buf := make([]byte, size)
@@ -27,8 +28,8 @@ func BenchmarkMemoryBackend(b *testing.B) {
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
-					offset := int64(rand.Intn(64<<20 - size))
-					backend.ReadAt(buf, offset)
+					offset := int64(rand.IntN(64<<20 - size))
+					_, _ = backend.ReadAt(buf, offset)
 				}
 			})
 
@@ -37,8 +38,8 @@ func BenchmarkMemoryBackend(b *testing.B) {
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
-					offset := int64(rand.Intn(64<<20 - size))
-					backend.WriteAt(data, offset)
+					offset := int64(rand.IntN(64<<20 - size))
+					_, _ = backend.WriteAt(data, offset)
 				}
 			})
 
@@ -49,7 +50,7 @@ func BenchmarkMemoryBackend(b *testing.B) {
 
 				offset := int64(0)
 				for i := 0; i < b.N; i++ {
-					backend.ReadAt(buf, offset)
+					_, _ = backend.ReadAt(buf, offset)
 					offset += int64(size)
 					if offset+int64(size) > backend.Size() {
 						offset = 0
@@ -63,7 +64,7 @@ func BenchmarkMemoryBackend(b *testing.B) {
 
 				offset := int64(0)
 				for i := 0; i < b.N; i++ {
-					backend.WriteAt(data, offset)
+					_, _ = backend.WriteAt(data, offset)
 					offset += int64(size)
 					if offset+int64(size) > backend.Size() {
 						offset = 0
@@ -88,16 +89,16 @@ func BenchmarkMemoryBackendConcurrent(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				buf := make([]byte, blockSize)
 				data := make([]byte, blockSize)
-				rand.Read(data)
+				_, _ = cryptorand.Read(data)
 
 				for pb.Next() {
-					offset := int64(rand.Intn(64<<20 - blockSize))
+					offset := int64(rand.IntN(64<<20 - blockSize))
 
 					// Mix of reads and writes (70% read, 30% write)
 					if rand.Float32() < 0.7 {
-						backend.ReadAt(buf, offset)
+						_, _ = backend.ReadAt(buf, offset)
 					} else {
-						backend.WriteAt(data, offset)
+						_, _ = backend.WriteAt(data, offset)
 					}
 				}
 			})
@@ -111,17 +112,17 @@ func BenchmarkMemoryBackendLatency(b *testing.B) {
 	blockSize := 4096
 	buf := make([]byte, blockSize)
 	data := make([]byte, blockSize)
-	rand.Read(data)
+	_, _ = cryptorand.Read(data)
 
 	b.Run("ReadLatency", func(b *testing.B) {
 		latencies := make([]time.Duration, 0, b.N)
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			offset := int64(rand.Intn(64<<20 - blockSize))
+			offset := int64(rand.IntN(64<<20 - blockSize))
 
 			start := time.Now()
-			backend.ReadAt(buf, offset)
+			_, _ = backend.ReadAt(buf, offset)
 			latencies = append(latencies, time.Since(start))
 		}
 
@@ -135,10 +136,10 @@ func BenchmarkMemoryBackendLatency(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			offset := int64(rand.Intn(64<<20 - blockSize))
+			offset := int64(rand.IntN(64<<20 - blockSize))
 
 			start := time.Now()
-			backend.WriteAt(data, offset)
+			_, _ = backend.WriteAt(data, offset)
 			latencies = append(latencies, time.Since(start))
 		}
 
@@ -160,7 +161,7 @@ func BenchmarkMemoryOverhead(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			offset := rand.Intn(64<<20 - size)
+			offset := rand.IntN(64<<20 - size)
 			copy(dst, src[offset:offset+size])
 		}
 	})
@@ -173,8 +174,8 @@ func BenchmarkMemoryOverhead(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			offset := int64(rand.Intn(64<<20 - size))
-			backend.ReadAt(buf, offset)
+			offset := int64(rand.IntN(64<<20 - size))
+			_, _ = backend.ReadAt(buf, offset)
 		}
 	})
 
@@ -185,8 +186,8 @@ func BenchmarkMemoryOverhead(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			offset := int64(rand.Intn(64<<20 - size))
-			backend.WriteAt(data, offset)
+			offset := int64(rand.IntN(64<<20 - size))
+			_, _ = backend.WriteAt(data, offset)
 		}
 	})
 }

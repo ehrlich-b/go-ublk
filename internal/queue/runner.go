@@ -115,7 +115,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 				return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
 			}
 			ts := syscall.Timespec{Sec: 0, Nsec: retryDelayNs}
-			syscall.Nanosleep(&ts, nil)
+			_ = syscall.Nanosleep(&ts, nil) // Best effort sleep
 		}
 		if err != nil {
 			return nil, fmt.Errorf("character device did not appear: %s", charPath)
@@ -231,7 +231,7 @@ func (r *Runner) Stop() error {
 
 // Close cleans up resources
 func (r *Runner) Close() error {
-	r.Stop()
+	_ = r.Stop() // Cleanup, ignore error
 
 	if r.ring != nil {
 		r.ring.Close()
@@ -240,13 +240,13 @@ func (r *Runner) Close() error {
 	// Unmap memory-mapped regions
 	if r.descPtr != 0 {
 		descSize := r.depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
-		syscall.Syscall(syscall.SYS_MUNMAP, r.descPtr, uintptr(descSize), 0)
+		_, _, _ = syscall.Syscall(syscall.SYS_MUNMAP, r.descPtr, uintptr(descSize), 0)
 		r.descPtr = 0
 	}
 
 	if r.bufPtr != 0 {
 		bufSize := r.depth * constants.IOBufferSizePerTag // 64KB per request buffer
-		syscall.Syscall(syscall.SYS_MUNMAP, r.bufPtr, uintptr(bufSize), 0)
+		_, _, _ = syscall.Syscall(syscall.SYS_MUNMAP, r.bufPtr, uintptr(bufSize), 0)
 		r.bufPtr = 0
 	}
 
@@ -542,28 +542,6 @@ func (r *Runner) processIOAndCommit(tag uint16) error {
 	return nil
 }
 
-// handleNeedGetData requests the kernel to copy write data into our buffer
-func (r *Runner) handleNeedGetData(tag uint16) error {
-	if r.logger != nil {
-		r.logger.Debugf("Queue %d: NEED_GET_DATA for tag %d", r.queueID, tag)
-	}
-
-	bufAddr := r.bufPtr + uintptr(int(tag)*constants.IOBufferSizePerTag)
-	ioCmd := &uapi.UblksrvIOCmd{
-		QID:  r.queueID,
-		Tag:  tag,
-		Addr: uint64(bufAddr),
-	}
-
-	userData := uint64(r.queueID)<<16 | uint64(tag)
-	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_NEED_GET_DATA)
-	if _, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData); err != nil {
-		return fmt.Errorf("submit NEED_GET_DATA: %w", err)
-	}
-
-	return nil
-}
-
 // handleIORequest processes a single I/O request
 func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	// Some completions are just keep-alive acknowledgements with an empty descriptor.
@@ -769,7 +747,7 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 		0,           // offset
 	)
 	if errno != 0 {
-		syscall.Syscall(syscall.SYS_MUNMAP, descPtr, uintptr(descSize), 0)
+		_, _, _ = syscall.Syscall(syscall.SYS_MUNMAP, descPtr, uintptr(descSize), 0)
 		return 0, 0, fmt.Errorf("failed to allocate I/O buffers: %v", errno)
 	}
 

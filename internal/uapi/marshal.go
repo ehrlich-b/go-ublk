@@ -148,7 +148,6 @@ func marshalParams(params *UblkParams) []byte {
 	if params.HasZoned() {
 		zonedBytes := directMarshal(&params.Zoned)
 		copy(buf[offset:], zonedBytes)
-		offset += len(zonedBytes)
 	}
 
 	return buf
@@ -196,7 +195,6 @@ func unmarshalParams(data []byte, params *UblkParams) error {
 		if err := directUnmarshal(data[offset:], &params.Zoned); err != nil {
 			return err
 		}
-		offset += int(unsafe.Sizeof(params.Zoned))
 	}
 
 	return nil

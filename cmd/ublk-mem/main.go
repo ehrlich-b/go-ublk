@@ -139,11 +139,11 @@ func main() {
 			if f, err := os.Create(filename); err == nil {
 				fmt.Fprintf(f, "Goroutine stack dump at %s\n", time.Now().Format(time.RFC3339))
 				fmt.Fprintf(f, "Process ID: %d\n\n", os.Getpid())
-				f.Write(buf[:n])
+				_, _ = f.Write(buf[:n]) // Best effort write
 
 				// Also dump goroutine profile
 				fmt.Fprintf(f, "\n\n=== GOROUTINE PROFILE ===\n")
-				pprof.Lookup("goroutine").WriteTo(f, 2)
+				_ = pprof.Lookup("goroutine").WriteTo(f, 2) // Best effort write
 
 				f.Close()
 				logger.Info("stack trace written to file", "file", filename)

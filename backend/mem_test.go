@@ -78,7 +78,7 @@ func TestMemoryDiscard(t *testing.T) {
 
 	// Write some data
 	testData := []byte("Hello, World!")
-	mem.WriteAt(testData, 0)
+	_, _ = mem.WriteAt(testData, 0)
 
 	// Discard part of it
 	err := mem.Discard(0, 5)
@@ -88,7 +88,7 @@ func TestMemoryDiscard(t *testing.T) {
 
 	// Verify the data is zeroed
 	readBuf := make([]byte, len(testData))
-	mem.ReadAt(readBuf, 0)
+	_, _ = mem.ReadAt(readBuf, 0)
 
 	for i := 0; i < 5; i++ {
 		if readBuf[i] != 0 {
@@ -130,7 +130,7 @@ func BenchmarkMemoryRead(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		offset := int64(i*4096) % (1024*1024 - 4096)
-		mem.ReadAt(buf, offset)
+		_, _ = mem.ReadAt(buf, offset)
 	}
 }
 
@@ -146,6 +146,6 @@ func BenchmarkMemoryWrite(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		offset := int64(i*4096) % (1024*1024 - 4096)
-		mem.WriteAt(buf, offset)
+		_, _ = mem.WriteAt(buf, offset)
 	}
 }

@@ -67,11 +67,11 @@ func TestDiscardBackend(t *testing.T) {
 
 	// Write some data
 	testData := []byte("hello world")
-	backend.WriteAt(testData, 0)
+	_, _ = backend.WriteAt(testData, 0)
 
 	// Verify data is there
 	readBuf := make([]byte, len(testData))
-	backend.ReadAt(readBuf, 0)
+	_, _ = backend.ReadAt(readBuf, 0)
 	if string(readBuf) != string(testData) {
 		t.Errorf("Data not written correctly")
 	}
@@ -89,7 +89,7 @@ func TestDiscardBackend(t *testing.T) {
 	}
 
 	// Verify data is zeroed
-	backend.ReadAt(readBuf, 0)
+	_, _ = backend.ReadAt(readBuf, 0)
 	for i, b := range readBuf {
 		if b != 0 {
 			t.Errorf("Byte %d not zeroed after discard: %d", i, b)
@@ -102,7 +102,7 @@ func TestWriteZeroesBackend(t *testing.T) {
 
 	// Write some data first
 	testData := []byte("hello world")
-	backend.WriteAt(testData, 0)
+	_, _ = backend.WriteAt(testData, 0)
 
 	// Check if backend supports WriteZeroes
 	writeZeroesBackend, ok := Backend(backend).(WriteZeroesBackend)
@@ -118,7 +118,7 @@ func TestWriteZeroesBackend(t *testing.T) {
 
 	// Verify data is zeroed
 	readBuf := make([]byte, len(testData))
-	backend.ReadAt(readBuf, 0)
+	_, _ = backend.ReadAt(readBuf, 0)
 	for i, b := range readBuf {
 		if b != 0 {
 			t.Errorf("Byte %d not zeroed: %d", i, b)
@@ -166,9 +166,9 @@ func TestStatBackend(t *testing.T) {
 	})
 
 	// Do some operations to generate call counts
-	backend.ReadAt(make([]byte, 10), 0)
-	backend.WriteAt([]byte("test"), 0)
-	backend.Flush()
+	_, _ = backend.ReadAt(make([]byte, 10), 0)
+	_, _ = backend.WriteAt([]byte("test"), 0)
+	_ = backend.Flush()
 
 	// Check if backend supports stats
 	statBackend, ok := Backend(backend).(StatBackend)
