@@ -51,9 +51,11 @@ func TestNewLogger(t *testing.T) {
 func TestLoggerWithContext(t *testing.T) {
 	var buf bytes.Buffer
 	config := &Config{
-		Level:  LevelDebug,
-		Format: "text",
-		Output: &buf,
+		Level:   LevelDebug,
+		Format:  "text",
+		Output:  &buf,
+		Sync:    true,
+		NoColor: true,
 	}
 
 	logger := NewLogger(config)
@@ -84,9 +86,11 @@ func TestLoggerWithContext(t *testing.T) {
 func TestLoggerWithRequest(t *testing.T) {
 	var buf bytes.Buffer
 	config := &Config{
-		Level:  LevelDebug,
-		Format: "text",
-		Output: &buf,
+		Level:   LevelDebug,
+		Format:  "text",
+		Output:  &buf,
+		Sync:    true,
+		NoColor: true,
 	}
 
 	logger := NewLogger(config)
@@ -105,9 +109,11 @@ func TestLoggerWithRequest(t *testing.T) {
 func TestLoggerWithError(t *testing.T) {
 	var buf bytes.Buffer
 	config := &Config{
-		Level:  LevelDebug,
-		Format: "text",
-		Output: &buf,
+		Level:   LevelDebug,
+		Format:  "text",
+		Output:  &buf,
+		Sync:    true,
+		NoColor: true,
 	}
 
 	logger := NewLogger(config)
@@ -124,9 +130,11 @@ func TestLoggerWithError(t *testing.T) {
 func TestGlobalLoggerFunctions(t *testing.T) {
 	var buf bytes.Buffer
 	config := &Config{
-		Level:  LevelDebug,
-		Format: "text",
-		Output: &buf,
+		Level:   LevelDebug,
+		Format:  "text",
+		Output:  &buf,
+		Sync:    true,
+		NoColor: true,
 	}
 
 	SetDefault(NewLogger(config))

@@ -21,12 +21,29 @@ import (
 
 func main() {
 	var (
-		sizeStr   = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
-		verbose   = flag.Bool("v", false, "Verbose output")
-		minimal   = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
-		numQueues = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
+		sizeStr    = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
+		verbose    = flag.Bool("v", false, "Verbose output")
+		minimal    = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
+		numQueues  = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
+		queueDepth = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
+		cpuprofile = flag.String("cpuprofile", "", "Write CPU profile to file")
+		memprofile = flag.String("memprofile", "", "Write memory profile to file")
 	)
 	flag.Parse()
+
+	// Start CPU profiling if requested
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatalf("Could not create CPU profile: %v", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatalf("Could not start CPU profile: %v", err)
+		}
+		defer pprof.StopCPUProfile()
+		log.Printf("CPU profiling enabled, will write to %s", *cpuprofile)
+	}
 
 	// Parse size
 	size, err := parseSize(*sizeStr)
@@ -46,7 +63,7 @@ func main() {
 		params.NumQueues = 1                       // Single queue for minimal mode
 		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
 	} else {
-		params.QueueDepth = 32
+		params.QueueDepth = *queueDepth
 		params.NumQueues = *numQueues              // 0 = auto-detect based on CPU count
 		params.MaxIOSize = ublk.IOBufferSizePerTag // Match buffer size
 	}
@@ -98,7 +115,7 @@ func main() {
 	fmt.Printf("Device created: %s\n", device.Path)
 	fmt.Printf("Character device: %s\n", device.CharPath)
 	fmt.Printf("Size: %s (%d bytes)\n", formatSize(size), size)
-	fmt.Printf("Queues: %d\n", device.NumQueues())
+	fmt.Printf("Queues: %d, Depth: %d\n", device.NumQueues(), params.QueueDepth)
 	fmt.Printf("\nYou can now use the device:\n")
 	fmt.Printf("  sudo mkfs.ext4 %s\n", device.Path)
 	fmt.Printf("  sudo mkdir -p /mnt/ublk\n")
@@ -162,6 +179,21 @@ func main() {
 	case <-time.After(1 * time.Second):
 		// Cleanup taking too long, exit anyway
 		logger.Info("cleanup timeout, forcing exit")
+	}
+
+	// Write memory profile if requested
+	if *memprofile != "" {
+		f, err := os.Create(*memprofile)
+		if err != nil {
+			logger.Error("could not create memory profile", "error", err)
+		} else {
+			runtime.GC() // Get up-to-date statistics
+			if err := pprof.WriteHeapProfile(f); err != nil {
+				logger.Error("could not write memory profile", "error", err)
+			}
+			f.Close()
+			logger.Info("memory profile written", "file", *memprofile)
+		}
 	}
 
 	os.Exit(0)

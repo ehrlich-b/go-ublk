@@ -52,6 +52,8 @@ type Runner struct {
 	// Per-tag state tracking for proper serialization
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
+	// Pre-allocated per-tag command structs to avoid hot path allocations
+	ioCmds []uapi.UblksrvIOCmd
 }
 
 const (
@@ -175,6 +177,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		cpuAffinity: config.CPUAffinity,
 		tagStates:   make([]TagState, config.Depth),
 		tagMutexes:  make([]sync.Mutex, config.Depth),
+		ioCmds:      make([]uapi.UblksrvIOCmd, config.Depth),
 	}
 
 	return runner, nil
@@ -343,13 +346,12 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	// Addr must point to the data buffer for this tag
 	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
 
-	ioCmd := &uapi.UblksrvIOCmd{
-		QID:    r.queueID,
-		Tag:    tag,
-		Result: 0,
-		// Must point to the I/O data buffer
-		Addr: uint64(bufferAddr),
-	}
+	// Use pre-allocated ioCmd to avoid heap allocation
+	ioCmd := &r.ioCmds[tag]
+	ioCmd.QID = r.queueID
+	ioCmd.Tag = tag
+	ioCmd.Result = 0
+	ioCmd.Addr = uint64(bufferAddr)
 
 	// Encode FETCH operation in userData
 	userData := udOpFetch | (uint64(r.queueID) << 16) | uint64(tag)
@@ -578,31 +580,27 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	offset := desc.StartSector * 512 // Convert sectors to bytes (assuming 512-byte sectors)
 	length := desc.NrSectors * 512   // Convert sectors to bytes
 
-	// Progress reporting - show I/O operations as they happen
-	opName := ""
-	switch op {
-	case uapi.UBLK_IO_OP_READ:
-		opName = "READ"
-	case uapi.UBLK_IO_OP_WRITE:
-		opName = "WRITE"
-	case uapi.UBLK_IO_OP_FLUSH:
-		opName = "FLUSH"
-	case uapi.UBLK_IO_OP_DISCARD:
-		opName = "DISCARD"
-	default:
-		opName = fmt.Sprintf("OP_%d", op)
-	}
-
 	// Log I/O operations at debug level (hot path - avoid in production)
+	// Only build strings when logging is enabled
 	if r.logger != nil {
+		opName := ""
+		switch op {
+		case uapi.UBLK_IO_OP_READ:
+			opName = "READ"
+		case uapi.UBLK_IO_OP_WRITE:
+			opName = "WRITE"
+		case uapi.UBLK_IO_OP_FLUSH:
+			opName = "FLUSH"
+		case uapi.UBLK_IO_OP_DISCARD:
+			opName = "DISCARD"
+		default:
+			opName = fmt.Sprintf("OP_%d", op)
+		}
 		if length < 1024 {
 			r.logger.Debugf("[Q%d:T%02d] %s %dB @ sector %d", r.queueID, tag, opName, length, desc.StartSector)
 		} else {
 			r.logger.Debugf("[Q%d:T%02d] %s %dKB @ sector %d", r.queueID, tag, opName, length/1024, desc.StartSector)
 		}
-	}
-
-	if r.logger != nil {
 		r.logger.Debugf("Queue %d: Handling I/O op=%d offset=%d len=%d tag=%d",
 			r.queueID, op, offset, length, tag)
 	}
@@ -628,32 +626,28 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	var err error
-	startTime := time.Now()
+
+	// Only measure time if observer is set (avoid syscall overhead)
+	var startTime time.Time
+	if r.observer != nil {
+		startTime = time.Now()
+	}
 
 	switch op {
 	case uapi.UBLK_IO_OP_READ:
-		if r.logger != nil {
-			r.logger.Debugf("calling ReadAt: offset=%d, buflen=%d", offset, len(buffer))
-		}
 		_, err = r.backend.ReadAt(buffer, int64(offset))
-		if r.logger != nil {
-			r.logger.Debugf("ReadAt completed: err=%v", err)
-		}
 		if r.observer != nil {
-			latencyNs := uint64(time.Since(startTime).Nanoseconds())
-			r.observer.ObserveRead(uint64(length), latencyNs, err == nil)
+			r.observer.ObserveRead(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_WRITE:
 		_, err = r.backend.WriteAt(buffer, int64(offset))
 		if r.observer != nil {
-			latencyNs := uint64(time.Since(startTime).Nanoseconds())
-			r.observer.ObserveWrite(uint64(length), latencyNs, err == nil)
+			r.observer.ObserveWrite(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_FLUSH:
 		err = r.backend.Flush()
 		if r.observer != nil {
-			latencyNs := uint64(time.Since(startTime).Nanoseconds())
-			r.observer.ObserveFlush(latencyNs, err == nil)
+			r.observer.ObserveFlush(uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_DISCARD:
 		// Handle discard if backend supports it
@@ -661,8 +655,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 			err = discardBackend.Discard(int64(offset), int64(length))
 		}
 		if r.observer != nil {
-			latencyNs := uint64(time.Since(startTime).Nanoseconds())
-			r.observer.ObserveDiscard(uint64(length), latencyNs, err == nil)
+			r.observer.ObserveDiscard(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	default:
 		err = fmt.Errorf("unsupported operation: %d", op)
@@ -707,13 +700,12 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	// Addr must point to the data buffer for next I/O
 	bufferAddr := r.bufPtr + uintptr(int(tag)*64*1024) // 64KB per tag
 
-	ioCmd := &uapi.UblksrvIOCmd{
-		QID:    r.queueID,
-		Tag:    tag,
-		Result: result,
-		// Must point to the I/O data buffer for next operation
-		Addr: uint64(bufferAddr),
-	}
+	// Use pre-allocated ioCmd to avoid heap allocation
+	ioCmd := &r.ioCmds[tag]
+	ioCmd.QID = r.queueID
+	ioCmd.Tag = tag
+	ioCmd.Result = result
+	ioCmd.Addr = uint64(bufferAddr)
 
 	// Encode COMMIT operation in userData
 	userData := udOpCommit | (uint64(r.queueID) << 16) | uint64(tag)
@@ -803,6 +795,7 @@ func NewStubRunner(ctx context.Context, config Config) *Runner {
 		logger:     config.Logger,
 		tagStates:  make([]TagState, config.Depth),
 		tagMutexes: make([]sync.Mutex, config.Depth),
+		ioCmds:     make([]uapi.UblksrvIOCmd, config.Depth),
 	}
 }
 

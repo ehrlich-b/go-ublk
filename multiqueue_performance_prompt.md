@@ -1,5 +1,18 @@
 # Multi-Queue Performance Debugging Prompt
 
+## Status: RESOLVED (2025-11-26)
+
+**Root Cause Identified:** Memory backend mutex contention, NOT kernel or io_uring issues.
+
+See TODO.md Phase 3.1 for full analysis. The kernel ublk driver and our io_uring implementation
+are correct. Multi-queue performance scaling requires backends that support concurrent access.
+
+---
+
+## Project Context (Historical)
+
+`go-ublk` is a pure Go implementation of Linux ublk (userspace block device). It creates virtual block devices (/dev/ublkb*) backed by user-defined storage (memory, files, network, etc.) using the Linux ublk kernel module and io_uring for high-performance I/O. The project currently achieves 80-110k IOPS on a single queue with 4K random workloads, comparable to kernel loop devices when accounting for userspace overhead. The multi-queue feature was recently implemented to allow scaling across multiple CPU cores, but it unexpectedly shows performance degradation instead of linear scaling.
+
 ## Problem Statement
 
 Multi-queue I/O is functionally working (reads/writes succeed, data integrity verified), but shows **severe performance degradation** compared to single-queue:

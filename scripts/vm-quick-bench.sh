@@ -61,10 +61,11 @@ run_fio_test() {
 }
 
 # Start ublk device
-echo "Starting ublk memory device (256MB)..."
-sudo ./ublk-mem --size=256M &
+# Using multi-queue with depth=64 for optimal performance
+echo "Starting ublk memory device (256MB, multi-queue, depth=64)..."
+sudo ./ublk-mem --size=256M --depth=64 &
 UBLK_PID=$!
-sleep 2
+sleep 3
 
 # Verify device exists
 if [ ! -b /dev/ublkb0 ]; then
@@ -76,10 +77,10 @@ fi
 echo "Device created at /dev/ublkb0"
 echo ""
 
-# Run ublk tests
+# Run ublk tests with QD=64 to utilize full queue depth
 run_fio_test /dev/ublkb0 randread 1 "ublk 4K Random Read (QD=1)"
-run_fio_test /dev/ublkb0 randread 32 "ublk 4K Random Read (QD=32)"
-run_fio_test /dev/ublkb0 randwrite 32 "ublk 4K Random Write (QD=32)"
+run_fio_test /dev/ublkb0 randread 64 "ublk 4K Random Read (QD=64)"
+run_fio_test /dev/ublkb0 randwrite 64 "ublk 4K Random Write (QD=64)"
 
 # Stop ublk device
 echo "Stopping ublk device..."
@@ -87,22 +88,24 @@ sudo kill -SIGINT $UBLK_PID
 wait $UBLK_PID 2>/dev/null || true
 sleep 1
 
-# Create loop device for comparison
+# Create RAM-backed loop device for fair comparison
 echo ""
-echo "=== Creating loop device for baseline ==="
-dd if=/dev/zero of=/tmp/loop_test.img bs=1M count=256 status=none
-LOOP_DEV=$(sudo losetup --find --show /tmp/loop_test.img)
-echo "Loop device created at $LOOP_DEV"
+echo "=== Creating RAM-backed loop device for baseline ==="
+sudo mkdir -p /tmp/ramdisk
+sudo mount -t tmpfs -o size=300M tmpfs /tmp/ramdisk 2>/dev/null || true
+dd if=/dev/zero of=/tmp/ramdisk/loop_test.img bs=1M count=256 status=none
+LOOP_DEV=$(sudo losetup --find --show /tmp/ramdisk/loop_test.img)
+echo "Loop device created at $LOOP_DEV (RAM-backed)"
 echo ""
 
-# Run loop tests
+# Run loop tests with QD=64 for fair comparison
 run_fio_test $LOOP_DEV randread 1 "loop 4K Random Read (QD=1)"
-run_fio_test $LOOP_DEV randread 32 "loop 4K Random Read (QD=32)"
-run_fio_test $LOOP_DEV randwrite 32 "loop 4K Random Write (QD=32)"
+run_fio_test $LOOP_DEV randread 64 "loop 4K Random Read (QD=64)"
+run_fio_test $LOOP_DEV randwrite 64 "loop 4K Random Write (QD=64)"
 
 # Cleanup
 sudo losetup -d $LOOP_DEV
-rm -f /tmp/loop_test.img
+sudo umount /tmp/ramdisk 2>/dev/null || true
 
 echo "=== Benchmark Complete ==="
 echo "Compare the IOPS and latency between ublk and loop device above."

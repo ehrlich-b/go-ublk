@@ -33,9 +33,11 @@ const (
 
 // Config holds logging configuration
 type Config struct {
-	Level  LogLevel
-	Format string // "json" or "text"
-	Output io.Writer
+	Level   LogLevel
+	Format  string // "json" or "text"
+	Output  io.Writer
+	Sync    bool // If true, writes are synchronous (useful for testing)
+	NoColor bool // If true, disables ANSI color codes (useful for testing)
 }
 
 // DefaultConfig returns a sensible default configuration
@@ -107,22 +109,25 @@ func (aw *asyncWriter) Close() error {
 	return nil
 }
 
-// NewLogger creates a new structured logger with async writes
+// NewLogger creates a new structured logger
 func NewLogger(config *Config) *Logger {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
-	// Wrap output in async writer with 1000 message buffer
-	asyncOut := newAsyncWriter(config.Output, 1000)
+	// Use async writer unless Sync mode is enabled
+	var output io.Writer = config.Output
+	if !config.Sync {
+		output = newAsyncWriter(config.Output, 1000)
+	}
 
 	var zlog zerolog.Logger
 	switch config.Format {
 	case "json":
-		zlog = zerolog.New(asyncOut).With().Timestamp().Logger()
+		zlog = zerolog.New(output).With().Timestamp().Logger()
 	default:
-		// Console format with colors
-		consoleWriter := zerolog.ConsoleWriter{Out: asyncOut, NoColor: false}
+		// Console format (colors can be disabled via config)
+		consoleWriter := zerolog.ConsoleWriter{Out: output, NoColor: config.NoColor}
 		zlog = zerolog.New(consoleWriter).With().Timestamp().Logger()
 	}
 

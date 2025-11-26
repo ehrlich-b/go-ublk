@@ -160,6 +160,13 @@ type minimalRing struct {
 	sqAddr   unsafe.Pointer // SQ ring mapping base
 	cqAddr   unsafe.Pointer // CQ ring mapping base
 	sqesAddr unsafe.Pointer // SQEs mapping base
+
+	// Pre-allocated fields to avoid hot path allocations
+	sqePool      sqe128           // Reusable SQE (submissions are sequential per ring)
+	resultsPool  []Result         // Reusable results slice
+	cqePoolSize  int              // Size of CQE result pool
+	cqePool      []minimalResult  // Pool of result structs to avoid allocation
+	cqePoolIndex int              // Next available result in pool
 }
 
 // kernelUringCmdOpcode returns the runtime kernel's IORING_OP_URING_CMD
@@ -234,13 +241,23 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 		return nil, fmt.Errorf("failed to mmap SQEs: %v", err)
 	}
 
+	// Pre-allocate pool sizes based on queue depth
+	// CQE pool needs to be larger since multiple completions can arrive at once
+	cqePoolSize := int(params.cqEntries)
+	if cqePoolSize < 64 {
+		cqePoolSize = 64 // Minimum pool size
+	}
+
 	r := &minimalRing{
-		ringFd:   int(ringFd),
-		targetFd: int(ctrlFd),
-		params:   params,
-		sqAddr:   unsafe.Pointer(&sqAddr[0]),
-		cqAddr:   unsafe.Pointer(&cqAddr[0]),
-		sqesAddr: unsafe.Pointer(&sqesAddr[0]),
+		ringFd:      int(ringFd),
+		targetFd:    int(ctrlFd),
+		params:      params,
+		sqAddr:      unsafe.Pointer(&sqAddr[0]),
+		cqAddr:      unsafe.Pointer(&cqAddr[0]),
+		sqesAddr:    unsafe.Pointer(&sqesAddr[0]),
+		resultsPool: make([]Result, 0, cqePoolSize),
+		cqePoolSize: cqePoolSize,
+		cqePool:     make([]minimalResult, cqePoolSize),
 	}
 
 	// Register the char device FD with io_uring (like C code does)
@@ -548,34 +565,40 @@ func (r *minimalResult) Value() int32     { return r.value }
 func (r *minimalResult) Error() error     { return r.err }
 
 func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
-	// Submit URING_CMD for data-plane to this ring's fd (expected to be /dev/ublkc<ID>)
-	// Verify struct packing is correct (must be exactly 16 bytes)
-	ioCmdSize := unsafe.Sizeof(*ioCmd)
-	if ioCmdSize != 16 {
-		return nil, fmt.Errorf("UblksrvIOCmd size is %d bytes, expected 16 (struct packing error)", ioCmdSize)
-	}
+	// Hot path optimization: Use pre-allocated sqePool instead of heap allocation
+	// Reuse the same sqe128 struct for all submissions (sequential per ring)
+	sqe := &r.sqePool
 
-	// Prepare SQE with the minimal fields the kernel expects
-	sqe := &sqe128{}
+	// Set minimal SQE fields (kernel expects these)
 	sqe.opcode = kernelUringCmdOpcode()
+	sqe.flags = 0
+	sqe.ioprio = 0
 	sqe.fd = int32(r.targetFd)
 	sqe.setCmdOp(cmd)
 	sqe.userData = userData
+	sqe.len = 16 // 16-byte ublksrv_io_cmd payload
+	sqe.opcodeFlags = 0
+	sqe.bufIndex = 0
+	sqe.personality = 0
+	sqe.spliceFdIn = 0
+	sqe.addr = 0
 
-	// For SQE128, the cmd area starts at byte 48 and is 80 bytes long
-	// The ublksrv_io_cmd (16 bytes) goes at the beginning of this area
-	sqe.len = 16  // Must be 16 to tell kernel there's a 16-byte payload
+	// Copy the ublksrv_io_cmd (16 bytes) to cmd area
+	// Using direct assignment is faster than copy() for small fixed sizes
+	*(*[16]byte)(unsafe.Pointer(&sqe.cmd[0])) = *(*[16]byte)(unsafe.Pointer(ioCmd))
 
-	// Copy the ublksrv_io_cmd to the cmd field (bytes 48-63 in the overall SQE)
-	copy(sqe.cmd[:16], (*[16]byte)(unsafe.Pointer(ioCmd))[:])
-
-	// Zero out the rest of the cmd area (bytes 64-127 in the overall SQE)
-	for i := 16; i < 80; i++ {
-		sqe.cmd[i] = 0
-	}
+	// Zero remaining cmd area (bytes 16-79) - required for kernel
+	// Use 64-bit writes for efficiency
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[16])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[24])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[32])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[40])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[48])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[56])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[64])) = 0
+	*(*uint64)(unsafe.Pointer(&sqe.cmd[72])) = 0
 
 	// Submit the command and flush to kernel
-	// submitOnlyCmd handles both queueing the SQE and calling io_uring_enter
 	if _, err := r.submitOnlyCmd(sqe); err != nil {
 		return nil, fmt.Errorf("failed to submit I/O command: %w", err)
 	}
@@ -587,8 +610,10 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 }
 
 func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
-	// Drain CQ if anything is already there
-	results := make([]Result, 0, 8)
+	// Hot path optimization: Reuse pre-allocated results slice
+	// Reset length to 0 but keep capacity
+	r.resultsPool = r.resultsPool[:0]
+	r.cqePoolIndex = 0 // Reset pool index for this batch
 
 	drain := func() {
 		cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
@@ -605,18 +630,31 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 
 		currentHead := atomic.LoadUint32(cqHead)
 
+		// Pre-calculate constant offset for cqe slot computation
+		cqMask := r.params.cqEntries - 1
+		cqeBase := uintptr(r.params.cqOff.cqes)
+		cqeSize := uintptr(unsafe.Sizeof(cqe32{}))
+
 		for currentHead != currentTail {
-			cqMask := r.params.cqEntries - 1
 			cqIndex := currentHead & cqMask
-			cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
+			cqeSlot := unsafe.Add(r.cqAddr, cqeBase+cqeSize*uintptr(cqIndex))
 			cqe := (*cqe32)(cqeSlot)
 
-
-			res := &minimalResult{userData: cqe.userData, value: cqe.res}
-			if cqe.res < 0 {
-				res.err = fmt.Errorf("operation failed with result: %d", cqe.res)
+			// Use pre-allocated result struct from pool
+			var res *minimalResult
+			if r.cqePoolIndex < r.cqePoolSize {
+				res = &r.cqePool[r.cqePoolIndex]
+				r.cqePoolIndex++
+			} else {
+				// Pool exhausted - fall back to allocation (rare)
+				res = &minimalResult{}
 			}
-			results = append(results, res)
+
+			res.userData = cqe.userData
+			res.value = cqe.res
+			res.err = nil // Don't allocate error string - caller checks Value()
+
+			r.resultsPool = append(r.resultsPool, res)
 			currentHead++
 		}
 
@@ -628,8 +666,8 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 
 	// First, non-blocking drain
 	drain()
-	if len(results) > 0 {
-		return results, nil
+	if len(r.resultsPool) > 0 {
+		return r.resultsPool, nil
 	}
 
 	// If timeout is specified, don't block forever
@@ -637,7 +675,7 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 		// Don't wait for any completions, just check if there are any
 		_, _, _ = r.submitAndWaitRing(0, 0)
 		drain()
-		return results, nil // Return empty slice if no work - NOT an error
+		return r.resultsPool, nil // Return empty slice if no work - NOT an error
 	}
 
 	// Block for at least one completion (only if no timeout)
@@ -656,7 +694,7 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 
 	// Drain whatever arrived
 	drain()
-	return results, nil // Always return slice, even if empty
+	return r.resultsPool, nil // Always return slice, even if empty
 }
 
 func (r *minimalRing) NewBatch() Batch {

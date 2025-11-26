@@ -74,6 +74,7 @@ fi
 # Start ublk device in background with MAXIMUM verbosity
 echo "Starting ublk-mem with maximum verbosity..."
 echo "All logs will go to stdout for immediate visibility"
+# Using multi-queue (auto-detect based on CPUs) with sharded memory backend
 sudo ./ublk-mem --size=16M -v &
 UBLK_PID=$!
 echo "Started ublk-mem with PID $UBLK_PID"

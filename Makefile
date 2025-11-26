@@ -97,28 +97,9 @@ setup-vm:
 		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /home/behrlich/ublk-test/ublk-mem\" >> /etc/sudoers.d/ublk-dev'"
 	@echo "✓ Passwordless sudo configured for ublk operations"
 
-# Test on VM (requires SSH access to 192.168.4.79)
-test-vm: 
-	@echo "🚀 Testing go-ublk on VM..."
-	@echo "Building ublk-mem binary..."
-	@$(GOBUILD) -o ublk-mem ./cmd/ublk-mem
-	@echo "Copying files to VM..."
-	@mkdir -p build
-	@cp ublk-mem test-vm.sh build/
-	@echo "Creating remote directory and copying files..."
-	@sshpass -p "$$(cat /tmp/devvm_pwd.txt)" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 "mkdir -p ~/ublk-test"
-	@sshpass -p "$$(cat /tmp/devvm_pwd.txt)" scp -o StrictHostKeyChecking=no build/ublk-mem build/test-vm.sh behrlich@192.168.4.79:~/ublk-test/
-	@echo "✓ Files copied successfully"
-	@echo ""
-	@echo "🧪 Running tests on VM..."
-	@echo "=============================================="
-	@sshpass -p "$$(cat /tmp/devvm_pwd.txt)" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 'cd ~/ublk-test && chmod +x test-vm.sh && ./test-vm.sh' || \
-		(echo ""; echo "❌ VM test failed"; echo "Try running: make setup-vm"; exit 1)
-	@echo "=============================================="
+# Test on VM (alias for vm-simple-e2e)
+test-vm: vm-simple-e2e
 	@echo "✅ VM test completed!"
-	@echo ""
-	@echo "🎉 If you saw 'Device created: /dev/ublkb0' above,"
-	@echo "   then the go-ublk control plane is working!"
 
 # --- VM Convenience Targets ---
 .PHONY: vm-copy vm-run vm-stop vm-e2e
@@ -146,16 +127,28 @@ vm-stop:
 
 vm-e2e: ublk-mem vm-copy
 	@echo "🧪 Running e2e I/O test on VM..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && ./test-e2e.sh"
+		"set -e; cd $(VM_DIR) && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh"
 	@echo "✅ VM e2e test completed"
 
 vm-benchmark: ublk-mem vm-copy
 	@echo "📊 Running baseline performance benchmark on VM..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-benchmark.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-quick-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-benchmark.sh && ./test-benchmark.sh"
+		"set -e; cd $(VM_DIR) && chmod +x ./vm-quick-bench.sh && ./vm-quick-bench.sh"
 	@echo "✅ VM benchmark completed"
+
+vm-profile: ublk-mem vm-copy
+	@echo "🔬 Running profiling benchmark on VM..."
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-profile-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
+		"set -e; cd $(VM_DIR) && chmod +x ./vm-profile-bench.sh && ./vm-profile-bench.sh"
+	@echo "📥 Fetching profile files..."
+	@mkdir -p build
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST):/tmp/ublk-*.prof build/ 2>/dev/null || echo "Warning: Could not fetch profiles"
+	@echo "✅ Profiles saved to build/"
+	@echo "💡 Analyze with: go tool pprof -http=:8080 ./ublk-mem build/ublk-cpu.prof"
 
 # Stress test: 10 alternating vm-e2e and vm-benchmark runs
 vm-stress: ublk-mem
@@ -380,39 +373,9 @@ help:
 	@echo "  vm-simple-e2e   - Simple single I/O test with max verbosity"
 	@echo ""
 	@echo "  help            - Show this help"
-# Advanced I/O test
-test-vm-io:
-	@echo "🧪 Advanced I/O Testing on VM..."
-	@echo "Building ublk-mem binary..."
-	@go build -o ublk-mem ./cmd/ublk-mem
-	@echo "Deploying to VM..."
-	@sshpass -f /tmp/devvm_pwd.txt ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 "mkdir -p ~/ublk-test"
-	@sshpass -f /tmp/devvm_pwd.txt scp -o StrictHostKeyChecking=no ublk-mem test-vm.sh behrlich@192.168.4.79:~/ublk-test/
-	@echo "Running advanced I/O test..."
-	@sshpass -f /tmp/devvm_pwd.txt ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 << 'REMOTE_EOF' || echo "Test completed (may have failed)"
-		cd ~/ublk-test
-		echo "=== Advanced I/O Test ==="
-		echo "Starting ublk-mem in background..."
-		sudo timeout 20s ./ublk-mem --size=64M -v &
-		UBLK_PID=$$!
-		sleep 3
-		echo "Checking if block device exists..."
-		if [ -b /dev/ublkb0 ]; then
-		    echo "✅ /dev/ublkb0 exists and is a block device"
-		    ls -la /dev/ublkb0
-		    sudo blockdev --getsize64 /dev/ublkb0
-		    echo "Testing basic I/O operations..."
-		    echo "Hello, ublk world!" | sudo dd of=/dev/ublkb0 bs=17 count=1 2>/dev/null
-		    echo "Reading back data..."
-		    sudo dd if=/dev/ublkb0 bs=17 count=1 2>/dev/null
-		    echo "✅ Basic I/O operations work!"
-		else
-		    echo "❌ /dev/ublkb0 does not exist or is not a block device"
-		fi
-		sudo kill $$UBLK_PID 2>/dev/null || true
-		wait $$UBLK_PID 2>/dev/null || true
-		echo "=== Advanced test completed ==="
-	REMOTE_EOF
+# Advanced I/O test (alias for vm-simple-e2e, legacy target)
+test-vm-io: vm-simple-e2e
+	@echo "✅ Advanced I/O test completed!"
 minimal_test: minimal_test.c
 	gcc -o minimal_test minimal_test.c
 
@@ -518,15 +481,20 @@ suite:
 	@echo "✅ Full test suite completed successfully!"
 
 # Debug hang with stack traces
+# Note: Uses SIGUSR1 handler in ublk-mem to dump goroutine stacks
 .PHONY: vm-hang-debug
 
 vm-hang-debug: ublk-mem vm-copy
-	@echo "🔍 Running hang debug test with stack trace capture..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no test-hang-debug.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@scripts/vm-ssh.sh 'cd ~/ublk-test && chmod +x ./test-hang-debug.sh && ./test-hang-debug.sh'
-	@echo "Fetching stack trace files..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no "$(VM_USER)@$(VM_HOST):~/ublk-test/ublk-stacks-*.txt" . 2>/dev/null || echo "No stack trace files found"
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "sudo cat /root/ublk-test/ublk-stacks-*.txt 2>/dev/null" || echo "No root-owned stack files"
+	@echo "🔍 Running hang debug - will capture stack traces via SIGUSR1..."
+	@scripts/vm-ssh.sh 'cd ~/ublk-test && \
+		sudo ./ublk-mem --size=64M -v & UBLK_PID=$$!; \
+		sleep 5; \
+		echo "Sending SIGUSR1 to capture stacks..."; \
+		sudo kill -USR1 $$UBLK_PID 2>/dev/null || true; \
+		sleep 2; \
+		sudo kill $$UBLK_PID 2>/dev/null || true; \
+		wait $$UBLK_PID 2>/dev/null || true'
+	@echo "✅ Hang debug completed - check VM logs for stack traces"
 
 # Race detector tests - build with Go race detector enabled
 # Note: Race detector requires CGO and adds ~10x overhead
