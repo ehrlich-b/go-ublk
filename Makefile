@@ -1,47 +1,64 @@
 # Makefile for go-ublk
 
-# Go parameters
-GOCMD=go
-GOBUILD=$(GOCMD) build
-TAGS?=
-GOCLEAN=$(GOCMD) clean
-GOTEST=$(GOCMD) test
-GOGET=$(GOCMD) get
-GOMOD=$(GOCMD) mod
+# Include local overrides if present (gitignored)
+-include Makefile.local
 
-# Race detector support
-# Usage: make RACE=1 ublk-mem
-#        make RACE=1 vm-e2e
-RACE?=
+#==============================================================================
+# Go Build Configuration
+#==============================================================================
+
+GOCMD    = go
+GOBUILD  = $(GOCMD) build
+GOCLEAN  = $(GOCMD) clean
+GOTEST   = $(GOCMD) test
+GOGET    = $(GOCMD) get
+GOMOD    = $(GOCMD) mod
+
+# Build flags
+TAGS ?=
+
+# Race detector: make RACE=1 <target>
+RACE ?=
 ifeq ($(RACE),1)
-  BUILD_FLAGS=-race
-  CGO_SETTING=CGO_ENABLED=1
+  BUILD_FLAGS = -race
+  CGO_SETTING = CGO_ENABLED=1
 else
-  BUILD_FLAGS=
-  CGO_SETTING=CGO_ENABLED=0
+  BUILD_FLAGS =
+  CGO_SETTING = CGO_ENABLED=0
 endif
 
-# Project info
-BINARY_NAME=ublk
-BINARY_DIR=./examples
+# Binary targets
+BINARIES = ublk-mem ublk-file ublk-null ublk-zip
 
-# Build targets
-BINARIES=ublk-mem ublk-file ublk-null ublk-zip
+#==============================================================================
+# VM Configuration (override in Makefile.local or environment)
+#==============================================================================
 
-# Test parameters
-TEST_FLAGS=-v
-INTEGRATION_FLAGS=-tags=integration
-UNIT_FLAGS=-tags=!integration
+VM_HOST ?= $(UBLK_VM_HOST)
+VM_USER ?= $(UBLK_VM_USER)
+VM_DIR  ?= ~/ublk-test
+VM_PASS ?= $(UBLK_VM_PASS)
 
-.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e vm-simple-benchmark suite vm-e2e-racedetect vm-simple-e2e-racedetect
+# SSH command construction
+ifdef VM_PASS
+  VM_SSH = sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST)
+  VM_SCP = sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no
+else
+  VM_SSH = ssh $(VM_USER)@$(VM_HOST)
+  VM_SCP = scp
+endif
 
-# Default target
+#==============================================================================
+# Core Targets
+#==============================================================================
+
+.PHONY: all build clean test test-unit test-integration deps tidy fmt lint vet help
+
 all: deps build test
 
-# Build all binaries (FORCE ensures always rebuild)
+# Build all binaries
 build: FORCE $(BINARIES)
 
-# Individual binary targets (FORCE ensures always rebuild)
 ublk-mem: FORCE
 	@mkdir -p bin
 	@echo "Building ublk-mem$(if $(BUILD_FLAGS), (with race detector),)..."
@@ -56,22 +73,21 @@ ublk-null: FORCE
 ublk-zip: FORCE
 	@echo "Building ublk-zip (Phase 4)"
 
-# Clean build artifacts
 clean:
 	$(GOCLEAN)
-	rm -rf bin/
+	rm -rf bin/ build/
 
-# Run all tests
+#==============================================================================
+# Testing
+#==============================================================================
+
 test: test-unit
-	@echo "All tests completed"
 
-# Run unit tests only (no kernel dependencies)
 test-unit:
 	@echo "Running unit tests..."
-	$(GOTEST) $(TEST_FLAGS) ./...
-	$(GOTEST) $(TEST_FLAGS) $(UNIT_FLAGS) ./test/unit/...
+	$(GOTEST) -v ./...
+	$(GOTEST) -v -tags=!integration ./test/unit/...
 
-# Run integration tests (requires ublk kernel support and root)
 test-integration:
 	@echo "Running integration tests (requires root and ublk kernel support)..."
 	@if [ "$$(id -u)" != "0" ]; then \
@@ -79,509 +95,198 @@ test-integration:
 		echo "Run: sudo make test-integration"; \
 		exit 1; \
 	fi
-	$(GOTEST) $(TEST_FLAGS) $(INTEGRATION_FLAGS) ./test/integration/...
+	$(GOTEST) -v -tags=integration ./test/integration/...
 
-# Set up VM for passwordless sudo (run once)
-setup-vm:
-	@echo "🔧 Setting up VM for passwordless sudo..."
-	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
-		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
-		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"# ublk dev rules\" > /etc/sudoers.d/ublk-dev'"
-	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
-		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
-		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /usr/sbin/modprobe ublk_drv\" >> /etc/sudoers.d/ublk-dev'"
-	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
-		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
-		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /usr/sbin/modprobe -r ublk_drv\" >> /etc/sudoers.d/ublk-dev'"
-	@PASSWORD=$$(cat /tmp/devvm_pwd.txt) && \
-		sshpass -p "$$PASSWORD" ssh -o StrictHostKeyChecking=no behrlich@192.168.4.79 \
-		"echo \"$$PASSWORD\" | sudo -S bash -c 'echo \"behrlich ALL=(ALL) NOPASSWD: /home/behrlich/ublk-test/ublk-mem\" >> /etc/sudoers.d/ublk-dev'"
-	@echo "✓ Passwordless sudo configured for ublk operations"
+test-race:
+	@echo "Running tests with race detector..."
+	$(GOTEST) -v -race ./...
 
-# Test on VM (alias for vm-simple-e2e)
-test-vm: vm-simple-e2e
-	@echo "✅ VM test completed!"
-
-# --- VM Convenience Targets ---
-.PHONY: vm-copy vm-run vm-stop vm-e2e
-
-VM_HOST=192.168.4.79
-VM_USER=behrlich
-VM_DIR=~/ublk-test
-VM_PASS=$(shell cat /tmp/devvm_pwd.txt)
-
-vm-copy: ublk-mem
-	@echo "📦 Copying ublk-mem to VM..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true; rm -f $(VM_DIR)/ublk-mem"
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no bin/ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@echo "✓ Copied."
-
-vm-run: ublk-mem vm-copy
-	@echo "🚀 Running ublk-mem on VM (10s)..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"cd $(VM_DIR) && sudo timeout 10 ./ublk-mem --size=16M -v || true; ls -la /dev/ublk* || true"
-
-vm-stop:
-	@echo "🛑 Stopping ublk-mem on VM (best-effort)..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"sudo killall ublk-mem 2>/dev/null || true"
-
-vm-e2e: ublk-mem vm-copy
-	@echo "🧪 Running e2e I/O test on VM..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh"
-	@echo "✅ VM e2e test completed"
-
-vm-benchmark: ublk-mem vm-copy
-	@echo "📊 Running baseline performance benchmark on VM..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-quick-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./vm-quick-bench.sh && ./vm-quick-bench.sh"
-	@echo "✅ VM benchmark completed"
-
-vm-profile: ublk-mem vm-copy
-	@echo "🔬 Running profiling benchmark on VM..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-profile-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./vm-profile-bench.sh && ./vm-profile-bench.sh"
-	@echo "📥 Fetching profile files..."
-	@mkdir -p build
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST):/tmp/ublk-*.prof build/ 2>/dev/null || echo "Warning: Could not fetch profiles"
-	@echo "✅ Profiles saved to build/"
-	@echo "💡 Analyze with: go tool pprof -http=:8080 ./ublk-mem build/ublk-cpu.prof"
-
-# Stress test: 10 alternating vm-e2e and vm-benchmark runs
-vm-stress: ublk-mem
-	@echo "🔥 Running 10x alternating vm-e2e / vm-benchmark stress test..."
-	@$(MAKE) vm-reset
-	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-		echo ""; \
-		echo "========== ITERATION $$i/10 =========="; \
-		echo "--- vm-e2e ---"; \
-		if ! timeout 60 $(MAKE) vm-e2e > /tmp/alt_e2e_$$i.log 2>&1; then \
-			echo "FAILED: vm-e2e on iteration $$i"; \
-			tail -20 /tmp/alt_e2e_$$i.log; \
-			exit 1; \
-		fi; \
-		grep -E "(PASS|All tests passed)" /tmp/alt_e2e_$$i.log | tail -1 || true; \
-		echo "vm-e2e: PASS"; \
-		echo "--- vm-benchmark ---"; \
-		if ! timeout 180 $(MAKE) vm-benchmark > /tmp/alt_bench_$$i.log 2>&1; then \
-			echo "FAILED: vm-benchmark on iteration $$i"; \
-			tail -30 /tmp/alt_bench_$$i.log; \
-			exit 1; \
-		fi; \
-		grep -E "IOPS=" /tmp/alt_bench_$$i.log | tail -1 || true; \
-		echo "vm-benchmark: PASS"; \
-	done
-	@echo ""
-	@echo "========== ALL 10 ALTERNATING TESTS PASSED =========="
-
-vm-simple-benchmark: ublk-mem vm-copy
-	@echo "📊 Running simple benchmark with debugging on VM..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-quick-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./vm-quick-bench.sh && timeout 120 ./vm-quick-bench.sh"
-	@echo "✅ VM simple benchmark completed"
-
-.PHONY: vm-e2e-80 vm-e2e-64 vm-e2e-80-raw vm-e2e-64-raw vm-run-env
-vm-e2e-80: ublk-mem vm-copy
-	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=80 ..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_DEVINFO_LEN=80 ./test-e2e.sh"
-
-vm-e2e-64: ublk-mem vm-copy
-	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=64 ..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_DEVINFO_LEN=64 ./test-e2e.sh"
-
-vm-e2e-80-raw: ublk-mem vm-copy
-	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=80 + raw ctrl encoding..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_CTRL_ENC=raw UBLK_DEVINFO_LEN=80 ./test-e2e.sh"
-
-vm-e2e-64-raw: ublk-mem vm-copy
-	@echo "🧪 Running e2e with UBLK_DEVINFO_LEN=64 + raw ctrl encoding..."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"set -e; cd $(VM_DIR) && chmod +x ./test-e2e.sh && UBLK_CTRL_ENC=raw UBLK_DEVINFO_LEN=64 ./test-e2e.sh"
-
-# Run ublk-mem on VM with custom environment variables
-# Usage: make vm-run-env ENV="UBLK_CTRL_ENC=raw UBLK_DEVINFO_LEN=64"
-vm-run-env: ublk-mem vm-copy
-	@echo "🚀 Running ublk-mem on VM with custom env: $(ENV)"
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) \
-		"cd $(VM_DIR) && sudo env $(ENV) timeout 15 ./ublk-mem --size=16M -v || true; ls -la /dev/ublk* || true"
-
-.PHONY: vm-enable-logs vm-dump-logs
-vm-enable-logs:
-	@echo "🪵 Enabling maximal kernel logging on VM (io_uring + ublk + tracing)..."
-	@scripts/vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
-
-vm-dump-logs:
-	@echo "📤 Dumping kernel logs and tracing buffers (last ~2k lines)..."
-	@scripts/vm-ssh.sh 'bash -s' < scripts/vm-dump-logs.sh
-
-.PHONY: vm-debug vm-fetch-latest-logs
-vm-debug: ublk-mem vm-copy
-	@echo "🧪 Running deep debug on VM (strace + kernel tracing) ..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-debug-run.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
-	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-test && chmod +x ./vm-debug-run.sh && ./vm-debug-run.sh"'
-
-vm-fetch-latest-logs:
-	@echo "📥 Fetching latest ublk-debug archive from VM home..."
-	@scripts/vm-ssh.sh 'bash -lc "ls -1t ~ | grep ^ublk-debug- | head -1"' > build/.last_log 2>/dev/null || true
-	@[ -s build/.last_log ] && echo "Latest: $$(cat build/.last_log)" || (echo "No log archives found" && exit 1)
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST):~/$$(cat build/.last_log) build/
-	@echo "✓ Logs downloaded to build/$$(cat build/.last_log)"
-
-.PHONY: vm-install-go
-vm-install-go:
-	@echo "🛠️  Installing Go toolchain and build deps on VM..."
-	@scripts/vm-ssh.sh 'bash -lc "sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Check-Valid-Until=false -o Acquire::AllowInsecureRepositories=true update -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go build-essential linux-libc-dev"'
-	@scripts/vm-ssh.sh 'bash -lc "go version || echo go not found"'
-	@echo "✓ VM Go installation step attempted"
-
-.PHONY: vm-fix-time
-vm-fix-time:
-	@echo "🕒 Attempting to sync VM time for apt validity..."
-	@scripts/vm-ssh.sh 'bash -lc "sudo timedatectl set-ntp true || true; sudo systemctl restart systemd-timesyncd || true; sleep 3; timedatectl || true"'
-	@echo "✓ VM time sync attempted"
-
-.PHONY: vm-src-copy vm-build-e2e
-vm-src-copy:
-	@echo "📦 Archiving and copying source to VM..."
-	@mkdir -p build
-	@tar --exclude='./build' -czf build/ublk-src.tgz .
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no build/ublk-src.tgz $(VM_USER)@$(VM_HOST):~/
-	@scripts/vm-ssh.sh 'bash -lc "rm -rf ~/ublk-src && mkdir -p ~/ublk-src && tar -xzf ~/ublk-src.tgz -C ~/ublk-src"'
-	@echo "✓ Source copied to VM"
-
-vm-build-e2e: vm-src-copy
-	@echo "🧰 Building on VM with cgo to use VM kernel headers..."
-	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && CGO_ENABLED=1 go build -o ublk-mem ./examples/ublk-mem"'
-	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && chmod +x ./test-e2e.sh && sudo ./test-e2e.sh"'
-
-# Run benchmarks
 benchmark:
 	@echo "Running benchmarks..."
 	$(GOTEST) -bench=. -benchmem ./...
 
-# Install/update dependencies
-deps:
-	$(GOGET) -v ./...
-	$(GOMOD) download
-
-# Tidy dependencies
-tidy:
-	$(GOMOD) tidy
-
-# Format code with gofmt -s (simplify) and goimports
-fmt:
-	@echo "Running gofmt -s -w ..."
-	@gofmt -s -w .
-	@echo "Running goimports -w ..."
-	@which goimports > /dev/null || (echo "goimports not found, installing..."; go install golang.org/x/tools/cmd/goimports@latest)
-	@goimports -w .
-	@echo "✓ Code formatted"
-
-# Lint code - checks formatting and runs golangci-lint
-lint:
-	@echo "Checking code formatting..."
-	@UNFORMATTED=$$(gofmt -l . | grep -v '^vendor/' || true); \
-	if [ -n "$$UNFORMATTED" ]; then \
-		echo "❌ The following files are not formatted:"; \
-		echo "$$UNFORMATTED"; \
-		echo "Run 'make fmt' to fix formatting"; \
-		exit 1; \
-	fi
-	@echo "✓ All files are properly formatted"
-	@echo "Checking imports..."
-	@which goimports > /dev/null || (echo "goimports not found, install with: go install golang.org/x/tools/cmd/goimports@latest"; exit 1)
-	@BADIMPORTS=$$(goimports -l . | grep -v '^vendor/' || true); \
-	if [ -n "$$BADIMPORTS" ]; then \
-		echo "❌ The following files have incorrect imports:"; \
-		echo "$$BADIMPORTS"; \
-		echo "Run 'make fmt' to fix imports"; \
-		exit 1; \
-	fi
-	@echo "✓ All imports are correct"
-	@echo "Running golangci-lint..."
-	@which golangci-lint > /dev/null || (echo "⚠️  golangci-lint not found, install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; echo "Skipping golangci-lint check..."; exit 0)
-	@golangci-lint run || (echo "❌ golangci-lint found issues"; exit 1)
-	@echo "✓ All lint checks passed"
-
-# Vet code
-vet:
-	$(GOCMD) vet ./...
-
-# Check if ublk kernel support is available
-check-kernel:
-	@echo "Checking ublk kernel support..."
-	@if [ -e /dev/ublk-control ]; then \
-		echo "✓ /dev/ublk-control exists"; \
-	else \
-		echo "✗ /dev/ublk-control not found"; \
-		echo "  Make sure ublk_drv module is loaded: sudo modprobe ublk_drv"; \
-	fi
-	@if lsmod | grep -q ublk_drv; then \
-		echo "✓ ublk_drv module is loaded"; \
-	else \
-		echo "✗ ublk_drv module not loaded"; \
-		echo "  Load with: sudo modprobe ublk_drv"; \
-	fi
-
-# Check module info
-check-module:
-	@echo "Checking ublk module information..."
-	@if modinfo ublk_drv >/dev/null 2>&1; then \
-		echo "Module information:"; \
-		modinfo ublk_drv | head -10; \
-	else \
-		echo "ublk_drv module not available"; \
-	fi
-
-# Development helpers
-dev-setup: deps
-	@echo "Setting up development environment..."
-	@if ! which golangci-lint >/dev/null 2>&1; then \
-		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
-	fi
-
-# Full check (formatting, vetting, linting, testing)
-check: fmt vet lint test
-
-# Coverage report
 coverage:
 	@echo "Generating coverage report..."
 	$(GOTEST) -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
+	@echo "Coverage report: coverage.html"
 
-# Race condition testing
-test-race:
-	@echo "Running tests with race detector..."
-	$(GOTEST) $(TEST_FLAGS) -race ./...
+#==============================================================================
+# Code Quality
+#==============================================================================
 
-# Help target
-help:
-	@echo "Available targets:"
-	@echo "  all             - Build and test everything"
-	@echo "  build           - Build all binaries"
-	@echo "  clean           - Clean build artifacts"
-	@echo "  test            - Run all tests"
-	@echo "  test-unit       - Run unit tests only"
-	@echo "  test-integration- Run integration tests (requires root)"
-	@echo "  setup-vm        - Configure VM for passwordless sudo (run once)"
-	@echo "  test-vm         - Test on VM with real ublk kernel support"
-	@echo "  benchmark       - Run benchmarks"
-	@echo "  deps            - Install/update dependencies"
-	@echo "  tidy            - Tidy dependencies"
-	@echo "  lint            - Run linter"
-	@echo "  fmt             - Format code"
-	@echo "  vet             - Vet code"
-	@echo "  check-kernel    - Check ublk kernel support"
-	@echo "  check-module    - Show ublk module info"
-	@echo "  dev-setup       - Setup development environment"
-	@echo "  check           - Full check (fmt, vet, lint, test)"
-	@echo "  coverage        - Generate test coverage report"
-	@echo "  test-race       - Run tests with race detector"
-	@echo ""
-	@echo ""
-	@echo "Race Detector (build with RACE=1):"
-	@echo "  vm-e2e-racedetect     - Run vm-e2e with race detector"
-	@echo "  vm-simple-e2e-racedetect - Run vm-simple-e2e with race detector"
-	@echo "  RACE=1 make vm-e2e    - Manual: any target with race detector"
-	@echo ""
-	@echo "Enhanced Debug Workflow:"
-	@echo "  vm-reset        - Hard reset VM and setup clean environment"
-	@echo "  kernel-trace    - Read kernel trace buffer (last 50 lines)"
-	@echo "  vm-simple-e2e   - Simple single I/O test with max verbosity"
-	@echo ""
-	@echo "  help            - Show this help"
-# Advanced I/O test (alias for vm-simple-e2e, legacy target)
-test-vm-io: vm-simple-e2e
-	@echo "✅ Advanced I/O test completed!"
-minimal_test: minimal_test.c
-	gcc -o minimal_test minimal_test.c
+deps:
+	$(GOGET) -v ./...
+	$(GOMOD) download
 
-vm-minimal: minimal_test
-	sshpass -p "$$(cat /tmp/devvm_pwd.txt)" scp minimal_test behrlich@192.168.4.79:~/
-	scripts/vm-ssh.sh "sudo ./minimal_test"
+tidy:
+	$(GOMOD) tidy
 
-# Copy entire repo to VM (excluding .git, build artifacts, etc.)
-vm-scp-all:
-	@echo "📦 Copying entire repo to VM..."
-	@echo "Excluding: .git, build artifacts, IDE files, etc."
-	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p ~/go-ublk"
-	@sshpass -p "$(VM_PASS)" rsync -avz \
-		--exclude='.git' \
-		--exclude='*.o' \
-		--exclude='*.so' \
-		--exclude='*.exe' \
-		--exclude='ublk-mem' \
-		--exclude='ublk-file' \
-		--exclude='ublk-null' \
-		--exclude='ublk-zip' \
-		--exclude='build/' \
-		--exclude='.vscode/' \
-		--exclude='.idea/' \
-		--exclude='*.log' \
-		--exclude='*.tmp' \
-		-e "sshpass -p '$(VM_PASS)' ssh -o StrictHostKeyChecking=no" \
-		./ $(VM_USER)@$(VM_HOST):~/go-ublk/
-	@echo "✓ Repo copied to ~/go-ublk on VM"
-	@echo "💡 Run: scripts/vm-ssh.sh \"cd go-ublk && make build\" to build on VM"
+fmt:
+	@echo "Running gofmt -s -w ..."
+	@gofmt -s -w .
+	@echo "Running goimports -w ..."
+	@which goimports > /dev/null || go install golang.org/x/tools/cmd/goimports@latest
+	@goimports -w .
+	@echo "Code formatted"
 
-# --- Enhanced Debug Workflow ---
-.PHONY: vm-reset kernel-trace vm-simple-e2e
+lint:
+	@echo "Checking formatting..."
+	@UNFORMATTED=$$(gofmt -l . | grep -v '^vendor/' || true); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "Unformatted files:"; echo "$$UNFORMATTED"; \
+		echo "Run 'make fmt' to fix"; exit 1; \
+	fi
+	@echo "Checking imports..."
+	@which goimports > /dev/null || (echo "goimports not found"; exit 1)
+	@BADIMPORTS=$$(goimports -l . | grep -v '^vendor/' || true); \
+	if [ -n "$$BADIMPORTS" ]; then \
+		echo "Bad imports:"; echo "$$BADIMPORTS"; \
+		echo "Run 'make fmt' to fix"; exit 1; \
+	fi
+	@echo "Running golangci-lint..."
+	@which golangci-lint > /dev/null || (echo "golangci-lint not found, skipping..."; exit 0)
+	@golangci-lint run || exit 1
+	@echo "Lint passed"
 
-# Hard reset VM and prepare clean environment
-vm-reset:
-	@echo "🔄 Performing hard VM reset and clean environment setup..."
-	@echo "Step 1: Hard reset via sysrq..."
-	@timeout 3 scripts/vm-ssh.sh 'sudo sh -c "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"' || echo "Reset triggered (expected timeout)"
-	@echo "Step 2: Waiting for VM to restart..."
+vet:
+	$(GOCMD) vet ./...
+
+check: fmt vet lint test
+
+dev-setup: deps
+	@echo "Setting up development environment..."
+	@which golangci-lint >/dev/null 2>&1 || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+#==============================================================================
+# Kernel Support Checks
+#==============================================================================
+
+check-kernel:
+	@echo "Checking ublk kernel support..."
+	@if [ -e /dev/ublk-control ]; then echo "✓ /dev/ublk-control exists"; \
+	else echo "✗ /dev/ublk-control not found - run: sudo modprobe ublk_drv"; fi
+	@if lsmod | grep -q ublk_drv; then echo "✓ ublk_drv module loaded"; \
+	else echo "✗ ublk_drv not loaded - run: sudo modprobe ublk_drv"; fi
+
+check-module:
+	@if modinfo ublk_drv >/dev/null 2>&1; then modinfo ublk_drv | head -10; \
+	else echo "ublk_drv module not available"; fi
+
+#==============================================================================
+# VM Testing (requires VM_HOST, VM_USER configured)
+#==============================================================================
+
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress
+
+# Check VM configuration before running VM targets
+vm-check:
+	@if [ -z "$(VM_HOST)" ] || [ -z "$(VM_USER)" ]; then \
+		echo "Error: VM not configured"; \
+		echo "Set VM_HOST and VM_USER in Makefile.local or environment:"; \
+		echo "  export UBLK_VM_HOST=192.168.1.100"; \
+		echo "  export UBLK_VM_USER=myuser"; \
+		echo "  export UBLK_VM_PASS=mypassword  # or use SSH keys"; \
+		echo ""; \
+		echo "Or copy Makefile.local.example to Makefile.local and edit it."; \
+		exit 1; \
+	fi
+
+vm-copy: vm-check ublk-mem
+	@echo "Copying ublk-mem to VM..."
+	@$(VM_SSH) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true"
+	@$(VM_SCP) bin/ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@echo "Copied."
+
+vm-e2e: vm-copy
+	@echo "Running e2e I/O test on VM..."
+	@$(VM_SCP) scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh"
+	@echo "VM e2e test completed"
+
+vm-simple-e2e: vm-copy
+	@echo "Running simple I/O test..."
+	@$(VM_SCP) scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@timeout 60 $(VM_SSH) "cd $(VM_DIR) && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh" || \
+		(echo "Test timed out" && $(MAKE) vm-trace && exit 1)
+
+vm-benchmark: vm-copy
+	@echo "Running benchmark on VM..."
+	@$(VM_SCP) scripts/vm-quick-bench.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x ./vm-quick-bench.sh && ./vm-quick-bench.sh"
+	@echo "VM benchmark completed"
+
+vm-reset: vm-check
+	@echo "Hard reset VM..."
+	@timeout 3 $(VM_SSH) 'sudo sh -c "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"' || true
+	@echo "Waiting for VM..."
 	@for i in $$(seq 1 30); do \
 		sleep 2; \
-		if scripts/vm-ssh.sh 'echo "VM is up"' >/dev/null 2>&1; then \
-			echo "✓ VM responsive after $$((i*2)) seconds"; \
-			break; \
-		fi; \
-		echo "  ($$i/30) polling..."; \
+		if $(VM_SSH) 'echo ok' >/dev/null 2>&1; then echo "VM up"; break; fi; \
+		echo "  ($$i/30)..."; \
 	done
-	@echo "Step 3: Waiting for system to fully initialize..."
 	@sleep 5
-	@echo "Step 4: Cleaning up any existing ublk devices..."
-	@scripts/vm-ssh.sh 'sudo pkill -9 ublk-mem 2>/dev/null || true; sudo rm -f /dev/ublkb* /dev/ublkc* 2>/dev/null || true'
-	@echo "Step 5: Reloading ublk module..."
-	@scripts/vm-ssh.sh 'sudo modprobe -r ublk_drv 2>/dev/null || true; sudo modprobe ublk_drv'
-	@echo "Step 6: Setting up enhanced kernel tracing..."
-	@scripts/vm-ssh.sh 'bash -s' < scripts/vm-enable-logs.sh
-	@echo "Step 7: Verifying trace setup..."
-	@scripts/vm-ssh.sh 'echo "Active kprobes:"; sudo cat /sys/kernel/tracing/kprobe_events | head -10 || echo "No kprobes set"'
-	@echo "✅ VM reset and tracing setup complete"
+	@$(VM_SSH) 'sudo pkill -9 ublk-mem 2>/dev/null || true; sudo modprobe -r ublk_drv 2>/dev/null || true; sudo modprobe ublk_drv'
+	@echo "VM reset complete"
 
-# Read kernel trace buffer
-kernel-trace:
-	@echo "📋 Reading kernel trace buffer..."
-	@scripts/vm-ssh.sh 'sudo cat /sys/kernel/tracing/trace' | tail -n 50
+vm-trace: vm-check
+	@$(VM_SSH) 'sudo cat /sys/kernel/tracing/trace 2>/dev/null | tail -50 || echo "No trace available"'
 
-# Simple single read/write test with maximum verbosity
-vm-simple-e2e: ublk-mem vm-copy
-	@echo "🧪 Running simple single I/O test with maximum verbosity..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-simple-e2e.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
-	@echo "Test will timeout after 60 seconds if hanging..."
-	@timeout 60 scripts/vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-simple-e2e.sh && ./vm-simple-e2e.sh' || \
-	 (echo "❌ Overall test timed out - checking VM state..." && \
-	  echo "=== FINAL KERNEL TRACE ===" && \
-	  make kernel-trace && \
-	  echo "=== FINAL DMESG ===" && \
-	  scripts/vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
-
-# FIO test to debug Direct I/O vs Buffered I/O issue
-vm-fio-simple-e2e: ublk-mem vm-copy
-	@echo "🧪 Running FIO debug test (buffered vs direct I/O)..."
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no scripts/vm-fio-simple-e2e.sh $(VM_USER)@$(VM_HOST):~/ublk-test/
-	@echo "Test will timeout after 60 seconds if hanging..."
-	@timeout 60 scripts/vm-ssh.sh 'cd ~/ublk-test && chmod +x ./vm-fio-simple-e2e.sh && ./vm-fio-simple-e2e.sh' || \
-	 (echo "❌ Overall test timed out - checking VM state..." && \
-	  echo "=== FINAL KERNEL TRACE ===" && \
-	  make kernel-trace && \
-	  echo "=== FINAL DMESG ===" && \
-	  scripts/vm-ssh.sh 'sudo dmesg | tail -n 20' || true)
-
-# Full test suite - runs build, reset VM, and all tests
-suite:
-	@echo "🧪 Running full test suite..."
-	@echo "📦 Building..."
-	@$(MAKE) build
-	@echo "🔄 Resetting VM..."
+vm-stress: ublk-mem
+	@echo "Running 10x stress test..."
 	@$(MAKE) vm-reset
-	@echo "🧪 Running simple E2E tests..."
-	@$(MAKE) vm-simple-e2e
-	@echo "🧪 Running full E2E tests..."
-	@$(MAKE) vm-e2e
-	@echo "📊 Running benchmark tests..."
-	@$(MAKE) vm-benchmark
-	@echo "✅ Full test suite completed successfully!"
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		echo "=== Iteration $$i/10 ==="; \
+		timeout 60 $(MAKE) vm-e2e || exit 1; \
+		timeout 180 $(MAKE) vm-benchmark || exit 1; \
+	done
+	@echo "All 10 iterations passed"
 
-# Debug hang with stack traces
-# Note: Uses SIGUSR1 handler in ublk-mem to dump goroutine stacks
-.PHONY: vm-hang-debug
+# Alias for backwards compatibility
+test-vm: vm-simple-e2e
 
-vm-hang-debug: ublk-mem vm-copy
-	@echo "🔍 Running hang debug - will capture stack traces via SIGUSR1..."
-	@scripts/vm-ssh.sh 'cd ~/ublk-test && \
-		sudo ./ublk-mem --size=64M -v & UBLK_PID=$$!; \
-		sleep 5; \
-		echo "Sending SIGUSR1 to capture stacks..."; \
-		sudo kill -USR1 $$UBLK_PID 2>/dev/null || true; \
-		sleep 2; \
-		sudo kill $$UBLK_PID 2>/dev/null || true; \
-		wait $$UBLK_PID 2>/dev/null || true'
-	@echo "✅ Hang debug completed - check VM logs for stack traces"
-
-# Race detector tests - build with Go race detector enabled
-# Note: Race detector requires CGO and adds ~10x overhead
-.PHONY: vm-e2e-racedetect vm-simple-e2e-racedetect
+#==============================================================================
+# Race Detector Variants
+#==============================================================================
 
 vm-e2e-racedetect:
-	@echo "🔍 Running vm-e2e with Go race detector enabled..."
 	@$(MAKE) RACE=1 vm-e2e
 
 vm-simple-e2e-racedetect:
-	@echo "🔍 Running vm-simple-e2e with Go race detector enabled..."
 	@$(MAKE) RACE=1 vm-simple-e2e
 
-# Reliability test variants - run tests 5 times with 30s timeout
-.PHONY: vm-simple-e2e-race vm-e2e-race vm-benchmark-race
+#==============================================================================
+# Help
+#==============================================================================
 
-vm-simple-e2e-race: ublk-mem vm-copy
-	@echo "🏁 Running vm-simple-e2e 5 times (30s timeout each)..."
-	@for i in 1 2 3 4 5; do \
-		echo ""; \
-		echo "=== Test $$i/5 ==="; \
-		if timeout 30 $(MAKE) vm-simple-e2e; then \
-			echo "✅ PASS"; \
-		else \
-			echo "❌ FAIL"; \
-			exit 1; \
-		fi; \
-	done
-	@echo ""; \
-	echo "✅ All 5 runs passed!"
+help:
+	@echo "go-ublk Makefile"
+	@echo ""
+	@echo "Build:"
+	@echo "  make build          Build all binaries"
+	@echo "  make clean          Clean build artifacts"
+	@echo "  make RACE=1 build   Build with race detector"
+	@echo ""
+	@echo "Test:"
+	@echo "  make test           Run unit tests"
+	@echo "  make test-race      Run tests with race detector"
+	@echo "  make benchmark      Run benchmarks"
+	@echo "  make coverage       Generate coverage report"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  make fmt            Format code"
+	@echo "  make lint           Run linter"
+	@echo "  make vet            Run go vet"
+	@echo "  make check          Run all checks"
+	@echo ""
+	@echo "VM Testing (requires configuration, see Makefile.local.example):"
+	@echo "  make vm-simple-e2e  Simple I/O test"
+	@echo "  make vm-e2e         Full e2e test"
+	@echo "  make vm-benchmark   Performance benchmark"
+	@echo "  make vm-stress      10x stress test"
+	@echo "  make vm-reset       Hard reset VM"
+	@echo ""
+	@echo "Kernel:"
+	@echo "  make check-kernel   Check ublk kernel support"
 
-vm-e2e-race: ublk-mem vm-copy
-	@echo "🏁 Running vm-e2e 5 times (30s timeout each)..."
-	@for i in 1 2 3 4 5; do \
-		echo ""; \
-		echo "=== Test $$i/5 ==="; \
-		if timeout 30 $(MAKE) vm-e2e; then \
-			echo "✅ PASS"; \
-		else \
-			echo "❌ FAIL"; \
-			exit 1; \
-		fi; \
-	done
-	@echo ""; \
-	echo "✅ All 5 runs passed!"
-
-vm-benchmark-race: ublk-mem vm-copy
-	@echo "🏁 Running vm-benchmark 5 times (30s timeout each)..."
-	@for i in 1 2 3 4 5; do \
-		echo ""; \
-		echo "=== Test $$i/5 ==="; \
-		if timeout 30 $(MAKE) vm-benchmark; then \
-			echo "✅ PASS"; \
-		else \
-			echo "❌ FAIL"; \
-			exit 1; \
-		fi; \
-	done
-	@echo ""; \
-	echo "✅ All 5 runs passed!"
-
-# FORCE target to ensure rebuilds
 FORCE:

@@ -1,0 +1,21 @@
+# Local Makefile overrides - copy to Makefile.local and customize
+# This file is gitignored and will be included by the main Makefile
+
+# VM Configuration for testing with real ublk kernel support
+# Set these to match your test VM environment
+
+# VM connection settings
+VM_HOST ?= 192.168.1.100
+VM_USER ?= myuser
+VM_DIR  ?= ~/ublk-test
+
+# VM authentication - choose one method:
+
+# Option 1: Password from file (for sshpass)
+# VM_PASS = $(shell cat ~/.vm_password)
+
+# Option 2: SSH key (recommended) - leave VM_PASS empty
+# VM_PASS =
+
+# Option 3: Environment variable
+# VM_PASS = $(VM_PASSWORD)

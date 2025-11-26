@@ -34,6 +34,7 @@ Thumbs.db
 
 # Local configuration
 LOCAL.md
+Makefile.local
 
 # VM development helpers (contain passwords/IPs)
 vm-ssh.sh
