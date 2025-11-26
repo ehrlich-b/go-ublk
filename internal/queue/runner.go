@@ -8,11 +8,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
-	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
@@ -34,17 +34,18 @@ const (
 
 // Runner handles I/O for a single ublk queue
 type Runner struct {
-	devID   uint32
-	queueID uint16
-	depth   int
-	backend interfaces.Backend
-	charFd  int
-	ring    uring.Ring
-	descPtr uintptr // mmap'd descriptor array
-	bufPtr  uintptr // I/O buffer base
-	ctx     context.Context
-	cancel  context.CancelFunc
-	logger  interfaces.Logger
+	devID    uint32
+	queueID  uint16
+	depth    int
+	backend  interfaces.Backend
+	charFd   int
+	ring     uring.Ring
+	descPtr  uintptr // mmap'd descriptor array
+	bufPtr   uintptr // I/O buffer base
+	ctx      context.Context
+	cancel   context.CancelFunc
+	logger   interfaces.Logger
+	observer interfaces.Observer // Metrics observer (may be nil)
 	// Per-tag state tracking for proper serialization
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
@@ -59,11 +60,12 @@ const (
 
 
 type Config struct {
-	DevID   uint32
-	QueueID uint16
-	Depth   int
-	Backend interfaces.Backend
-	Logger  interfaces.Logger
+	DevID    uint32
+	QueueID  uint16
+	Depth    int
+	Backend  interfaces.Backend
+	Logger   interfaces.Logger
+	Observer interfaces.Observer // Metrics observer (may be nil)
 }
 
 // NewRunner creates a new queue runner
@@ -81,7 +83,11 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 
 	var fd int
 	var err error
-	const maxRetries = 50 // up to ~5s with 100ms sleep
+	// Wait up to ~5s for udev to create the character device after ADD_DEV.
+	// udev typically creates the node in <100ms, but slow systems or high
+	// udev queue depth can cause delays. 50 * 100ms = 5s is generous.
+	const maxRetries = 50
+	const retryDelayNs = 100 * 1_000_000 // 100ms in nanoseconds
 	for i := 0; i < maxRetries; i++ {
 		fd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
 		if err == nil {
@@ -93,8 +99,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		if err != syscall.ENOENT {
 			return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
 		}
-		// Sleep 100ms and retry
-		ts := syscall.Timespec{Sec: 0, Nsec: 100 * 1_000_000}
+		ts := syscall.Timespec{Sec: 0, Nsec: retryDelayNs}
 		syscall.Nanosleep(&ts, nil)
 	}
 	if err != nil {
@@ -151,6 +156,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		ctx:        ctx,
 		cancel:     cancel,
 		logger:     config.Logger,
+		observer:   config.Observer,
 		tagStates:  make([]TagState, config.Depth),
 		tagMutexes: make([]sync.Mutex, config.Depth),
 	}
@@ -330,103 +336,6 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	if r.logger != nil {
 		r.logger.Debugf("Queue %d: Initial FETCH_REQ submitted for tag %d", r.queueID, tag)
 	}
-	return nil
-}
-
-// waitAndStartDataPlane waits for the character device to appear and starts the data plane
-func (r *Runner) waitAndStartDataPlane() {
-	logger := logging.Default().WithDevice(int(r.devID)).WithQueue(int(r.queueID))
-	logger.Info("waiting for character device to appear")
-
-	charPath := uapi.UblkDevicePath(r.devID)
-
-	// Wait for the character device to appear with longer timeout
-	maxWait := 30 // 30 seconds
-	for i := 0; i < maxWait; i++ {
-		select {
-		case <-r.ctx.Done():
-			logger.Info("context cancelled while waiting for device")
-			return
-		default:
-		}
-
-		// Try to open the character device
-		fd, err := syscall.Open(charPath, syscall.O_RDWR, 0)
-		if err == nil {
-			logger.Info("character device appeared, starting data plane", "char_path", charPath)
-
-			// Initialize the real data plane
-			err = r.initializeDataPlane(fd)
-			if err != nil {
-				logger.Error("failed to initialize data plane", "error", err)
-				syscall.Close(fd)
-				return
-			}
-
-			// Main processing loop
-			go func() {
-				for {
-					select {
-					case <-r.ctx.Done():
-						logger.Info("data plane loop stopped via context")
-						return
-					default:
-						if err := r.processRequests(); err != nil {
-							logger.Error("data plane processing failed", "error", err)
-							return
-						}
-					}
-				}
-			}()
-			return
-		}
-
-		if err != syscall.ENOENT {
-			logger.Error("failed to open character device", "error", err, "char_path", charPath)
-			return
-		}
-
-		// Wait 1 second before retrying
-		syscall.Syscall(syscall.SYS_NANOSLEEP, uintptr(unsafe.Pointer(&syscall.Timespec{Sec: 1})), 0, 0)
-	}
-
-	logger.Error("character device never appeared", "char_path", charPath)
-}
-
-// initializeDataPlane sets up the io_uring and memory mapping for the data plane
-func (r *Runner) initializeDataPlane(fd int) error {
-	logger := logging.Default().WithDevice(int(r.devID)).WithQueue(int(r.queueID))
-	logger.Debug("initializing data plane", "fd", fd)
-
-	// Create io_uring for this queue
-	ringConfig := uring.Config{
-		Entries: uint32(r.depth),
-		FD:      int32(fd),
-		Flags:   0,
-	}
-
-	ring, err := uring.NewRing(ringConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create io_uring: %v", err)
-	}
-
-	// Memory map the descriptor array and I/O buffers
-	descPtr, bufPtr, err := mmapQueues(fd, r.queueID, r.depth)
-	if err != nil {
-		ring.Close()
-		return fmt.Errorf("failed to mmap queues: %v", err)
-	}
-
-	// Update runner with initialized resources
-	r.charFd = fd
-	r.ring = ring
-	r.descPtr = descPtr
-	r.bufPtr = bufPtr
-	// Initialize per-tag state tracking
-	r.tagStates = make([]TagState, r.depth)
-	r.tagMutexes = make([]sync.Mutex, r.depth)
-
-	logger.Info("data plane initialized successfully")
 	return nil
 }
 
@@ -652,12 +561,12 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 		opName = fmt.Sprintf("OP_%d", op)
 	}
 
-	// Log I/O operations for progress visibility
+	// Log I/O operations at debug level (hot path - avoid in production)
 	if r.logger != nil {
 		if length < 1024 {
-			r.logger.Printf("[Q%d:T%02d] %s %dB @ sector %d", r.queueID, tag, opName, length, desc.StartSector)
+			r.logger.Debugf("[Q%d:T%02d] %s %dB @ sector %d", r.queueID, tag, opName, length, desc.StartSector)
 		} else {
-			r.logger.Printf("[Q%d:T%02d] %s %dKB @ sector %d", r.queueID, tag, opName, length/1024, desc.StartSector)
+			r.logger.Debugf("[Q%d:T%02d] %s %dKB @ sector %d", r.queueID, tag, opName, length/1024, desc.StartSector)
 		}
 	}
 
@@ -678,7 +587,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 	if length > maxBufferSize {
 		if r.logger != nil {
-			r.logger.Printf("dynamic allocation: length %d exceeds buffer size %d", length, maxBufferSize)
+			r.logger.Debugf("dynamic allocation: length %d exceeds buffer size %d", length, maxBufferSize)
 		}
 		dynamicBuffer = make([]byte, length)
 		buffer = dynamicBuffer
@@ -687,6 +596,8 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	var err error
+	startTime := time.Now()
+
 	switch op {
 	case uapi.UBLK_IO_OP_READ:
 		if r.logger != nil {
@@ -696,14 +607,30 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 		if r.logger != nil {
 			r.logger.Debugf("ReadAt completed: err=%v", err)
 		}
+		if r.observer != nil {
+			latencyNs := uint64(time.Since(startTime).Nanoseconds())
+			r.observer.ObserveRead(uint64(length), latencyNs, err == nil)
+		}
 	case uapi.UBLK_IO_OP_WRITE:
 		_, err = r.backend.WriteAt(buffer, int64(offset))
+		if r.observer != nil {
+			latencyNs := uint64(time.Since(startTime).Nanoseconds())
+			r.observer.ObserveWrite(uint64(length), latencyNs, err == nil)
+		}
 	case uapi.UBLK_IO_OP_FLUSH:
 		err = r.backend.Flush()
+		if r.observer != nil {
+			latencyNs := uint64(time.Since(startTime).Nanoseconds())
+			r.observer.ObserveFlush(latencyNs, err == nil)
+		}
 	case uapi.UBLK_IO_OP_DISCARD:
 		// Handle discard if backend supports it
 		if discardBackend, ok := r.backend.(interfaces.DiscardBackend); ok {
 			err = discardBackend.Discard(int64(offset), int64(length))
+		}
+		if r.observer != nil {
+			latencyNs := uint64(time.Since(startTime).Nanoseconds())
+			r.observer.ObserveDiscard(uint64(length), latencyNs, err == nil)
 		}
 	default:
 		err = fmt.Errorf("unsupported operation: %d", op)
@@ -827,32 +754,6 @@ func mmapQueues(fd int, queueID uint16, depth int) (uintptr, uintptr, error) {
 }
 
 // NewStubRunner creates a stub runner for simulation/testing
-// NewWaitingRunner creates a runner that waits for device creation and starts data plane
-func NewWaitingRunner(ctx context.Context, config Config) *Runner {
-	ctx, cancel := context.WithCancel(ctx)
-
-	runner := &Runner{
-		devID:      config.DevID,
-		queueID:    config.QueueID,
-		depth:      config.Depth,
-		backend:    config.Backend,
-		charFd:     -1,  // No device yet
-		ring:       nil, // No ring yet
-		descPtr:    0,   // No mmap yet
-		bufPtr:     0,   // No buffers yet
-		ctx:        ctx,
-		cancel:     cancel,
-		logger:     config.Logger,
-		tagStates:  make([]TagState, config.Depth),
-		tagMutexes: make([]sync.Mutex, config.Depth),
-	}
-
-	// Start a goroutine that will initialize the real data plane once the device appears
-	go runner.waitAndStartDataPlane()
-
-	return runner
-}
-
 func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 

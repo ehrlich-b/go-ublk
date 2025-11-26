@@ -24,32 +24,31 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 **See [docs/REVIEW.md](docs/REVIEW.md) for detailed file-by-file analysis.**
 
-### 0.1 Delete Dead Code (~400-500 lines)
-- [ ] Delete `internal/uring/iouring.go` (unused `giouring` build tag)
-- [ ] Delete from runner.go: `NewStubRunner`, `NewWaitingRunner`, `stubLoop`
-- [ ] Delete from runner.go: `waitAndStartDataPlane`, `initializeDataPlane`
-- [ ] Delete from control.go: `StartDataPlane` (deprecated)
-- [ ] Delete from control.go: `StartDeviceAsync` (unused)
-- [ ] Delete from errors.go: unused constructors (`NewDeviceError`, `NewQueueError`, `NewErrorWithErrno`)
-- [ ] Delete from logger.go: unused domain methods (`ControlStart`, `IOStart`, `RingSubmit`, etc.)
+### 0.1 Delete Dead Code (~400-500 lines) ✅ DONE
+- [x] Delete `internal/uring/iouring.go` and `iouring_stub.go` (unused `giouring` build tag)
+- [x] Delete from runner.go: `NewWaitingRunner`, `waitAndStartDataPlane`, `initializeDataPlane`
+  - Note: `NewStubRunner` kept for unit tests, `stubLoop` kept for defensive stub fallback
+- [x] Delete from control.go: `StartDataPlane`, `StartDeviceAsync`, `AsyncStartHandle`
+- [x] Delete from errors.go: unused constructors (`NewDeviceError`, `NewQueueError`, `NewErrorWithErrno`)
+- [x] Delete from logger.go: unused domain methods (`ControlStart`, `ControlSuccess`, `ControlError`, `IOStart`, `IOComplete`, `IOError`, `RingSubmit`, `RingComplete`, `MemoryMap`, `MemoryUnmap`)
 
-### 0.2 Fix Bugs
-- [ ] Fix `directUnmarshal` in marshal.go (wrong pointer arithmetic)
-- [ ] Fix `waitLive` in backend.go (always returns nil)
-- [ ] Fix `device.queues` mismatch (stores 0, creates 1)
+### 0.2 Fix Bugs ✅ DONE
+- [x] Fix `directUnmarshal` in marshal.go (use reflect like directMarshal)
+- [x] Fix `waitLive` in backend.go (return error on timeout instead of nil)
+- [x] Fix `device.queues` mismatch (calculate numQueues before creating Device struct)
 
-### 0.3 Consolidate Interfaces
-- [ ] Remove `internal/interfaces` package (use public interfaces everywhere)
-- [ ] Remove `Logger = interfaces.Logger` alias in interfaces.go
-- [ ] Merge `ctrl.DeviceParams` with public `DeviceParams`
+### 0.3 Consolidate Interfaces ✅ DONE
+- [x] Simplify `internal/interfaces` to just Backend, DiscardBackend, Logger (removed 75 lines)
+- [x] Define `Logger` directly in interfaces.go (removed alias and import)
+- [ ] Merge `ctrl.DeviceParams` with public `DeviceParams` (blocked by circular imports - intentionally separate)
 
-### 0.4 Environment Variable Hacks
-- [ ] Remove `UBLK_DEVINFO_LEN` env var hack in control.go
-- [ ] Remove `UBLK_CTRL_ENC` if still present
+### 0.4 Environment Variable Hacks ✅ DONE
+- [x] Remove `UBLK_DEVINFO_LEN` env var hack in control.go
+- [x] `UBLK_CTRL_ENC` not present in Go code (only Makefile test variations)
 
-### 0.5 Documentation
-- [ ] Document magic timing constants (why 100ms? why 500ms?)
-- [ ] Move hot-path logging to debug level
+### 0.5 Documentation ✅ DONE
+- [x] Document magic timing constants (why 100ms? why 500ms?)
+- [x] Move hot-path logging to debug level
 
 ---
 
@@ -66,19 +65,19 @@ Rationale:
 
 The code is well-abstracted behind the `Ring` interface.
 
-### 1.2 Testing Infrastructure
-- [ ] Add `make test-unit` to CI/pre-commit
-- [ ] Add race detector to VM tests: `go test -race`
-- [ ] Document VM testing setup for contributors
+### 1.2 Testing Infrastructure ✅ DONE
+- [x] Add `make test-unit` to CI/pre-commit (GitHub Actions in `.github/workflows/ci.yml`)
+- [x] Add race detector to VM tests: `make vm-e2e-racedetect` or `RACE=1 make vm-e2e`
+- [x] Document VM testing setup for contributors (`docs/VM_TESTING.md`)
 
 ---
 
 ## Phase 2: API Polish
 
-### 2.1 Structured Error Handling
-- [x] Create `Error` type with errno mapping (exists but over-engineered)
-- [ ] Simplify to single error type (remove legacy `UblkError`)
-- [ ] Support `errors.Is()` and `errors.As()`
+### 2.1 Structured Error Handling ✅ DONE
+- [x] Create `Error` type with errno mapping
+- [x] Simplify to single error type (removed legacy `UblkError` string type)
+- [x] Support `errors.Is()` and `errors.As()` via sentinel errors
 
 ### 2.2 Device Lifecycle API
 Current API is monolithic:
@@ -94,10 +93,10 @@ device.Stop()                                 // stop I/O, keep device
 device.Close()                                // full cleanup
 ```
 
-### 2.3 Observability
-- [ ] Wire up existing Metrics to I/O loop (currently allocated but not populated)
-- [ ] Expose metrics interface (compatible with Prometheus)
-- [ ] Add latency histogram (P50, P99, P999)
+### 2.3 Observability ✅ DONE
+- [x] Wire up existing Metrics to I/O loop via Observer interface
+- [x] Expose metrics interface (Observer pattern, compatible with custom backends)
+- [x] Add latency histogram with P50, P99, P999 percentiles
 
 ---
 

@@ -109,7 +109,8 @@ func (h *AsyncHandle) Wait(timeout time.Duration) (Result, error) {
 			logger.Debug("still waiting for completion", "attempts", attempts, "error", err.Error())
 		}
 
-		// Not ready yet, sleep briefly
+		// Not ready yet, sleep briefly.
+		// 10ms balances responsiveness with CPU overhead for async polling.
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -847,7 +848,11 @@ func (r *minimalRing) processCompletion() (Result, error) {
 	currentTail := atomic.LoadUint32(cqTail)
 	currentHead := *cqHead
 
-	// Check if we have completions, with a retry loop for memory visibility
+	// Check if we have completions, with a retry loop for memory visibility.
+	// After io_uring_enter returns, the kernel has updated CQ tail, but the
+	// store may not be visible to this CPU yet due to cache coherence latency.
+	// 5 retries * 10µs = 50µs max wait, which is sufficient for cross-CPU
+	// visibility on modern x86-64 systems (typically <1µs).
 	const maxRetries = 5
 	const retryDelay = 10 * time.Microsecond
 	for i := 0; i < maxRetries; i++ {

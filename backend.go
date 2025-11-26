@@ -29,8 +29,8 @@ func waitLive(devID uint32, timeout time.Duration) error {
 		time.Sleep(constants.DevicePollingInterval)
 	}
 
-	// Device may still be functional even if not visible
-	return nil
+	// Timeout waiting for device
+	return fmt.Errorf("timeout waiting for device %s to appear", blockPath)
 }
 
 // Backend interfaces are now defined in interfaces.go
@@ -205,13 +205,19 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		observer = NewMetricsObserver(metrics)
 	}
 
+	// Determine actual number of queues (default to 1 if not specified)
+	numQueues := params.NumQueues
+	if numQueues == 0 {
+		numQueues = 1 // Single queue for minimal implementation
+	}
+
 	// Create Device struct
 	device := &Device{
 		ID:        devID,
 		Path:      fmt.Sprintf("/dev/ublkb%d", devID),
 		CharPath:  fmt.Sprintf("/dev/ublkc%d", devID),
 		Backend:   params.Backend,
-		queues:    params.NumQueues,
+		queues:    numQueues, // Store actual queue count, not params value
 		depth:     params.QueueDepth,
 		blockSize: params.LogicalBlockSize,
 		started:   false, // Not started yet
@@ -221,21 +227,17 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 	device.ctx, device.cancel = context.WithCancel(ctx)
 
-	numQueues := params.NumQueues
-	if numQueues == 0 {
-		numQueues = 1 // Single queue for minimal implementation
-	}
-
 	// Initialize queue runners before START_DEV
 	// The kernel waits for initial FETCH_REQ commands from all queues
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
 		runnerConfig := queue.Config{
-			DevID:   devID,
-			QueueID: uint16(i),
-			Depth:   params.QueueDepth,
-			Backend: params.Backend,
-			Logger:  options.Logger,
+			DevID:    devID,
+			QueueID:  uint16(i),
+			Depth:    params.QueueDepth,
+			Backend:  params.Backend,
+			Logger:   options.Logger,
+			Observer: observer,
 		}
 
 		runner, err := queue.NewRunner(device.ctx, runnerConfig)

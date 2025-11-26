@@ -9,6 +9,18 @@ GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 
+# Race detector support
+# Usage: make RACE=1 ublk-mem
+#        make RACE=1 vm-e2e
+RACE?=
+ifeq ($(RACE),1)
+  BUILD_FLAGS=-race
+  CGO_SETTING=CGO_ENABLED=1
+else
+  BUILD_FLAGS=
+  CGO_SETTING=CGO_ENABLED=0
+endif
+
 # Project info
 BINARY_NAME=ublk
 BINARY_DIR=./cmd
@@ -21,7 +33,7 @@ TEST_FLAGS=-v
 INTEGRATION_FLAGS=-tags=integration
 UNIT_FLAGS=-tags=!integration
 
-.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e vm-simple-benchmark suite
+.PHONY: all build clean test test-unit test-integration setup-vm test-vm benchmark deps tidy lint check-kernel help vm-reset kernel-trace vm-simple-e2e vm-simple-benchmark suite vm-e2e-racedetect vm-simple-e2e-racedetect
 
 # Default target
 all: deps build test
@@ -31,8 +43,8 @@ build: FORCE $(BINARIES)
 
 # Individual binary targets (FORCE ensures always rebuild)
 ublk-mem: FORCE
-	@echo "Building ublk-mem..."
-	@CGO_ENABLED=0 $(GOBUILD) -o ublk-mem ./cmd/ublk-mem
+	@echo "Building ublk-mem$(if $(BUILD_FLAGS), (with race detector),)..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o ublk-mem ./cmd/ublk-mem
 
 ublk-file: FORCE
 	@echo "Building ublk-file (Phase 4)"
@@ -356,6 +368,12 @@ help:
 	@echo "  coverage        - Generate test coverage report"
 	@echo "  test-race       - Run tests with race detector"
 	@echo ""
+	@echo ""
+	@echo "Race Detector (build with RACE=1):"
+	@echo "  vm-e2e-racedetect     - Run vm-e2e with race detector"
+	@echo "  vm-simple-e2e-racedetect - Run vm-simple-e2e with race detector"
+	@echo "  RACE=1 make vm-e2e    - Manual: any target with race detector"
+	@echo ""
 	@echo "Enhanced Debug Workflow:"
 	@echo "  vm-reset        - Hard reset VM and setup clean environment"
 	@echo "  kernel-trace    - Read kernel trace buffer (last 50 lines)"
@@ -510,7 +528,19 @@ vm-hang-debug: ublk-mem vm-copy
 	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no "$(VM_USER)@$(VM_HOST):~/ublk-test/ublk-stacks-*.txt" . 2>/dev/null || echo "No stack trace files found"
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "sudo cat /root/ublk-test/ublk-stacks-*.txt 2>/dev/null" || echo "No root-owned stack files"
 
-# Race test variants - run tests 5 times with 30s timeout
+# Race detector tests - build with Go race detector enabled
+# Note: Race detector requires CGO and adds ~10x overhead
+.PHONY: vm-e2e-racedetect vm-simple-e2e-racedetect
+
+vm-e2e-racedetect:
+	@echo "🔍 Running vm-e2e with Go race detector enabled..."
+	@$(MAKE) RACE=1 vm-e2e
+
+vm-simple-e2e-racedetect:
+	@echo "🔍 Running vm-simple-e2e with Go race detector enabled..."
+	@$(MAKE) RACE=1 vm-simple-e2e
+
+# Reliability test variants - run tests 5 times with 30s timeout
 .PHONY: vm-simple-e2e-race vm-e2e-race vm-benchmark-race
 
 vm-simple-e2e-race: ublk-mem vm-copy

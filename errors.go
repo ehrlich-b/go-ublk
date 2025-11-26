@@ -54,18 +54,13 @@ func (e *Error) Unwrap() error {
 	return e.Inner
 }
 
-// Is provides errors.Is support for UblkError compatibility
+// Is provides errors.Is support by comparing error codes
 func (e *Error) Is(target error) bool {
 	if target == nil {
 		return false
 	}
 
-	// Support legacy UblkError comparison
-	if ue, ok := target.(UblkError); ok {
-		return e.Code == UblkErrorCode(ue)
-	}
-
-	// Support structured Error comparison
+	// Support Error comparison by code
 	if te, ok := target.(*Error); ok {
 		return e.Code == te.Code
 	}
@@ -89,22 +84,18 @@ const (
 	ErrCodeDeviceOffline      UblkErrorCode = "device offline"
 )
 
-// Legacy UblkError type for backward compatibility
-type UblkError string
-
-func (e UblkError) Error() string {
-	return string(e)
-}
-
-// Legacy error constants (maintain backward compatibility)
-const (
-	ErrNotImplemented     UblkError = "not implemented"
-	ErrDeviceNotFound     UblkError = "device not found"
-	ErrDeviceBusy         UblkError = "device busy"
-	ErrInvalidParameters  UblkError = "invalid parameters"
-	ErrKernelNotSupported UblkError = "kernel does not support ublk"
-	ErrPermissionDenied   UblkError = "permission denied"
-	ErrInsufficientMemory UblkError = "insufficient memory"
+// Sentinel errors for use with errors.Is()
+var (
+	ErrNotImplemented     = &Error{Code: ErrCodeNotImplemented, Msg: "not implemented", Queue: -1}
+	ErrDeviceNotFound     = &Error{Code: ErrCodeDeviceNotFound, Msg: "device not found", Queue: -1}
+	ErrDeviceBusy         = &Error{Code: ErrCodeDeviceBusy, Msg: "device busy", Queue: -1}
+	ErrInvalidParameters  = &Error{Code: ErrCodeInvalidParameters, Msg: "invalid parameters", Queue: -1}
+	ErrKernelNotSupported = &Error{Code: ErrCodeKernelNotSupported, Msg: "kernel does not support ublk", Queue: -1}
+	ErrPermissionDenied   = &Error{Code: ErrCodePermissionDenied, Msg: "permission denied", Queue: -1}
+	ErrInsufficientMemory = &Error{Code: ErrCodeInsufficientMemory, Msg: "insufficient memory", Queue: -1}
+	ErrIOError            = &Error{Code: ErrCodeIOError, Msg: "I/O error", Queue: -1}
+	ErrTimeout            = &Error{Code: ErrCodeTimeout, Msg: "timeout", Queue: -1}
+	ErrDeviceOffline      = &Error{Code: ErrCodeDeviceOffline, Msg: "device offline", Queue: -1}
 )
 
 // Error constructors
@@ -115,37 +106,6 @@ func NewError(op string, code UblkErrorCode, msg string) *Error {
 		Op:   op,
 		Code: code,
 		Msg:  msg,
-	}
-}
-
-// NewErrorWithErrno creates a new structured error with errno
-func NewErrorWithErrno(op string, code UblkErrorCode, errno syscall.Errno) *Error {
-	return &Error{
-		Op:    op,
-		Code:  code,
-		Errno: errno,
-		Msg:   errno.Error(),
-	}
-}
-
-// NewDeviceError creates a new device-specific error
-func NewDeviceError(op string, devID uint32, code UblkErrorCode, msg string) *Error {
-	return &Error{
-		Op:    op,
-		DevID: devID,
-		Code:  code,
-		Msg:   msg,
-	}
-}
-
-// NewQueueError creates a new queue-specific error
-func NewQueueError(op string, devID uint32, queue int, code UblkErrorCode, msg string) *Error {
-	return &Error{
-		Op:    op,
-		DevID: devID,
-		Queue: queue,
-		Code:  code,
-		Msg:   msg,
 	}
 }
 

@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+// LatencyBuckets defines the latency histogram buckets in nanoseconds.
+// Buckets cover from 1us to 10s with logarithmic spacing.
+var LatencyBuckets = []uint64{
+	1_000,        // 1us
+	10_000,       // 10us
+	100_000,      // 100us
+	1_000_000,    // 1ms
+	10_000_000,   // 10ms
+	100_000_000,  // 100ms
+	1_000_000_000, // 1s
+	10_000_000_000, // 10s
+}
+
+const numLatencyBuckets = 8
+
 // Metrics tracks performance and operational statistics for ublk devices
 type Metrics struct {
 	// I/O operation counters
@@ -32,6 +47,10 @@ type Metrics struct {
 	// Performance tracking
 	TotalLatencyNs atomic.Uint64 // Cumulative operation latency in nanoseconds
 	OpCount        atomic.Uint64 // Total operations (for average latency calculation)
+
+	// Latency histogram buckets (cumulative counts)
+	// Each bucket[i] contains the count of operations with latency <= LatencyBuckets[i]
+	LatencyBuckets [numLatencyBuckets]atomic.Uint64
 
 	// Device lifecycle
 	StartTime atomic.Int64 // Device start timestamp (UnixNano)
@@ -104,10 +123,17 @@ func (m *Metrics) RecordQueueDepth(depth uint32) {
 	}
 }
 
-// recordLatency records operation latency
+// recordLatency records operation latency and updates histogram
 func (m *Metrics) recordLatency(latencyNs uint64) {
 	m.TotalLatencyNs.Add(latencyNs)
 	m.OpCount.Add(1)
+
+	// Update histogram buckets (cumulative)
+	for i, bucket := range LatencyBuckets {
+		if latencyNs <= bucket {
+			m.LatencyBuckets[i].Add(1)
+		}
+	}
 }
 
 // Stop marks the device as stopped
@@ -142,14 +168,22 @@ type MetricsSnapshot struct {
 	AvgLatencyNs uint64
 	UptimeNs     uint64
 
+	// Latency percentiles (in nanoseconds)
+	LatencyP50Ns  uint64 // 50th percentile (median)
+	LatencyP99Ns  uint64 // 99th percentile
+	LatencyP999Ns uint64 // 99.9th percentile
+
+	// Histogram bucket counts (cumulative)
+	LatencyHistogram [numLatencyBuckets]uint64
+
 	// Computed statistics
-	ReadIOPS      float64 // Operations per second
-	WriteIOPS     float64
-	ReadBandwidth float64 // Bytes per second
+	ReadIOPS       float64 // Operations per second
+	WriteIOPS      float64
+	ReadBandwidth  float64 // Bytes per second
 	WriteBandwidth float64
-	TotalOps      uint64
-	TotalBytes    uint64
-	ErrorRate     float64 // Percentage of failed operations
+	TotalOps       uint64
+	TotalBytes     uint64
+	ErrorRate      float64 // Percentage of failed operations
 }
 
 // Snapshot creates a point-in-time snapshot of metrics
@@ -211,7 +245,53 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 		snap.ErrorRate = float64(totalErrors) / float64(snap.TotalOps) * 100.0
 	}
 
+	// Copy histogram bucket counts
+	for i := 0; i < numLatencyBuckets; i++ {
+		snap.LatencyHistogram[i] = m.LatencyBuckets[i].Load()
+	}
+
+	// Calculate percentiles from histogram
+	if opCount > 0 {
+		snap.LatencyP50Ns = m.calculatePercentile(0.50)
+		snap.LatencyP99Ns = m.calculatePercentile(0.99)
+		snap.LatencyP999Ns = m.calculatePercentile(0.999)
+	}
+
 	return snap
+}
+
+// calculatePercentile estimates the latency at the given percentile (0.0-1.0)
+// using linear interpolation between histogram buckets.
+func (m *Metrics) calculatePercentile(percentile float64) uint64 {
+	totalOps := m.OpCount.Load()
+	if totalOps == 0 {
+		return 0
+	}
+
+	targetCount := uint64(float64(totalOps) * percentile)
+
+	// Find the bucket containing the target percentile
+	prevBucket := uint64(0)
+	for i, bucket := range LatencyBuckets {
+		bucketCount := m.LatencyBuckets[i].Load()
+		if bucketCount >= targetCount {
+			// Linear interpolation within bucket
+			prevCount := uint64(0)
+			if i > 0 {
+				prevCount = m.LatencyBuckets[i-1].Load()
+			}
+			if bucketCount == prevCount {
+				return bucket
+			}
+			// Interpolate between prevBucket and bucket
+			fraction := float64(targetCount-prevCount) / float64(bucketCount-prevCount)
+			return prevBucket + uint64(fraction*float64(bucket-prevBucket))
+		}
+		prevBucket = bucket
+	}
+
+	// If we get here, the latency exceeds all buckets
+	return LatencyBuckets[numLatencyBuckets-1]
 }
 
 // Reset resets all metrics counters (useful for testing)
@@ -232,6 +312,9 @@ func (m *Metrics) Reset() {
 	m.MaxQueueDepth.Store(0)
 	m.TotalLatencyNs.Store(0)
 	m.OpCount.Store(0)
+	for i := 0; i < numLatencyBuckets; i++ {
+		m.LatencyBuckets[i].Store(0)
+	}
 	m.StartTime.Store(time.Now().UnixNano())
 	m.StopTime.Store(0)
 }

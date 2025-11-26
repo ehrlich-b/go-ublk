@@ -1,7 +1,5 @@
 package ublk
 
-import "github.com/ehrlich-b/go-ublk/internal/interfaces"
-
 // Backend defines the interface that all ublk backends must implement.
 // This interface is intentionally similar to standard Go interfaces like
 // io.ReaderAt and io.WriterAt for familiarity and composability.
@@ -95,5 +93,8 @@ type ResizeBackend interface {
 	Resize(newSize int64) error
 }
 
-// Logger interface for optional logging (alias for internal interface)
-type Logger = interfaces.Logger
+// Logger interface for optional logging.
+type Logger interface {
+	Printf(format string, args ...interface{})
+	Debugf(format string, args ...interface{})
+}

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestIntegrationDeviceLifecycle(t *testing.T) {
 	if err != nil {
 		// It's expected to fail in test environment without proper ublk setup
 		// but the error should not be "not implemented" anymore
-		if err == ublk.ErrNotImplemented {
+		if errors.Is(err, ublk.ErrNotImplemented) {
 			t.Errorf("Should not get ErrNotImplemented anymore, got: %v", err)
 		}
 		t.Logf("Expected failure in test environment: %v", err)

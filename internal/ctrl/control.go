@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/logging"
@@ -91,20 +89,8 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 		"flags", fmt.Sprintf("0x%x", devInfo.UblksrvFlags),
 		"dev_id", devInfo.DevID)
 
-	// Marshal device info and optionally pad to requested length (64 or 80)
+	// Marshal device info (64-byte format matches kernel 6.6+)
 	infoBuf := uapi.Marshal(devInfo)
-	if v := os.Getenv("UBLK_DEVINFO_LEN"); v != "" {
-		if want, err := strconv.Atoi(v); err == nil {
-			if want == 80 && len(infoBuf) == 64 {
-				padded := make([]byte, 80)
-				copy(padded, infoBuf)
-				infoBuf = padded
-				c.logger.Debug("using padded dev_info payload", "size", 80)
-			} else if want == 64 && len(infoBuf) != 64 {
-				// Not expected today; keep as-is
-			}
-		}
-	}
 
 	// Build control header (48-byte variant)
 	cmd := &uapi.UblksrvCtrlCmd{
@@ -249,62 +235,6 @@ func (c *Controller) StartDevice(devID uint32) error {
 		return fmt.Errorf("START_DEV failed with error: %d", result.Value())
 	}
 
-	return nil
-}
-
-// AsyncStartHandle wraps the async START_DEV operation
-type AsyncStartHandle struct {
-	handle *uring.AsyncHandle
-	devID  uint32
-}
-
-// Wait waits for START_DEV completion
-func (h *AsyncStartHandle) Wait(timeout time.Duration) error {
-	result, err := h.handle.Wait(timeout)
-	if err != nil {
-		return fmt.Errorf("START_DEV timeout for device %d: %v", h.devID, err)
-	}
-
-	if result.Value() < 0 {
-		return fmt.Errorf("START_DEV failed with error: %d", result.Value())
-	}
-
-	return nil
-}
-
-// StartDeviceAsync initiates START_DEV without blocking
-func (c *Controller) StartDeviceAsync(devID uint32) (*AsyncStartHandle, error) {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       uint64(os.Getpid()),
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-	var op uint32 = uapi.UBLK_CMD_START_DEV
-	if c.useIoctl {
-		op = uapi.UblkCtrlCmd(op)
-	}
-
-	// Submit asynchronously
-	handle, err := c.ring.SubmitCtrlCmdAsync(op, cmd, 0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to submit START_DEV: %v", err)
-	}
-
-	return &AsyncStartHandle{
-		handle: handle,
-		devID:  devID,
-	}, nil
-}
-
-// StartDataPlane is deprecated - queue runners handle FETCH_REQ directly
-func (c *Controller) StartDataPlane(devID uint32, numQueues, queueDepth int) error {
-	c.logger.Warn("StartDataPlane is deprecated", "dev_id", devID)
 	return nil
 }
 

@@ -24,43 +24,6 @@ func TestStructuredError(t *testing.T) {
 	}
 }
 
-func TestErrorWithErrno(t *testing.T) {
-	err := NewErrorWithErrno("START_DEV", ErrCodePermissionDenied, syscall.EPERM)
-
-	if err.Errno != syscall.EPERM {
-		t.Errorf("Expected Errno=EPERM, got %v", err.Errno)
-	}
-
-	if err.Code != ErrCodePermissionDenied {
-		t.Errorf("Expected Code=ErrCodePermissionDenied, got %s", err.Code)
-	}
-}
-
-func TestDeviceError(t *testing.T) {
-	err := NewDeviceError("SET_PARAMS", 123, ErrCodeDeviceBusy, "device in use")
-
-	if err.DevID != 123 {
-		t.Errorf("Expected DevID=123, got %d", err.DevID)
-	}
-
-	expected := "ublk: device in use (op=SET_PARAMS)"
-	if err.Error() != expected {
-		t.Errorf("Expected error message %q, got %q", expected, err.Error())
-	}
-}
-
-func TestQueueError(t *testing.T) {
-	err := NewQueueError("FETCH_REQ", 42, 1, ErrCodeIOError, "queue stalled")
-
-	if err.DevID != 42 {
-		t.Errorf("Expected DevID=42, got %d", err.DevID)
-	}
-
-	if err.Queue != 1 {
-		t.Errorf("Expected Queue=1, got %d", err.Queue)
-	}
-}
-
 func TestWrapError(t *testing.T) {
 	inner := syscall.ENOENT
 	err := WrapError("DELETE_DEV", inner)
@@ -78,20 +41,26 @@ func TestWrapError(t *testing.T) {
 	}
 }
 
-func TestBackwardCompatibility(t *testing.T) {
-	// Legacy UblkError should still work
-	var legacyErr error = ErrDeviceNotFound
+func TestSentinelErrors(t *testing.T) {
+	// Sentinel errors work with errors.Is
+	var sentinelErr error = ErrDeviceNotFound
 
-	// New structured error should be comparable with legacy error
+	// Structured error should match sentinel by code
 	structuredErr := &Error{Code: ErrCodeDeviceNotFound}
 
 	if !errors.Is(structuredErr, ErrDeviceNotFound) {
-		t.Error("Structured error should be compatible with legacy UblkError")
+		t.Error("Structured error should match sentinel via errors.Is")
 	}
 
-	// Test that legacy error still implements error interface
-	if legacyErr.Error() != "device not found" {
-		t.Errorf("Expected legacy error message, got %q", legacyErr.Error())
+	// Sentinel error message
+	if sentinelErr.Error() != "ublk: device not found" {
+		t.Errorf("Expected sentinel error message, got %q", sentinelErr.Error())
+	}
+
+	// Wrapped errors should match sentinel
+	wrappedErr := WrapError("TEST_OP", syscall.ENOENT)
+	if !errors.Is(wrappedErr, ErrDeviceNotFound) {
+		t.Error("Wrapped ENOENT should match ErrDeviceNotFound")
 	}
 }
 
@@ -113,7 +82,8 @@ func TestIsCode(t *testing.T) {
 }
 
 func TestIsErrno(t *testing.T) {
-	err := NewErrorWithErrno("TEST", ErrCodeIOError, syscall.EIO)
+	// Create error with errno via WrapError
+	err := WrapError("TEST", syscall.EIO)
 
 	if !IsErrno(err, syscall.EIO) {
 		t.Error("IsErrno should return true for matching errno")

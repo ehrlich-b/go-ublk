@@ -218,13 +218,16 @@ func directMarshal(v interface{}) []byte {
 
 // directUnmarshal performs direct memory copy for unmarshaling
 func directUnmarshal(data []byte, v interface{}) error {
-	size := int(unsafe.Sizeof(v))
+	// Get the actual pointer and size from the interface (must be a pointer type)
+	ptr := reflect.ValueOf(v).Pointer()
+	size := int(reflect.TypeOf(v).Elem().Size())
+
 	if len(data) < size {
 		return ErrInsufficientData
 	}
 
-	// Direct memory copy
-	dst := (*[1 << 20]byte)(unsafe.Pointer(&v))
+	// Direct memory copy to the struct
+	dst := (*[1 << 20]byte)(unsafe.Pointer(ptr))
 	copy(dst[:size], data[:size])
 
 	return nil

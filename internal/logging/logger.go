@@ -268,50 +268,6 @@ func (l *Logger) Errorf(format string, args ...any) {
 	l.zlog.Error().Msgf(format, args...)
 }
 
-// Control plane logging methods
-func (l *Logger) ControlStart(operation string) {
-	l.Info("control operation starting", "operation", operation)
-}
-
-func (l *Logger) ControlSuccess(operation string) {
-	l.Info("control operation succeeded", "operation", operation)
-}
-
-func (l *Logger) ControlError(operation string, err error) {
-	l.Error("control operation failed", "operation", operation, "error", err)
-}
-
-// Data plane logging methods
-func (l *Logger) IOStart(op string, offset int64, length int) {
-	l.Debug("I/O operation starting", "op", op, "offset", offset, "length", length)
-}
-
-func (l *Logger) IOComplete(op string, offset int64, length int, latency_us int64) {
-	l.Debug("I/O operation completed", "op", op, "offset", offset, "length", length, "latency_us", latency_us)
-}
-
-func (l *Logger) IOError(op string, offset int64, length int, err error) {
-	l.Error("I/O operation failed", "op", op, "offset", offset, "length", length, "error", err)
-}
-
-// Ring operations
-func (l *Logger) RingSubmit(entries int) {
-	l.Debug("submitting ring entries", "entries", entries)
-}
-
-func (l *Logger) RingComplete(completions int) {
-	l.Debug("processed ring completions", "completions", completions)
-}
-
-// Memory management
-func (l *Logger) MemoryMap(size int, offset int64) {
-	l.Debug("memory mapped", "size", size, "offset", offset)
-}
-
-func (l *Logger) MemoryUnmap(size int) {
-	l.Debug("memory unmapped", "size", size)
-}
-
 // Convenience functions for global logger
 func Debug(msg string, args ...any) {
 	Default().Debug(msg, args...)

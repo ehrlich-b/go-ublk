@@ -248,12 +248,14 @@ make vm-e2e         # Full I/O test suite
 ```
 
 ### VM Testing Setup
-For full integration testing on real kernels:
+For full integration testing on real kernels, see [docs/VM_TESTING.md](docs/VM_TESTING.md).
 
-1. **Setup test VM** with Linux 6.1+ and ublk support
-2. **Configure SSH access** with password in `/tmp/devvm_pwd.txt`
-3. **Update VM IP** in Makefile if different from `192.168.4.79`
-4. **Run automated tests**: `make vm-e2e`
+Quick start:
+1. Setup test VM with Linux 6.1+ and ublk support
+2. Store password: `echo "password" > /tmp/devvm_pwd.txt`
+3. Update `VM_HOST` in Makefile if needed
+4. Run: `make setup-vm` (one-time)
+5. Run: `make vm-e2e`
 
 The VM tests verify:
 - ✅ Kernel ublk module loading

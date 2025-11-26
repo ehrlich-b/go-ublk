@@ -4,6 +4,8 @@
 package unit
 
 import (
+	"errors"
+	"syscall"
 	"testing"
 
 	"github.com/ehrlich-b/go-ublk"
@@ -150,9 +152,15 @@ func TestErrorTypes(t *testing.T) {
 	var _ error = ublk.ErrDeviceNotFound
 	var _ error = ublk.ErrInvalidParameters
 
-	// Test error messages
-	if ublk.ErrNotImplemented.Error() != "not implemented" {
-		t.Errorf("ErrNotImplemented message = %q, want 'not implemented'", ublk.ErrNotImplemented.Error())
+	// Test error messages (sentinel errors have "ublk: " prefix)
+	if ublk.ErrNotImplemented.Error() != "ublk: not implemented" {
+		t.Errorf("ErrNotImplemented message = %q, want 'ublk: not implemented'", ublk.ErrNotImplemented.Error())
+	}
+
+	// Test errors.Is works with sentinel errors
+	wrappedErr := ublk.WrapError("TEST", syscall.ENOENT)
+	if !errors.Is(wrappedErr, ublk.ErrDeviceNotFound) {
+		t.Error("Wrapped ENOENT should match ErrDeviceNotFound")
 	}
 }
 

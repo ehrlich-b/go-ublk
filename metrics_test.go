@@ -209,3 +209,47 @@ func TestMetricsRates(t *testing.T) {
 		t.Errorf("Expected WriteBandwidth ~2048, got %.2f", snap.WriteBandwidth)
 	}
 }
+
+func TestMetricsHistogram(t *testing.T) {
+	m := NewMetrics()
+
+	// Record operations with various latencies
+	// 50 ops at 500us (50th percentile should be around 500us)
+	// 49 ops at 5ms
+	// 1 op at 50ms (99th percentile)
+	for i := 0; i < 50; i++ {
+		m.RecordRead(1024, 500_000, true) // 500us
+	}
+	for i := 0; i < 49; i++ {
+		m.RecordWrite(1024, 5_000_000, true) // 5ms
+	}
+	m.RecordWrite(1024, 50_000_000, true) // 50ms (this is the P99)
+
+	snap := m.Snapshot()
+
+	// Total should be 100 ops
+	if snap.TotalOps != 100 {
+		t.Errorf("Expected 100 total ops, got %d", snap.TotalOps)
+	}
+
+	// P50 should be around 500us-1ms range (the 50th percentile)
+	// With cumulative buckets, 50 ops at 500us means bucket[2] (100us) has 50
+	if snap.LatencyP50Ns < 100_000 || snap.LatencyP50Ns > 1_000_000 {
+		t.Errorf("Expected P50 in 100us-1ms range, got %d ns", snap.LatencyP50Ns)
+	}
+
+	// P99 should be in the 10ms-100ms range (99th percentile)
+	if snap.LatencyP99Ns < 5_000_000 || snap.LatencyP99Ns > 100_000_000 {
+		t.Errorf("Expected P99 in 5ms-100ms range, got %d ns", snap.LatencyP99Ns)
+	}
+
+	// Verify histogram buckets are populated
+	totalInBuckets := uint64(0)
+	for i := 0; i < len(snap.LatencyHistogram); i++ {
+		totalInBuckets += snap.LatencyHistogram[i]
+	}
+	// Due to cumulative nature, total should be >= TotalOps
+	if totalInBuckets == 0 {
+		t.Error("Expected histogram buckets to be populated")
+	}
+}

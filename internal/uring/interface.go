@@ -87,30 +87,20 @@ type Config struct {
 	Flags   uint32 // Additional flags
 }
 
-// NewRing creates a new Ring implementation
+// NewRing creates a new Ring implementation using pure Go io_uring
 func NewRing(config Config) (Ring, error) {
 	logger := logging.Default()
 	logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
 
-	// Prefer full-featured io_uring via library (if available)
-	if ring, err := NewRealRing(config); err == nil {
-		logger.Info("created io_uring via library", "entries", config.Entries)
-		return ring, nil
-	} else {
-		logger.Warn("NewRealRing failed, trying minimal shim", "error", err)
-	}
-
-	// Fallback: minimal syscall-based shim (limited but real syscalls)
-	if minRing, err := NewMinimalRing(config.Entries, config.FD); err == nil {
-		logger.Info("created minimal io_uring implementation", "entries", config.Entries)
-		return minRing, nil
-	} else {
+	ring, err := NewMinimalRing(config.Entries, config.FD)
+	if err != nil {
 		logger.Error("NewMinimalRing failed, falling back to stub", "error", err)
+		logger.Warn("using stub ring - this breaks actual functionality")
+		return &stubRing{config: config}, nil
 	}
 
-	// Last resort: stub (non-functional for real I/O)
-	logger.Warn("using stub ring - this breaks actual functionality")
-	return &stubRing{config: config}, nil
+	logger.Info("created io_uring", "entries", config.Entries)
+	return ring, nil
 }
 
 // Stub implementation for development/testing
