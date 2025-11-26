@@ -51,3 +51,9 @@ tmp/
 # Go workspace file
 .gitignored-repos/
 .gomodcache/
+
+# Go build cache
+.cache/
+
+# Stack dumps
+ublk-stacks*.txt
