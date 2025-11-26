@@ -129,7 +129,7 @@ func main() {
 		for range stackDumpCh {
 			logger.Info("=== GOROUTINE STACK TRACE DUMP ===")
 			buf := make([]byte, 1024*1024) // 1MB buffer
-			n := runtime.Stack(buf, true)   // true = all goroutines
+			n := runtime.Stack(buf, true)  // true = all goroutines
 			fmt.Fprintf(os.Stderr, "\n=== FULL GOROUTINE STACK DUMP ===\n")
 			fmt.Fprintf(os.Stderr, "%s\n", buf[:n])
 			fmt.Fprintf(os.Stderr, "=== END STACK DUMP ===\n\n")

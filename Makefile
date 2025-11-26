@@ -275,14 +275,40 @@ deps:
 tidy:
 	$(GOMOD) tidy
 
-# Lint code (requires golangci-lint)
-lint:
-	@which golangci-lint > /dev/null || (echo "golangci-lint not found, install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1)
-	golangci-lint run
-
-# Format code
+# Format code with gofmt -s (simplify) and goimports
 fmt:
-	$(GOCMD) fmt ./...
+	@echo "Running gofmt -s -w ..."
+	@gofmt -s -w .
+	@echo "Running goimports -w ..."
+	@which goimports > /dev/null || (echo "goimports not found, installing..."; go install golang.org/x/tools/cmd/goimports@latest)
+	@goimports -w .
+	@echo "✓ Code formatted"
+
+# Lint code - checks formatting and runs golangci-lint
+lint:
+	@echo "Checking code formatting..."
+	@UNFORMATTED=$$(gofmt -l . | grep -v '^vendor/' || true); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "❌ The following files are not formatted:"; \
+		echo "$$UNFORMATTED"; \
+		echo "Run 'make fmt' to fix formatting"; \
+		exit 1; \
+	fi
+	@echo "✓ All files are properly formatted"
+	@echo "Checking imports..."
+	@which goimports > /dev/null || (echo "goimports not found, install with: go install golang.org/x/tools/cmd/goimports@latest"; exit 1)
+	@BADIMPORTS=$$(goimports -l . | grep -v '^vendor/' || true); \
+	if [ -n "$$BADIMPORTS" ]; then \
+		echo "❌ The following files have incorrect imports:"; \
+		echo "$$BADIMPORTS"; \
+		echo "Run 'make fmt' to fix imports"; \
+		exit 1; \
+	fi
+	@echo "✓ All imports are correct"
+	@echo "Running golangci-lint..."
+	@which golangci-lint > /dev/null || (echo "⚠️  golangci-lint not found, install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; echo "Skipping golangci-lint check..."; exit 0)
+	@golangci-lint run || (echo "❌ golangci-lint found issues"; exit 1)
+	@echo "✓ All lint checks passed"
 
 # Vet code
 vet:

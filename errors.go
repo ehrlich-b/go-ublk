@@ -14,13 +14,13 @@ const (
 
 // Error represents a structured ublk error with context and errno mapping
 type Error struct {
-	Op     string        // Operation that failed (e.g., "CREATE_DEV", "START_DEV")
-	DevID  uint32        // Device ID (0 if not applicable)
-	Queue  int           // Queue number (NoQueue if not applicable)
-	Code   UblkErrorCode // High-level error category
-	Errno  syscall.Errno // Kernel errno (0 if not applicable)
-	Msg    string        // Human-readable message
-	Inner  error         // Wrapped error
+	Op    string        // Operation that failed (e.g., "CREATE_DEV", "START_DEV")
+	DevID uint32        // Device ID (0 if not applicable)
+	Queue int           // Queue number (NoQueue if not applicable)
+	Code  UblkErrorCode // High-level error category
+	Errno syscall.Errno // Kernel errno (0 if not applicable)
+	Msg   string        // Human-readable message
+	Inner error         // Wrapped error
 }
 
 // Error implements the error interface

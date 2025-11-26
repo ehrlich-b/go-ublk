@@ -48,10 +48,10 @@ const (
 //
 // These delays account for kernel and udev processing latency during device setup.
 // The ublk protocol requires strict ordering:
-//   1. ADD_DEV creates device in kernel (udev creates /dev/ublkc*)
-//   2. Queue threads open char device and submit FETCH_REQs
-//   3. START_DEV transitions to LIVE state (kernel waits for FETCH_REQs)
-//   4. Block device /dev/ublkb* becomes available
+//  1. ADD_DEV creates device in kernel (udev creates /dev/ublkc*)
+//  2. Queue threads open char device and submit FETCH_REQs
+//  3. START_DEV transitions to LIVE state (kernel waits for FETCH_REQs)
+//  4. Block device /dev/ublkb* becomes available
 //
 // Without proper delays, START_DEV may hang waiting for FETCH_REQs that haven't
 // propagated through io_uring, or the block device may not be visible yet.

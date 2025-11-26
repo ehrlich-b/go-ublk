@@ -10,13 +10,13 @@ import (
 
 // Mock backend for testing
 type mockBackend struct {
-	data      []byte
-	size      int64
-	readErr   error
-	writeErr  error
-	readDelay time.Duration
+	data       []byte
+	size       int64
+	readErr    error
+	writeErr   error
+	readDelay  time.Duration
 	writeDelay time.Duration
-	mu        sync.RWMutex
+	mu         sync.RWMutex
 }
 
 func newMockBackend(size int64) *mockBackend {

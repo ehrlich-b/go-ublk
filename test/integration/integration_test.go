@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package integration
@@ -75,7 +76,7 @@ func TestIntegrationDeviceLifecycle(t *testing.T) {
 			t.Logf("Cleanup error (expected in test env): %v", err)
 		}
 	}()
-	
+
 	t.Logf("Successfully created device: %s", device.Path)
 }
 
@@ -95,7 +96,7 @@ func TestIntegrationBasicIO(t *testing.T) {
 
 func TestIntegrationFilesystemMount(t *testing.T) {
 	requireRoot(t)
-	requireKernel(t, "6.1") 
+	requireKernel(t, "6.1")
 	requireUblkModule(t)
 
 	t.Skip("Skipping until device creation is implemented")

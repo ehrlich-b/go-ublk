@@ -5,15 +5,15 @@ import "sync"
 // MockBackend provides a mock implementation of Backend for testing.
 // It implements all optional interfaces and tracks method calls for verification.
 type MockBackend struct {
-	data     []byte
-	size     int64
-	closed   bool
-	flushed  bool
-	synced   bool
-	stats    map[string]interface{}
+	data    []byte
+	size    int64
+	closed  bool
+	flushed bool
+	synced  bool
+	stats   map[string]interface{}
 
 	// Method call tracking
-	mu sync.RWMutex
+	mu         sync.RWMutex
 	readCalls  int
 	writeCalls int
 	flushCalls int

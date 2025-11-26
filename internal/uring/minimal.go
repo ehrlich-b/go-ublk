@@ -51,10 +51,10 @@ type sqe128 struct {
 	opcodeFlags uint32  // 28 (aka rw_flags/uring_cmd_flags)
 
 	// 32..47: rest of base SQE fields
-	userData    uint64   // 32..39
-	bufIndex    uint16   // 40..41
-	personality uint16   // 42..43
-	spliceFdIn  int32    // 44..47
+	userData    uint64 // 32..39
+	bufIndex    uint16 // 40..41
+	personality uint16 // 42..43
+	spliceFdIn  int32  // 44..47
 
 	// 48..127: cmd area for URING_CMD (80 bytes with SQE128)
 	// This is where ublksrv_io_cmd (16 bytes) goes for FETCH_REQ/COMMIT_AND_FETCH_REQ
@@ -162,11 +162,11 @@ type minimalRing struct {
 	sqesAddr unsafe.Pointer // SQEs mapping base
 
 	// Pre-allocated fields to avoid hot path allocations
-	sqePool      sqe128           // Reusable SQE (submissions are sequential per ring)
-	resultsPool  []Result         // Reusable results slice
-	cqePoolSize  int              // Size of CQE result pool
-	cqePool      []minimalResult  // Pool of result structs to avoid allocation
-	cqePoolIndex int              // Next available result in pool
+	sqePool      sqe128          // Reusable SQE (submissions are sequential per ring)
+	resultsPool  []Result        // Reusable results slice
+	cqePoolSize  int             // Size of CQE result pool
+	cqePool      []minimalResult // Pool of result structs to avoid allocation
+	cqePoolIndex int             // Next available result in pool
 }
 
 // kernelUringCmdOpcode returns the runtime kernel's IORING_OP_URING_CMD
@@ -477,7 +477,6 @@ func (r *minimalRing) RegisterFiles(fds []int32) error {
 func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
 	logger := logging.Default()
 
-
 	logger.Debug("submitting ctrl command", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
 	logger.Debug("preparing URING_CMD", "cmd", cmd, "dev_id", ctrlCmd.DevID)
 
@@ -529,14 +528,12 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 		return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
 	}
 
-
 	// Set cmd_op field to ioctl-encoded value (like working C implementation)
 	sqe.setCmdOp(cmd)
 
 	// With sqe128 layout, sqe.cmd starts at byte 48
 	// Copy the 32-byte control command to the cmd area
 	copy(sqe.cmd[:32], ctrlCmdBytes)
-
 
 	logger.Debug("SQE prepared", "fd", sqe.fd, "cmd", cmd, "addr", sqe.addr)
 
@@ -737,7 +734,6 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 		return nil, fmt.Errorf("submission queue full")
 	}
 
-
 	// Step 2: Get SQE slot and copy our prepared SQE into SQEs mapping
 	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
 	sqIndex := *sqTail & sqMask
@@ -759,7 +755,6 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 		dstCmd := (*[32]byte)(unsafe.Pointer(uintptr(sqeSlot) + 48))
 		copy(dstCmd[:], srcCmd[:])
 	}
-
 
 	// Update array entry
 	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), uintptr(4*sqIndex))) = sqIndex
@@ -790,7 +785,6 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	// Step 5: Process completion
 	return r.processCompletion()
 }
-
 
 // submitAndWaitRing calls io_uring_enter to submit and wait for completions
 func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted, completed uint32, errno syscall.Errno) {

@@ -36,19 +36,19 @@ const (
 
 // Runner handles I/O for a single ublk queue
 type Runner struct {
-	deviceID       uint32
-	queueID     uint16
-	depth       int
-	backend     interfaces.Backend
-	charDeviceFd      int
-	ring        uring.Ring
-	descPtr     uintptr // mmap'd descriptor array
-	bufPtr      uintptr // I/O buffer base
-	ctx         context.Context
-	cancel      context.CancelFunc
-	logger      interfaces.Logger
-	observer    interfaces.Observer // Metrics observer (may be nil)
-	cpuAffinity []int               // CPU affinity mask (nil = no affinity)
+	deviceID     uint32
+	queueID      uint16
+	depth        int
+	backend      interfaces.Backend
+	charDeviceFd int
+	ring         uring.Ring
+	descPtr      uintptr // mmap'd descriptor array
+	bufPtr       uintptr // I/O buffer base
+	ctx          context.Context
+	cancel       context.CancelFunc
+	logger       interfaces.Logger
+	observer     interfaces.Observer // Metrics observer (may be nil)
+	cpuAffinity  []int               // CPU affinity mask (nil = no affinity)
 	// Per-tag state tracking for proper serialization
 	tagStates  []TagState
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
@@ -62,7 +62,6 @@ const (
 	descStartSectorOffset = uintptr(8)
 	descAddrOffset        = uintptr(16)
 )
-
 
 type Config struct {
 	DevID       uint32
@@ -162,22 +161,22 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	runner := &Runner{
-		deviceID:       config.DevID,
-		queueID:     config.QueueID,
-		depth:       config.Depth,
-		backend:     config.Backend,
-		charDeviceFd:      fd,
-		ring:        ring,
-		descPtr:     descPtr,
-		bufPtr:      bufPtr,
-		ctx:         ctx,
-		cancel:      cancel,
-		logger:      config.Logger,
-		observer:    config.Observer,
-		cpuAffinity: config.CPUAffinity,
-		tagStates:   make([]TagState, config.Depth),
-		tagMutexes:  make([]sync.Mutex, config.Depth),
-		ioCmds:      make([]uapi.UblksrvIOCmd, config.Depth),
+		deviceID:     config.DevID,
+		queueID:      config.QueueID,
+		depth:        config.Depth,
+		backend:      config.Backend,
+		charDeviceFd: fd,
+		ring:         ring,
+		descPtr:      descPtr,
+		bufPtr:       bufPtr,
+		ctx:          ctx,
+		cancel:       cancel,
+		logger:       config.Logger,
+		observer:     config.Observer,
+		cpuAffinity:  config.CPUAffinity,
+		tagStates:    make([]TagState, config.Depth),
+		tagMutexes:   make([]sync.Mutex, config.Depth),
+		ioCmds:       make([]uapi.UblksrvIOCmd, config.Depth),
 	}
 
 	return runner, nil
@@ -782,20 +781,20 @@ func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Runner{
-		deviceID:      config.DevID,
-		queueID:    config.QueueID,
-		depth:      config.Depth,
-		backend:    config.Backend,
-		charDeviceFd:     -1,  // No real device
-		ring:       nil, // No real ring
-		descPtr:    0,
-		bufPtr:     0,
-		ctx:        ctx,
-		cancel:     cancel,
-		logger:     config.Logger,
-		tagStates:  make([]TagState, config.Depth),
-		tagMutexes: make([]sync.Mutex, config.Depth),
-		ioCmds:     make([]uapi.UblksrvIOCmd, config.Depth),
+		deviceID:     config.DevID,
+		queueID:      config.QueueID,
+		depth:        config.Depth,
+		backend:      config.Backend,
+		charDeviceFd: -1,  // No real device
+		ring:         nil, // No real ring
+		descPtr:      0,
+		bufPtr:       0,
+		ctx:          ctx,
+		cancel:       cancel,
+		logger:       config.Logger,
+		tagStates:    make([]TagState, config.Depth),
+		tagMutexes:   make([]sync.Mutex, config.Depth),
+		ioCmds:       make([]uapi.UblksrvIOCmd, config.Depth),
 	}
 }
 

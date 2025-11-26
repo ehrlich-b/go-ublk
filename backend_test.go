@@ -267,7 +267,7 @@ func TestDefaultParams(t *testing.T) {
 
 func BenchmarkMockBackendRead(b *testing.B) {
 	backend := NewMockBackend(1024 * 1024) // 1MB
-	buf := make([]byte, 4096)               // 4KB reads
+	buf := make([]byte, 4096)              // 4KB reads
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -281,7 +281,7 @@ func BenchmarkMockBackendRead(b *testing.B) {
 
 func BenchmarkMockBackendWrite(b *testing.B) {
 	backend := NewMockBackend(1024 * 1024) // 1MB
-	buf := make([]byte, 4096)               // 4KB writes
+	buf := make([]byte, 4096)              // 4KB writes
 	for i := range buf {
 		buf[i] = byte(i)
 	}
@@ -389,15 +389,15 @@ func TestDeviceLifecycleStates(t *testing.T) {
 
 	// 1. Created state (before Start)
 	deviceCreated := &Device{
-		ID:        1,
-		Path:      "/dev/ublkb1",
-		CharPath:  "/dev/ublkc1",
-		Backend:   backend,
-		queues:    1,
-		depth:     32,
-		started:   false,
-		closed:    false,
-		options:   options,
+		ID:       1,
+		Path:     "/dev/ublkb1",
+		CharPath: "/dev/ublkc1",
+		Backend:  backend,
+		queues:   1,
+		depth:    32,
+		started:  false,
+		closed:   false,
+		options:  options,
 	}
 
 	if deviceCreated.State() != DeviceStateCreated {
@@ -410,17 +410,17 @@ func TestDeviceLifecycleStates(t *testing.T) {
 	// 2. Running state (after Start)
 	ctx, cancel := context.WithCancel(context.Background())
 	deviceRunning := &Device{
-		ID:        2,
-		Path:      "/dev/ublkb2",
-		CharPath:  "/dev/ublkc2",
-		Backend:   backend,
-		queues:    1,
-		depth:     32,
-		started:   true,
-		closed:    false,
-		ctx:       ctx,
-		cancel:    cancel,
-		options:   options,
+		ID:       2,
+		Path:     "/dev/ublkb2",
+		CharPath: "/dev/ublkc2",
+		Backend:  backend,
+		queues:   1,
+		depth:    32,
+		started:  true,
+		closed:   false,
+		ctx:      ctx,
+		cancel:   cancel,
+		options:  options,
 	}
 
 	if deviceRunning.State() != DeviceStateRunning {
@@ -441,15 +441,15 @@ func TestDeviceLifecycleStates(t *testing.T) {
 
 	// 4. Closed state
 	deviceClosed := &Device{
-		ID:        3,
-		Path:      "/dev/ublkb3",
-		CharPath:  "/dev/ublkc3",
-		Backend:   backend,
-		queues:    1,
-		depth:     32,
-		started:   false,
-		closed:    true,
-		options:   options,
+		ID:       3,
+		Path:     "/dev/ublkb3",
+		CharPath: "/dev/ublkc3",
+		Backend:  backend,
+		queues:   1,
+		depth:    32,
+		started:  false,
+		closed:   true,
+		options:  options,
 	}
 
 	if deviceClosed.State() != DeviceStateClosed {
@@ -475,13 +475,13 @@ func TestDeviceLifecycleAPIPreconditions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	startedDevice := &Device{
-		ID:       1,
-		Backend:  backend,
-		started:  true,
-		closed:   false,
-		ctx:      ctx,
-		cancel:   cancel,
-		options:  options,
+		ID:      1,
+		Backend: backend,
+		started: true,
+		closed:  false,
+		ctx:     ctx,
+		cancel:  cancel,
+		options: options,
 	}
 	if err := startedDevice.Start(context.Background()); err == nil {
 		t.Error("Start on already started device should return error")
@@ -489,11 +489,11 @@ func TestDeviceLifecycleAPIPreconditions(t *testing.T) {
 
 	// Test Start on closed device
 	closedDevice := &Device{
-		ID:       2,
-		Backend:  backend,
-		started:  false,
-		closed:   true,
-		options:  options,
+		ID:      2,
+		Backend: backend,
+		started: false,
+		closed:  true,
+		options: options,
 	}
 	if err := closedDevice.Start(context.Background()); err == nil {
 		t.Error("Start on closed device should return error")
@@ -506,11 +506,11 @@ func TestDeviceLifecycleAPIPreconditions(t *testing.T) {
 
 	// Test Stop on not started device
 	notStartedDevice := &Device{
-		ID:       3,
-		Backend:  backend,
-		started:  false,
-		closed:   false,
-		options:  options,
+		ID:      3,
+		Backend: backend,
+		started: false,
+		closed:  false,
+		options: options,
 	}
 	if err := notStartedDevice.Stop(); err == nil {
 		t.Error("Stop on not started device should return error")

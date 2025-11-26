@@ -17,15 +17,15 @@ type DeviceParams struct {
 	EnableZoned        bool
 	EnableIoctlEncode  bool
 
-	ReadOnly        bool
-	Rotational      bool
-	VolatileCache   bool
-	EnableFUA       bool
+	ReadOnly      bool
+	Rotational    bool
+	VolatileCache bool
+	EnableFUA     bool
 
-	DiscardAlignment    uint32
-	DiscardGranularity  uint32
-	MaxDiscardSectors   uint32
-	MaxDiscardSegments  uint16
+	DiscardAlignment   uint32
+	DiscardGranularity uint32
+	MaxDiscardSectors  uint32
+	MaxDiscardSegments uint16
 
 	DeviceName  string
 	CPUAffinity []int
@@ -59,16 +59,16 @@ func DefaultDeviceParams(backend interfaces.Backend) DeviceParams {
 }
 
 type DeviceInfo struct {
-	ID           uint32
-	State        uint32
-	NumQueues    uint16
-	QueueDepth   uint16
-	BlockSize    uint16
-	MaxIOSize    uint32
-	DevSectors   uint64
-	Features     uint64
-	CharPath     string
-	BlockPath    string
+	ID         uint32
+	State      uint32
+	NumQueues  uint16
+	QueueDepth uint16
+	BlockSize  uint16
+	MaxIOSize  uint32
+	DevSectors uint64
+	Features   uint64
+	CharPath   string
+	BlockPath  string
 }
 
 func (d *DeviceInfo) Size() int64 {

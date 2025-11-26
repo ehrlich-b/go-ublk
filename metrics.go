@@ -9,13 +9,13 @@ import (
 // LatencyBuckets defines the latency histogram buckets in nanoseconds.
 // Buckets cover from 1us to 10s with logarithmic spacing.
 var LatencyBuckets = []uint64{
-	1_000,        // 1us
-	10_000,       // 10us
-	100_000,      // 100us
-	1_000_000,    // 1ms
-	10_000_000,   // 10ms
-	100_000_000,  // 100ms
-	1_000_000_000, // 1s
+	1_000,          // 1us
+	10_000,         // 10us
+	100_000,        // 100us
+	1_000_000,      // 1ms
+	10_000_000,     // 10ms
+	100_000_000,    // 100ms
+	1_000_000_000,  // 1s
 	10_000_000_000, // 10s
 }
 
@@ -348,11 +348,11 @@ type Observer interface {
 // NoOpObserver is a no-op implementation of Observer
 type NoOpObserver struct{}
 
-func (NoOpObserver) ObserveRead(uint64, uint64, bool)     {}
-func (NoOpObserver) ObserveWrite(uint64, uint64, bool)    {}
-func (NoOpObserver) ObserveDiscard(uint64, uint64, bool)  {}
-func (NoOpObserver) ObserveFlush(uint64, bool)            {}
-func (NoOpObserver) ObserveQueueDepth(uint32)             {}
+func (NoOpObserver) ObserveRead(uint64, uint64, bool)    {}
+func (NoOpObserver) ObserveWrite(uint64, uint64, bool)   {}
+func (NoOpObserver) ObserveDiscard(uint64, uint64, bool) {}
+func (NoOpObserver) ObserveFlush(uint64, bool)           {}
+func (NoOpObserver) ObserveQueueDepth(uint32)            {}
 
 // MetricsObserver implements Observer using the built-in Metrics
 type MetricsObserver struct {
