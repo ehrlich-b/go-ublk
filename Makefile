@@ -23,7 +23,7 @@ endif
 
 # Project info
 BINARY_NAME=ublk
-BINARY_DIR=./cmd
+BINARY_DIR=./examples
 
 # Build targets
 BINARIES=ublk-mem ublk-file ublk-null ublk-zip
@@ -43,8 +43,9 @@ build: FORCE $(BINARIES)
 
 # Individual binary targets (FORCE ensures always rebuild)
 ublk-mem: FORCE
+	@mkdir -p bin
 	@echo "Building ublk-mem$(if $(BUILD_FLAGS), (with race detector),)..."
-	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o ublk-mem ./cmd/ublk-mem
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ublk-mem ./examples/ublk-mem
 
 ublk-file: FORCE
 	@echo "Building ublk-file (Phase 4)"
@@ -58,7 +59,7 @@ ublk-zip: FORCE
 # Clean build artifacts
 clean:
 	$(GOCLEAN)
-	rm -f $(BINARIES)
+	rm -rf bin/
 
 # Run all tests
 test: test-unit
@@ -112,7 +113,7 @@ VM_PASS=$(shell cat /tmp/devvm_pwd.txt)
 vm-copy: ublk-mem
 	@echo "📦 Copying ublk-mem to VM..."
 	@sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true; rm -f $(VM_DIR)/ublk-mem"
-	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no bin/ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@echo "✓ Copied."
 
 vm-run: ublk-mem vm-copy
@@ -258,7 +259,7 @@ vm-src-copy:
 
 vm-build-e2e: vm-src-copy
 	@echo "🧰 Building on VM with cgo to use VM kernel headers..."
-	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && CGO_ENABLED=1 go build -o ublk-mem ./cmd/ublk-mem"'
+	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && CGO_ENABLED=1 go build -o ublk-mem ./examples/ublk-mem"'
 	@scripts/vm-ssh.sh 'bash -lc "cd ~/ublk-src && chmod +x ./test-e2e.sh && sudo ./test-e2e.sh"'
 
 # Run benchmarks

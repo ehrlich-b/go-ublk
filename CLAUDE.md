@@ -44,7 +44,7 @@ make vm-stress          # 10x alternating e2e + benchmark
 go-ublk/
 ├── *.go              # Public API (ublk package)
 ├── backend/          # Backend implementations (mem.go)
-├── cmd/ublk-mem/     # Memory-backed device CLI
+├── examples/ublk-mem/ # Memory-backed device example
 ├── docs/             # Documentation (REVIEW.md, etc.)
 ├── scripts/          # Shell scripts (vm-ssh.sh, etc.)
 └── internal/

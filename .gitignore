@@ -19,10 +19,7 @@ vendor/
 build/
 
 # Built binaries
-ublk-mem
-ublk-file
-ublk-null
-ublk-zip
+bin/
 
 # IDE specific files
 .idea/

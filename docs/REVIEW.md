@@ -480,7 +480,7 @@ Minor issue: `Discard` zeroes bytes in a loop instead of using `copy` with a zer
 
 ---
 
-#### `cmd/ublk-mem/main.go` (212 lines)
+#### `examples/ublk-mem/main.go` (212 lines)
 
 **Purpose:** CLI for memory-backed ublk device
 
@@ -593,7 +593,7 @@ const retryDelay = 10 * time.Microsecond   // why 10us?
 | internal/uring/interface.go | 255 | OK | Make stub fatal |
 | internal/logging/logger.go | 346 | BLOATED | Delete unused methods |
 | backend/mem.go | 144 | OK | Keep |
-| cmd/ublk-mem/main.go | 212 | OK | Keep |
+| examples/ublk-mem/main.go | 212 | OK | Keep |
 
 **Total lines to delete:** ~400-500 (dead code, unused implementations)
 **Bugs to fix:** 2-3 (directUnmarshal, waitLive, NumQueues)
