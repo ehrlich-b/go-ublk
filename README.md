@@ -1,56 +1,14 @@
 # go-ublk
 
-Pure Go implementation of Linux ublk (userspace block device).
+A Go library for building Linux block devices in userspace. Pure Go, dependency-free, no cgo.
 
-Think FUSE, but for block devices instead of filesystems. ublk lets you implement block devices entirely in userspace using io_uring for communication with the kernel.
+ublk is like FUSE, but for block devices instead of filesystems. The kernel forwards block I/O to your userspace program via io_uring - you just implement read/write handlers. go-ublk handles the io_uring setup, kernel communication, and device lifecycle.
 
-## Requirements
+As far as I can tell, this is the only pure-Go ublk implementation available.
 
-- Linux kernel >= 6.8 (tested on Ubuntu 24.04 LTS)
-- `ublk_drv` kernel module loaded
-- Root or CAP_SYS_ADMIN capability
+## Usage
 
-### Tested Kernels (provisional, VM-tested)
-
-| Kernel | Distro | Status |
-|--------|--------|--------|
-| 6.8.0-31 | Ubuntu 24.04 LTS | ✅ Works |
-| 6.11.0-24 | Ubuntu 24.04 HWE | ✅ Works |
-
-## Performance
-
-Benchmarks on Ubuntu 24.04 VM (4 queues, depth=64, batched io_uring submissions):
-
-| Workload | go-ublk | Loop (RAM) | % of Loop |
-|----------|---------|------------|-----------|
-| 4K Read (1 job, QD=64) | 85k IOPS | 220k IOPS | 39% |
-| 4K Read (4 jobs, QD=64) | 99k IOPS | 116k IOPS | 85% |
-| 4K Write (4 jobs, QD=64) | 90k IOPS | 99k IOPS | 91% |
-
-Multi-queue workloads achieve 85-91% of kernel loop device performance.
-
-## Quick Start
-
-```bash
-# Load the kernel module
-sudo modprobe ublk_drv
-
-# Build and run a RAM disk
-make build
-sudo ./bin/ublk-mem --size=1G
-
-# In another terminal
-sudo mkfs.ext4 /dev/ublkb0
-sudo mount /dev/ublkb0 /mnt
-# ... use the filesystem ...
-sudo umount /mnt
-
-# Stop with Ctrl+C
-```
-
-## API
-
-Implement the `Backend` interface and call `CreateAndServe`:
+Implement the `Backend` interface (it matches `io.ReaderAt`/`io.WriterAt`) and call `CreateAndServe`:
 
 ```go
 package main
@@ -89,20 +47,47 @@ func main() {
 }
 ```
 
-The `Backend` interface matches Go's `io.ReaderAt`/`io.WriterAt` plus `Size`, `Flush`, and `Close`.
+## Try It
 
-## Testing
+The repo includes a RAM-backed block device example:
 
 ```bash
-make build       # Build binaries
-make test-unit   # Run unit tests
-make vm-e2e      # Full integration test (requires VM setup)
+# Load the kernel module
+sudo modprobe ublk_drv
+
+# Build and run
+make build
+sudo ./bin/ublk-mem --size=1G
+
+# In another terminal: use it like any block device
+sudo mkfs.ext4 /dev/ublkb0
+sudo mount /dev/ublkb0 /mnt
+# ...
+sudo umount /mnt
 ```
+
+## Performance
+
+Local benchmarks on Ubuntu 24.04 VM (2 vCPUs, 8GB RAM, i7-8700K host, 4 queues, depth=64):
+
+| Workload | go-ublk | Loop (RAM) | % of Loop |
+|----------|---------|------------|-----------|
+| 4K Read (1 job) | 85k IOPS | 220k IOPS | 39% |
+| 4K Read (4 jobs) | 99k IOPS | 116k IOPS | 85% |
+| 4K Write (4 jobs) | 90k IOPS | 99k IOPS | 91% |
+
+Multi-queue workloads reach 85-91% of kernel loop device throughput.
+
+## Requirements
+
+- Linux kernel >= 6.8
+- `ublk_drv` module loaded
+- Root or CAP_SYS_ADMIN
 
 ## References
 
 - [Linux kernel ublk docs](https://docs.kernel.org/block/ublk.html)
-- [ublksrv (C reference implementation)](https://github.com/ublk-org/ublksrv)
+- [ublksrv (C reference)](https://github.com/ublk-org/ublksrv)
 
 ## License
 
