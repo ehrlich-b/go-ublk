@@ -77,7 +77,7 @@ type Config struct {
 	DevID       uint32
 	QueueID     uint16
 	Depth       int
-	BlockSize   int                 // Logical block size in bytes (default: 512)
+	BlockSize   int // Logical block size in bytes (default: 512)
 	Backend     interfaces.Backend
 	Logger      interfaces.Logger
 	Observer    interfaces.Observer // Metrics observer (may be nil)
@@ -534,8 +534,8 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	// Extract I/O parameters from descriptor
-	op := desc.GetOp()                                 // Use the provided method to get operation
-	offset := desc.StartSector * uint64(r.blockSize)   // Convert sectors to bytes
+	op := desc.GetOp()                                     // Use the provided method to get operation
+	offset := desc.StartSector * uint64(r.blockSize)       // Convert sectors to bytes
 	length := uint32(desc.NrSectors) * uint32(r.blockSize) // Convert sectors to bytes
 
 	// Calculate buffer pointer for this tag

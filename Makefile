@@ -154,9 +154,37 @@ vet:
 
 check: fmt vet lint test
 
-dev-setup: deps
+# CI target - runs exactly what GitHub Actions runs
+ci:
+	@echo "=== Running CI checks ==="
+	@echo "1. Checking formatting..."
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "Code is not formatted. Run 'make fmt' to fix."; \
+		gofmt -l .; \
+		exit 1; \
+	fi
+	@echo "   ✓ Formatting OK"
+	@echo "2. Running go vet..."
+	@go vet ./...
+	@echo "   ✓ Vet OK"
+	@echo "3. Running unit tests..."
+	@$(GOTEST) ./...
+	@echo "   ✓ Tests OK"
+	@echo "4. Running tests with race detector..."
+	@$(GOTEST) -race ./...
+	@echo "   ✓ Race tests OK"
+	@echo "=== CI checks passed ==="
+
+dev-setup: deps install-hooks
 	@echo "Setting up development environment..."
 	@which golangci-lint >/dev/null 2>&1 || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Install git hooks
+install-hooks:
+	@echo "Installing git hooks..."
+	@cp scripts/pre-push .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@echo "Pre-push hook installed. CI checks will run before each push."
 
 #==============================================================================
 # Kernel Support Checks
@@ -364,9 +392,9 @@ help:
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make fmt            Format code"
-	@echo "  make lint           Run linter"
 	@echo "  make vet            Run go vet"
-	@echo "  make check          Run all checks"
+	@echo "  make ci             Run all CI checks (same as GitHub Actions)"
+	@echo "  make install-hooks  Install pre-push hook to run CI before push"
 	@echo ""
 	@echo "VM Testing (requires configuration, see Makefile.local.example):"
 	@echo "  make vm-simple-e2e  Simple I/O test"

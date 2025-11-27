@@ -1,0 +1,12 @@
+#!/bin/bash
+# Pre-push hook: runs make ci before allowing push
+# Install with: make install-hooks
+
+echo "Running pre-push CI checks..."
+if ! make ci; then
+    echo ""
+    echo "CI checks failed. Push aborted."
+    echo "Fix the issues above and try again."
+    exit 1
+fi
+echo "Pre-push checks passed."
