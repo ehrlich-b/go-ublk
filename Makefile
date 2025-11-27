@@ -216,6 +216,14 @@ vm-benchmark: vm-copy
 	@$(VM_SSH) "cd $(VM_DIR) && chmod +x ./vm-quick-bench.sh && ./vm-quick-bench.sh"
 	@echo "VM benchmark completed"
 
+# Fetch a file from the VM: make vm-fetch SRC=/tmp/cpu.prof DST=./cpu.prof
+vm-fetch: vm-check
+	@if [ -z "$(SRC)" ] || [ -z "$(DST)" ]; then \
+		echo "Usage: make vm-fetch SRC=/path/on/vm DST=/path/local"; \
+		exit 1; \
+	fi
+	$(VM_SCP) $(VM_USER)@$(VM_HOST):$(SRC) $(DST)
+
 vm-reset: vm-check
 	@echo "Hard reset VM..."
 	@timeout 3 $(VM_SSH) 'sudo sh -c "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"' || true

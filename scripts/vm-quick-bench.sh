@@ -17,18 +17,22 @@ if ! command -v jq &> /dev/null; then
     sudo apt-get update && sudo apt-get install -y jq
 fi
 
+# Arrays to store results for summary table
+declare -a RESULTS
+
 # Helper function to run fio and extract metrics
 run_fio_test() {
     local device=$1
     local rw=$2
     local iodepth=$3
-    local name=$4
+    local numjobs=$4
+    local name=$5
 
     echo "=== $name ==="
 
     local output=$(sudo fio --name=test --filename=$device --size=256M \
         --ioengine=libaio --direct=1 --runtime=10 --time_based=1 \
-        --rw=$rw --bs=4k --iodepth=$iodepth --numjobs=1 \
+        --rw=$rw --bs=4k --iodepth=$iodepth --numjobs=$numjobs --group_reporting \
         --output-format=json 2>/dev/null)
 
     if [ "$rw" = "randread" ] || [ "$rw" = "read" ]; then
@@ -53,11 +57,13 @@ run_fio_test() {
     local lat_p99_us=$(echo "scale=1; $lat_p99 / 1000" | bc)
 
     echo "  IOPS:        ${iops_k}k"
-    echo "  Bandwidth:   ${bw_mbs} MiB/s"
+    echo "  Throughput:  ${bw_mbs} MiB/s"
     echo "  Avg Latency: ${lat_mean_us} us"
-    echo "  P50 Latency: ${lat_p50_us} us"
     echo "  P99 Latency: ${lat_p99_us} us"
     echo ""
+
+    # Store for summary (name|iops_k|bw_mbs)
+    RESULTS+=("$name|${iops_k}|${bw_mbs}")
 }
 
 # Start ublk device
@@ -77,10 +83,10 @@ fi
 echo "Device created at /dev/ublkb0"
 echo ""
 
-# Run ublk tests with QD=64 to utilize full queue depth
-run_fio_test /dev/ublkb0 randread 1 "ublk 4K Random Read (QD=1)"
-run_fio_test /dev/ublkb0 randread 64 "ublk 4K Random Read (QD=64)"
-run_fio_test /dev/ublkb0 randwrite 64 "ublk 4K Random Write (QD=64)"
+# Run ublk tests - single job and multi-job to test scaling
+run_fio_test /dev/ublkb0 randread 64 1 "ublk 4K Read (1 job, QD=64)"
+run_fio_test /dev/ublkb0 randread 64 4 "ublk 4K Read (4 jobs, QD=64)"
+run_fio_test /dev/ublkb0 randwrite 64 4 "ublk 4K Write (4 jobs, QD=64)"
 
 # Stop ublk device
 echo "Stopping ublk device..."
@@ -98,15 +104,22 @@ LOOP_DEV=$(sudo losetup --find --show /tmp/ramdisk/loop_test.img)
 echo "Loop device created at $LOOP_DEV (RAM-backed)"
 echo ""
 
-# Run loop tests with QD=64 for fair comparison
-run_fio_test $LOOP_DEV randread 1 "loop 4K Random Read (QD=1)"
-run_fio_test $LOOP_DEV randread 64 "loop 4K Random Read (QD=64)"
-run_fio_test $LOOP_DEV randwrite 64 "loop 4K Random Write (QD=64)"
+# Run loop tests - matching ublk test configuration
+run_fio_test $LOOP_DEV randread 64 1 "loop 4K Read (1 job, QD=64)"
+run_fio_test $LOOP_DEV randread 64 4 "loop 4K Read (4 jobs, QD=64)"
+run_fio_test $LOOP_DEV randwrite 64 4 "loop 4K Write (4 jobs, QD=64)"
 
 # Cleanup
 sudo losetup -d $LOOP_DEV
 sudo umount /tmp/ramdisk 2>/dev/null || true
 
-echo "=== Benchmark Complete ==="
-echo "Compare the IOPS and latency between ublk and loop device above."
-echo "The difference shows the go-ublk userspace overhead."
+echo "=== Summary ==="
+echo ""
+printf "%-30s %12s %12s\n" "Workload" "IOPS" "Throughput"
+printf "%-30s %12s %12s\n" "--------" "----" "----------"
+for result in "${RESULTS[@]}"; do
+    IFS='|' read -r name iops bw <<< "$result"
+    printf "%-30s %10sk %10s MB/s\n" "$name" "$iops" "$bw"
+done
+echo ""
+echo "Multi-job scaling shows how well go-ublk utilizes multiple queues."

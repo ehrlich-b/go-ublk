@@ -2,9 +2,16 @@
 package uring
 
 import (
+	"errors"
+
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
+
+// ErrRingFull is returned when the submission queue is full.
+// In normal ublk operation this should never happen - the state machine
+// guarantees at most depth in-flight operations.
+var ErrRingFull = errors.New("submission queue full")
 
 // Ring provides the interface for io_uring operations needed by ublk
 type Ring interface {
@@ -17,8 +24,20 @@ type Ring interface {
 	// SubmitCtrlCmdAsync submits a control command without waiting for completion
 	SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error)
 
-	// SubmitIOCmd submits an I/O command and returns the result
+	// SubmitIOCmd submits an I/O command and returns the result.
+	// This is a convenience method that calls PrepareIOCmd + FlushSubmissions.
 	SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error)
+
+	// PrepareIOCmd prepares an I/O command SQE without submitting to the kernel.
+	// The SQE is written to ring memory but not visible to the kernel until
+	// FlushSubmissions is called. This enables batching multiple I/O commands
+	// into a single io_uring_enter syscall.
+	// Returns ErrRingFull if the submission queue is full.
+	PrepareIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) error
+
+	// FlushSubmissions submits all prepared SQEs with a single io_uring_enter syscall.
+	// Returns the number of SQEs submitted.
+	FlushSubmissions() (uint32, error)
 
 	// WaitForCompletion waits for completion events and returns them
 	WaitForCompletion(timeout int) ([]Result, error)

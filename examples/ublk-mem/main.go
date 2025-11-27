@@ -195,6 +195,12 @@ func main() {
 		}
 	}
 
+	// Stop CPU profiling explicitly (defer won't run with os.Exit)
+	if *cpuprofile != "" {
+		pprof.StopCPUProfile()
+		logger.Info("CPU profile written", "file", *cpuprofile)
+	}
+
 	os.Exit(0)
 }
 

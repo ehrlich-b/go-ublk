@@ -2,32 +2,42 @@
 
 ---
 
-## ✅ PERFORMANCE TARGET ACHIEVED
+## ✅ PERFORMANCE STATUS
 
-**Target:** ~50% of loop device ✅ **EXCEEDED**
+**Current Results (2025-11-26 with 4 queues, depth=64, batched submissions):**
+| Workload | go-ublk | Loop (RAM) | % of Loop |
+|----------|---------|------------|-----------|
+| 4K Read (1 job, QD=64) | 85.5k IOPS / 334 MB/s | 220k IOPS / 860 MB/s | 39% |
+| 4K Read (4 jobs, QD=64) | 98.9k IOPS / 386 MB/s | 116k IOPS / 455 MB/s | 85% |
+| 4K Write (4 jobs, QD=64) | 90.1k IOPS / 352 MB/s | 98.6k IOPS / 385 MB/s | 91% |
 
-**Current Results (2025-11-26 with 4 queues, depth=64):**
-| Workload | go-ublk | Loop (RAM) | % of Loop | Status |
-|----------|---------|------------|-----------|--------|
-| 4K Random Read (1 job, QD=64) | 146k IOPS | 209k IOPS | **70%** | ✅ Target exceeded |
-| 4K Random Read (4 jobs, QD=64) | **365k IOPS** | 122k IOPS | **300%** | ✅ 3x faster! |
+**Massive improvement from batched io_uring submissions (2025-11-26):**
+| Workload | Before | After | Improvement |
+|----------|--------|-------|-------------|
+| 4K Read (1 job) | 68k IOPS | 85.5k IOPS | 26% faster |
+| 4K Read (4 jobs) | 17k IOPS | 98.9k IOPS | **5.8x faster** |
+| 4K Write (4 jobs) | 9k IOPS | 90.1k IOPS | **10x faster** |
 
-**Multi-queue scaling is excellent:** 4 jobs = 2.5x performance of 1 job, while loop device degrades.
+Multi-queue now achieves 85-91% of kernel loop device performance (up from 9-17%).
 
 **Optimizations completed:**
 - [x] Pre-allocated SQE structs in io_uring (avoid 128-byte allocation per I/O)
 - [x] Pre-allocated result pool for CQE completions
 - [x] Pre-allocated UblksrvIOCmd structs per tag
-- [x] Moved hot path logging inside logger nil checks
+- [x] Removed hot path logging entirely (was causing mutex contention)
 - [x] Moved time.Now() behind observer nil check
 - [x] Increased default queue depth to 64 (configurable with --depth flag)
 - [x] Sharded memory backend (64KB shards for parallel access)
 - [x] Multi-queue support (4 queues by default)
+- [x] Buffer pool for >64KB allocations (700x faster than make)
+- [x] **Batched io_uring submissions** - PrepareIOCmd + FlushSubmissions pattern
+  - All completions in a batch prepare SQEs without syscalls
+  - Single io_uring_enter() call submits entire batch
+  - Reduced syscall overhead from 50%+ to negligible
 
-**Future optimization opportunities (not needed for 50% target):**
+**Future optimization opportunities:**
 - Registered buffers for zero-copy I/O
-- io_uring SQPOLL for reduced syscall overhead
-- Buffer pool for >64KB allocations
+- io_uring SQPOLL for kernel-side polling
 
 ---
 
@@ -154,7 +164,10 @@ Concurrent I/O to different memory regions no longer contends on a single mutex.
 - Context switches between kernel and userspace
 
 ### 3.2 Memory Optimization
-- [ ] Buffer pool to eliminate >64KB dynamic allocation on hot path
+- [x] Buffer pool to eliminate >64KB dynamic allocation on hot path
+  - Implemented size-bucketed sync.Pool (128KB, 256KB, 512KB, 1MB)
+  - 700-5,500x faster than raw allocation (41ns vs 29μs-272μs)
+  - Pool used automatically for I/O > 64KB in queue runner
 - [ ] Consider registered buffers for zero-copy
 - [ ] Profile and optimize hot paths
 

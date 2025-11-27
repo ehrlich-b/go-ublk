@@ -156,6 +156,11 @@ type minimalRing struct {
 	cqePoolSize  int             // Size of CQE result pool
 	cqePool      []minimalResult // Pool of result structs to avoid allocation
 	cqePoolIndex int             // Next available result in pool
+
+	// Batching state: local tail tracks prepared-but-not-submitted SQEs.
+	// The kernel only sees submissions when we store sqTailLocal to the shared tail.
+	// This enables batching multiple SQEs into a single io_uring_enter syscall.
+	sqTailLocal uint32
 }
 
 // kernelUringCmdOpcode returns the runtime kernel's IORING_OP_URING_CMD
@@ -248,6 +253,11 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 		cqePoolSize: cqePoolSize,
 		cqePool:     make([]minimalResult, cqePoolSize),
 	}
+
+	// Initialize sqTailLocal from the shared tail pointer.
+	// At ring creation, shared tail is 0, so sqTailLocal starts at 0.
+	sqTail := (*uint32)(unsafe.Add(r.sqAddr, params.sqOff.tail))
+	r.sqTailLocal = atomic.LoadUint32(sqTail)
 
 	// Register the char device FD with io_uring (like C code does)
 	// Required for queue operations
@@ -535,7 +545,9 @@ func (r *minimalResult) UserData() uint64 { return r.userData }
 func (r *minimalResult) Value() int32     { return r.value }
 func (r *minimalResult) Error() error     { return r.err }
 
-func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
+// PrepareIOCmd prepares an I/O command SQE without submitting to the kernel.
+// Call FlushSubmissions() to submit all prepared commands in a single syscall.
+func (r *minimalRing) PrepareIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) error {
 	// Hot path optimization: Use pre-allocated sqePool instead of heap allocation
 	// Reuse the same sqe128 struct for all submissions (sequential per ring)
 	sqe := &r.sqePool
@@ -569,13 +581,34 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	*(*uint64)(unsafe.Pointer(&sqe.cmd[64])) = 0
 	*(*uint64)(unsafe.Pointer(&sqe.cmd[72])) = 0
 
-	// Submit the command and flush to kernel
-	if _, err := r.submitOnlyCmd(sqe); err != nil {
-		return nil, fmt.Errorf("failed to submit I/O command: %w", err)
+	// Prepare SQE in ring buffer (no syscall)
+	if err := r.prepareSQE(sqe); err != nil {
+		return fmt.Errorf("failed to prepare I/O command: %w", err)
 	}
 
-	// Make sure the payload stays alive until after submission.
+	// Make sure the payload stays alive until after preparation
 	runtime.KeepAlive(ioCmd)
+
+	return nil
+}
+
+// FlushSubmissions submits all prepared SQEs with a single io_uring_enter syscall.
+// Returns the number of SQEs submitted.
+func (r *minimalRing) FlushSubmissions() (uint32, error) {
+	return r.flushSubmissions()
+}
+
+// SubmitIOCmd submits an I/O command and returns the result.
+// This is a convenience method that calls PrepareIOCmd + FlushSubmissions.
+// For batching multiple commands, use PrepareIOCmd repeatedly then FlushSubmissions once.
+func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (Result, error) {
+	if err := r.PrepareIOCmd(cmd, ioCmd, userData); err != nil {
+		return nil, err
+	}
+
+	if _, err := r.FlushSubmissions(); err != nil {
+		return nil, err
+	}
 
 	return &minimalResult{userData: userData, value: 0, err: nil}, nil
 }
@@ -799,6 +832,67 @@ func (r *minimalRing) submitOnly(toSubmit uint32) (submitted uint32, errno sysca
 		0, 0)
 
 	return uint32(r1), err
+}
+
+// prepareSQE writes an SQE to the ring buffer without submitting to the kernel.
+// The SQE is visible to us (sqTailLocal is incremented) but not to the kernel
+// until flushSubmissions() is called. This enables batching.
+func (r *minimalRing) prepareSQE(sqe *sqe128) error {
+	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
+	sqMask := r.params.sqEntries - 1
+
+	// Check if ring is full. In normal operation this should never happen
+	// because the state machine guarantees at most depth in-flight operations.
+	if r.sqTailLocal-atomic.LoadUint32(sqHead) >= r.params.sqEntries {
+		return ErrRingFull
+	}
+
+	// Get SQE slot index and destination
+	sqIndex := r.sqTailLocal & sqMask
+	sqeSlot := unsafe.Add(r.sqesAddr, 128*uintptr(sqIndex))
+
+	// Copy SQE to ring slot (includes cmd area at bytes 48-127)
+	*(*sqe128)(sqeSlot) = *sqe
+
+	// Update the indirection array entry
+	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
+	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
+
+	// Increment LOCAL tail - kernel doesn't see this yet
+	r.sqTailLocal++
+
+	// NO memory barrier here - that happens in flushSubmissions
+	// NO syscall here - that's the whole point of batching
+	return nil
+}
+
+// flushSubmissions submits all prepared SQEs with a single io_uring_enter syscall.
+// This publishes sqTailLocal to the shared tail, making all prepared SQEs visible
+// to the kernel, then calls io_uring_enter to wake the kernel.
+func (r *minimalRing) flushSubmissions() (uint32, error) {
+	sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
+	currentTail := atomic.LoadUint32(sqTail)
+	pending := r.sqTailLocal - currentTail
+
+	if pending == 0 {
+		return 0, nil // Nothing to submit
+	}
+
+	// CRITICAL: Memory barrier ensures all SQE writes are visible to kernel
+	// before we update the shared tail pointer. Without this, the kernel might
+	// see the new tail value but read stale/garbage SQE data.
+	Sfence()
+
+	// Publish new tail to kernel - this makes all prepared SQEs visible
+	atomic.StoreUint32(sqTail, r.sqTailLocal)
+
+	// ONE syscall for the entire batch
+	submitted, errno := r.submitOnly(pending)
+	if errno != 0 {
+		return 0, fmt.Errorf("io_uring_enter failed: %v", errno)
+	}
+
+	return submitted, nil
 }
 
 // submitOnlyCmd submits a command SQE without waiting for completion

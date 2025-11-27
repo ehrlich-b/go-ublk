@@ -381,7 +381,9 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	return nil
 }
 
-// processRequests processes completed I/O requests using proper per-tag state machine
+// processRequests processes completed I/O requests using proper per-tag state machine.
+// Uses batched io_uring submissions: all completion handlers prepare SQEs, then
+// one FlushSubmissions() call submits them all with a single syscall.
 func (r *Runner) processRequests() error {
 	// Wait for completion events from io_uring - this blocks until events arrive
 	completions, err := r.ring.WaitForCompletion(0) // 0 = block until at least 1 completion
@@ -394,13 +396,11 @@ func (r *Runner) processRequests() error {
 		return nil // No work to do - continue loop
 	}
 
-	// Process each completion event using per-tag state machine
+	// Process each completion event using per-tag state machine.
+	// Each handler prepares an SQE but doesn't submit - we batch them.
 	for _, completion := range completions {
-		// Guard against nil completions
+		// Guard against nil completions (should never happen)
 		if completion == nil {
-			if r.logger != nil {
-				r.logger.Printf("Queue %d: Skipping nil completion", r.queueID)
-			}
 			continue
 		}
 
@@ -409,21 +409,22 @@ func (r *Runner) processRequests() error {
 		isCommit := (userData & udOpCommit) != 0
 		result := completion.Value()
 
-		// Validate tag range
+		// Validate tag range (should never fail)
 		if tag >= uint16(r.depth) {
-			if r.logger != nil {
-				r.logger.Printf("Queue %d: Invalid tag %d (depth=%d)", r.queueID, tag, r.depth)
-			}
 			continue
 		}
 
 		// Process completion based on per-tag state machine
 		if err := r.handleCompletion(tag, isCommit, result); err != nil {
-			if r.logger != nil {
-				r.logger.Printf("Queue %d: Failed to handle completion for tag %d: %v", r.queueID, tag, err)
-			}
 			return err
 		}
+	}
+
+	// Submit all prepared SQEs with ONE syscall.
+	// Before: N completions → N syscalls (50%+ CPU in syscall overhead)
+	// After:  N completions → 1 syscall
+	if _, err := r.ring.FlushSubmissions(); err != nil {
+		return fmt.Errorf("failed to flush submissions: %w", err)
 	}
 
 	return nil
@@ -436,14 +437,6 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 	defer r.tagMutexes[tag].Unlock()
 
 	currentState := r.tagStates[tag]
-	opType := "FETCH"
-	if isCommit {
-		opType = "COMMIT"
-	}
-
-	if r.logger != nil {
-		r.logger.Debugf("queue %d tag %d %s completion, result=%d, state=%d", r.queueID, tag, opType, result, currentState)
-	}
 
 	// State machine transitions
 	switch currentState {
@@ -452,22 +445,13 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		if result == 0 {
 			// UBLK_IO_RES_OK: I/O request available - transition to Owned and process
 			r.tagStates[tag] = TagStateOwned
-			if r.logger != nil {
-				r.logger.Debugf("queue %d tag %d I/O arrived, processing", r.queueID, tag)
-			}
 			return r.processIOAndCommit(tag)
 		} else if result == 1 {
 			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path (not implemented yet)
 			r.tagStates[tag] = TagStateOwned
-			if r.logger != nil {
-				r.logger.Printf("queue %d tag %d NEED_GET_DATA not implemented", r.queueID, tag)
-			}
 			return fmt.Errorf("NEED_GET_DATA not implemented")
 		} else {
 			// Unexpected result code
-			if r.logger != nil {
-				r.logger.Printf("queue %d tag %d unexpected FETCH result=%d", r.queueID, tag, result)
-			}
 			return fmt.Errorf("unexpected FETCH result: %d", result)
 		}
 
@@ -478,22 +462,13 @@ func (r *Runner) handleCompletion(tag uint16, isCommit bool, result int32) error
 		if result == 0 {
 			// UBLK_IO_RES_OK: Next I/O request available - transition to Owned and process immediately
 			r.tagStates[tag] = TagStateOwned
-			if r.logger != nil {
-				r.logger.Debugf("queue %d tag %d next I/O arrived, processing", r.queueID, tag)
-			}
 			return r.processIOAndCommit(tag)
 		} else if result == 1 {
 			// UBLK_IO_RES_NEED_GET_DATA: Two-step write path
 			r.tagStates[tag] = TagStateOwned
-			if r.logger != nil {
-				r.logger.Printf("queue %d tag %d next NEED_GET_DATA not implemented", r.queueID, tag)
-			}
 			return fmt.Errorf("NEED_GET_DATA not implemented")
 		} else if result < 0 {
 			// Error/abort path
-			if r.logger != nil {
-				r.logger.Printf("queue %d tag %d COMMIT error/abort: result=%d", r.queueID, tag, result)
-			}
 			r.tagStates[tag] = TagStateOwned // Tag can be reused after error
 			return fmt.Errorf("COMMIT_AND_FETCH error: %d", result)
 		} else {
@@ -528,18 +503,9 @@ func (r *Runner) processIOAndCommit(tag uint16) error {
 	// Read descriptor for this tag using atomic loads to avoid stale cache lines
 	desc := r.loadDescriptor(tag)
 
-	if r.logger != nil {
-		r.logger.Debugf("processIOAndCommit: tag=%d, OpFlags=0x%x, NrSectors=%d, StartSector=%d, Addr=0x%x",
-			tag, desc.OpFlags, desc.NrSectors, desc.StartSector, desc.Addr)
-	}
-
 	// Handle empty descriptor - submit COMMIT_AND_FETCH with result=0
 	// to acknowledge and wait for next I/O
 	if desc.OpFlags == 0 && desc.NrSectors == 0 {
-		if r.logger != nil {
-			r.logger.Debugf("Queue %d: Tag %d empty descriptor, submitting noop COMMIT_AND_FETCH", r.queueID, tag)
-		}
-		// Submit COMMIT_AND_FETCH with result=0 (no-op)
 		return r.submitCommitAndFetch(tag, nil, desc)
 	}
 
@@ -555,9 +521,6 @@ func (r *Runner) processIOAndCommit(tag uint16) error {
 func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	// Some completions are just keep-alive acknowledgements with an empty descriptor.
 	if desc.OpFlags == 0 && desc.NrSectors == 0 {
-		if r.logger != nil {
-			r.logger.Debugf("Queue %d: Tag %d noop completion (descriptor empty)", r.queueID, tag)
-		}
 		return r.submitCommitAndFetch(tag, nil, desc)
 	}
 
@@ -565,31 +528,6 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	op := desc.GetOp()               // Use the provided method to get operation
 	offset := desc.StartSector * 512 // Convert sectors to bytes (assuming 512-byte sectors)
 	length := desc.NrSectors * 512   // Convert sectors to bytes
-
-	// Log I/O operations at debug level (hot path - avoid in production)
-	// Only build strings when logging is enabled
-	if r.logger != nil {
-		opName := ""
-		switch op {
-		case uapi.UBLK_IO_OP_READ:
-			opName = "READ"
-		case uapi.UBLK_IO_OP_WRITE:
-			opName = "WRITE"
-		case uapi.UBLK_IO_OP_FLUSH:
-			opName = "FLUSH"
-		case uapi.UBLK_IO_OP_DISCARD:
-			opName = "DISCARD"
-		default:
-			opName = fmt.Sprintf("OP_%d", op)
-		}
-		if length < 1024 {
-			r.logger.Debugf("[Q%d:T%02d] %s %dB @ sector %d", r.queueID, tag, opName, length, desc.StartSector)
-		} else {
-			r.logger.Debugf("[Q%d:T%02d] %s %dKB @ sector %d", r.queueID, tag, opName, length/1024, desc.StartSector)
-		}
-		r.logger.Debugf("Queue %d: Handling I/O op=%d offset=%d len=%d tag=%d",
-			r.queueID, op, offset, length, tag)
-	}
 
 	// Calculate buffer pointer for this tag
 	bufOffset := int(tag) * constants.IOBufferSizePerTag // 64KB per buffer
@@ -599,14 +537,11 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	const maxBufferSize = constants.IOBufferSizePerTag
 
 	var buffer []byte
-	var dynamicBuffer []byte
 
 	if length > maxBufferSize {
-		if r.logger != nil {
-			r.logger.Debugf("dynamic allocation: length %d exceeds buffer size %d", length, maxBufferSize)
-		}
-		dynamicBuffer = make([]byte, length)
-		buffer = dynamicBuffer
+		// Use buffer pool for large I/Os to avoid hot-path allocations
+		buffer = GetBuffer(length)
+		defer PutBuffer(buffer)
 	} else {
 		buffer = (*[constants.IOBufferSizePerTag]byte)(bufPtr)[:length:length]
 	}
@@ -648,34 +583,17 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	// Submit COMMIT_AND_FETCH_REQ with result
-	if r.logger != nil {
-		r.logger.Debugf("calling submitCommitAndFetch: tag=%d, err=%v", tag, err)
-	}
-	submitErr := r.submitCommitAndFetch(tag, err, desc)
-	if r.logger != nil {
-		r.logger.Debugf("submitCommitAndFetch completed: err=%v", submitErr)
-	}
-	return submitErr
+	return r.submitCommitAndFetch(tag, err, desc)
 }
 
-// submitCommitAndFetch submits COMMIT_AND_FETCH_REQ with proper state tracking
+// submitCommitAndFetch prepares COMMIT_AND_FETCH_REQ with proper state tracking.
+// Note: This only prepares the SQE - caller must call FlushSubmissions() to submit.
 func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
-	// Tag mutex is already held by caller to prevent deadlock
-	if r.logger != nil {
-		r.logger.Debugf("submitCommitAndFetch: starting for tag=%d", tag)
-	}
-
 	// Calculate result: bytes processed for success, negative errno for error
 	// Always set result = nr_sectors << 9 (nr_sectors * 512) as per expert guidance
 	result := int32(desc.NrSectors) << 9 // Success: return bytes processed
 	if ioErr != nil {
 		result = -5 // -EIO
-		if r.logger != nil {
-			r.logger.Printf("Queue %d: I/O error for tag %d: %v", r.queueID, tag, ioErr)
-		}
-	}
-	if r.logger != nil {
-		r.logger.Debugf("submitCommitAndFetch: calculated result=%d", result)
 	}
 
 	// Only submit if we're in Owned state
@@ -697,19 +615,16 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	userData := udOpCommit | (uint64(r.queueID) << 16) | uint64(tag)
 	// Use the IOCTL-encoded command
 	cmd := uapi.UblkIOCmd(uapi.UBLK_IO_COMMIT_AND_FETCH_REQ) // This creates UBLK_U_IO_COMMIT_AND_FETCH_REQ
-	_, err := r.ring.SubmitIOCmd(cmd, ioCmd, userData)
+
+	// Prepare SQE without submitting - enables batching multiple completions
+	// into a single io_uring_enter syscall
+	err := r.ring.PrepareIOCmd(cmd, ioCmd, userData)
 	if err != nil {
-		return fmt.Errorf("COMMIT_AND_FETCH_REQ failed: %w", err)
+		return fmt.Errorf("COMMIT_AND_FETCH_REQ prepare failed: %w", err)
 	}
 
-	// Update state: COMMIT_AND_FETCH_REQ is now in flight
+	// Update state: COMMIT_AND_FETCH_REQ is now prepared (will be in flight after flush)
 	r.tagStates[tag] = TagStateInFlightCommit
-
-	if r.logger != nil {
-		r.logger.Debugf("queue %d: COMMIT_AND_FETCH_REQ submitted for tag %d with result=%d bytes",
-			r.queueID, tag, result)
-	}
-
 	return nil
 }
 
