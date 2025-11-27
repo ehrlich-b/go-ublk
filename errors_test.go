@@ -18,7 +18,8 @@ func TestStructuredError(t *testing.T) {
 		t.Errorf("Expected Code=ErrCodeInvalidParameters, got %s", err.Code)
 	}
 
-	expected := "ublk: invalid queue depth (op=CREATE_DEV, queue=0)"
+	// Queue defaults to NoQueue (-1), so queue is not shown in error message
+	expected := "ublk: invalid queue depth (op=CREATE_DEV)"
 	if err.Error() != expected {
 		t.Errorf("Expected error message %q, got %q", expected, err.Error())
 	}

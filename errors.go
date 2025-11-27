@@ -109,9 +109,10 @@ var (
 // NewError creates a new structured error
 func NewError(op string, code UblkErrorCode, msg string) *Error {
 	return &Error{
-		Op:   op,
-		Code: code,
-		Msg:  msg,
+		Op:    op,
+		Code:  code,
+		Msg:   msg,
+		Queue: NoQueue, // Default to NoQueue (-1) since no specific queue
 	}
 }
 
@@ -144,6 +145,7 @@ func WrapError(op string, inner error) *Error {
 			Errno: errno,
 			Msg:   errno.Error(),
 			Inner: inner,
+			Queue: NoQueue,
 		}
 	}
 
@@ -152,6 +154,7 @@ func WrapError(op string, inner error) *Error {
 		Code:  code,
 		Msg:   inner.Error(),
 		Inner: inner,
+		Queue: NoQueue,
 	}
 }
 

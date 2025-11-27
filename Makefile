@@ -270,6 +270,81 @@ vm-simple-e2e-racedetect:
 	@$(MAKE) RACE=1 vm-simple-e2e
 
 #==============================================================================
+# VM Kernel Management
+#==============================================================================
+
+.PHONY: vm-kernel vm-kernel-list vm-kernel-install vm-kernel-switch
+
+# Show current kernel
+vm-kernel: vm-check
+	@$(VM_SSH) "uname -r"
+
+# List available and installed kernels
+vm-kernel-list: vm-check
+	@echo "=== Installed kernels ==="
+	@$(VM_SSH) "dpkg -l | grep linux-image | grep -E '^ii' | awk '{print \$$2, \$$3}'"
+	@echo ""
+	@echo "=== Available 6.8 kernels ==="
+	@$(VM_SSH) "apt-cache search linux-image-6.8 | grep generic | grep -v unsigned | sort -V | tail -5"
+
+# Install a specific kernel: make vm-kernel-install VER=6.8.0-31
+vm-kernel-install: vm-check
+	@if [ -z "$(VER)" ]; then \
+		echo "Usage: make vm-kernel-install VER=6.8.0-31"; \
+		exit 1; \
+	fi
+	@echo "Installing kernel $(VER)..."
+	@$(VM_SSH) "sudo apt-get update && sudo apt-get install -y linux-image-$(VER)-generic linux-modules-$(VER)-generic"
+
+# Switch to a kernel and reboot: make vm-kernel-switch VER=6.8.0-31
+vm-kernel-switch: vm-check
+	@if [ -z "$(VER)" ]; then \
+		echo "Usage: make vm-kernel-switch VER=6.8.0-31"; \
+		exit 1; \
+	fi
+	@echo "Setting default kernel to $(VER) and rebooting..."
+	@$(VM_SSH) "sudo grub-set-default 'Advanced options for Ubuntu>Ubuntu, with Linux $(VER)-generic' && sudo update-grub"
+	@$(VM_SSH) "sudo reboot" || true
+	@echo "Waiting for VM to reboot..."
+	@sleep 10
+	@for i in $$(seq 1 30); do \
+		if $(VM_SSH) 'uname -r' 2>/dev/null; then break; fi; \
+		sleep 2; \
+		echo "  ($$i/30)..."; \
+	done
+
+# Quick downgrade to 6.8 (oldest available on 24.04)
+vm-kernel-6.8: vm-check
+	@echo "Installing and switching to kernel 6.8.0-31..."
+	@$(VM_SSH) "sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-6.8.0-31-generic linux-modules-6.8.0-31-generic linux-modules-extra-6.8.0-31-generic" || true
+	@$(VM_SSH) "sudo grub-set-default 'Advanced options for Ubuntu>Ubuntu, with Linux 6.8.0-31-generic' && sudo update-grub"
+	@$(VM_SSH) "sudo reboot" || true
+	@echo "Waiting for VM to reboot..."
+	@sleep 10
+	@for i in $$(seq 1 30); do \
+		if $(VM_SSH) 'uname -r' 2>/dev/null; then break; fi; \
+		sleep 2; \
+		echo "  ($$i/30)..."; \
+	done
+	@$(VM_SSH) "sudo modprobe ublk_drv"
+	@echo "Done. Kernel: $$($(VM_SSH) 'uname -r')"
+
+# Switch back to latest kernel (6.11)
+vm-kernel-latest: vm-check
+	@echo "Switching to latest kernel..."
+	@$(VM_SSH) "sudo grub-set-default 0 && sudo update-grub"
+	@$(VM_SSH) "sudo reboot" || true
+	@echo "Waiting for VM to reboot..."
+	@sleep 10
+	@for i in $$(seq 1 30); do \
+		if $(VM_SSH) 'uname -r' 2>/dev/null; then break; fi; \
+		sleep 2; \
+		echo "  ($$i/30)..."; \
+	done
+	@$(VM_SSH) "sudo modprobe ublk_drv"
+	@echo "Done. Kernel: $$($(VM_SSH) 'uname -r')"
+
+#==============================================================================
 # Help
 #==============================================================================
 
@@ -303,5 +378,11 @@ help:
 	@echo ""
 	@echo "Kernel:"
 	@echo "  make check-kernel   Check ublk kernel support"
+	@echo ""
+	@echo "VM Kernel Management:"
+	@echo "  make vm-kernel      Show current VM kernel"
+	@echo "  make vm-kernel-list List installed/available kernels"
+	@echo "  make vm-kernel-6.8  Downgrade to kernel 6.8 (minimum supported)"
+	@echo "  make vm-kernel-switch VER=6.8.0-31  Switch to specific kernel"
 
 FORCE:

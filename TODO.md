@@ -2,6 +2,64 @@
 
 ---
 
+## ✅ Code Quality Fixes (2025-11-26) - DONE
+
+### Hardcoded 512-byte sector size ✅
+**File:** `internal/queue/runner.go:537-539`
+- [x] Added `BlockSize` field to `queue.Config`
+- [x] Runner now uses `r.blockSize` instead of hardcoded 512
+- [x] `backend.go` passes `params.LogicalBlockSize` to runners
+
+### unmarshalCtrlDevInfo offset inconsistency ✅
+**File:** `internal/uapi/marshal.go:281-291`
+- [x] OwnerUID/GID now read when `len >= 48` (correct offset in 64-byte struct)
+
+### NewError doesn't set Queue to NoQueue ✅
+**File:** `errors.go:110-117`
+- [x] `NewError()` now initializes `Queue: NoQueue`
+- [x] `WrapError()` also initializes `Queue: NoQueue`
+- [x] Updated test expectations
+
+### Start() doesn't share char device fd ✅
+**File:** `backend.go:410-460`
+- [x] `Start()` now opens char device once and shares via `CharFd`
+- [x] Matches `CreateAndServe()` pattern
+
+---
+
+## ✅ Kernel Support - CONFIRMED 6.8+
+
+**Minimum supported kernel: 6.8** (Ubuntu 24.04 LTS base kernel)
+
+**Tested configurations:**
+| Kernel | Distro | Status |
+|--------|--------|--------|
+| 6.8.0-31 | Ubuntu 24.04 | ✅ Verified |
+| 6.11.0-24 | Ubuntu 24.04 HWE | ✅ Verified |
+
+**Kernel management commands:**
+```bash
+make vm-kernel          # Show current kernel
+make vm-kernel-list     # List available kernels
+make vm-kernel-6.8      # Downgrade to 6.8 (minimum)
+make vm-kernel-latest   # Switch to latest kernel
+```
+
+**Technical requirements:**
+| Feature | Minimum | Notes |
+|---------|---------|-------|
+| ublk driver | 6.1 | When ublk was merged |
+| IORING_OP_URING_CMD | 6.0 | Opcode 46 |
+| SQE128/CQE32 | 5.19 | Required for URING_CMD |
+| IOCTL encoding | 6.8+ | Required (UBLK_F_CMD_IOCTL_ENCODE) |
+
+**Not implemented (low priority):**
+- NEED_GET_DATA two-phase write path
+- Runtime kernel version detection
+- Graceful fallbacks for older kernels
+
+---
+
 ## ✅ PERFORMANCE STATUS
 
 **Current Results (2025-11-26 with 4 queues, depth=64, batched submissions):**

@@ -48,6 +48,7 @@ type Runner struct {
 	deviceID     uint32
 	queueID      uint16
 	depth        int
+	blockSize    int // Logical block size in bytes
 	backend      interfaces.Backend
 	charDeviceFd int
 	ring         uring.Ring
@@ -76,6 +77,7 @@ type Config struct {
 	DevID       uint32
 	QueueID     uint16
 	Depth       int
+	BlockSize   int                 // Logical block size in bytes (default: 512)
 	Backend     interfaces.Backend
 	Logger      interfaces.Logger
 	Observer    interfaces.Observer // Metrics observer (may be nil)
@@ -169,10 +171,17 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	// Default block size to 512 if not specified
+	blockSize := config.BlockSize
+	if blockSize <= 0 {
+		blockSize = 512
+	}
+
 	runner := &Runner{
 		deviceID:     config.DevID,
 		queueID:      config.QueueID,
 		depth:        config.Depth,
+		blockSize:    blockSize,
 		backend:      config.Backend,
 		charDeviceFd: fd,
 		ring:         ring,
@@ -525,9 +534,9 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	}
 
 	// Extract I/O parameters from descriptor
-	op := desc.GetOp()               // Use the provided method to get operation
-	offset := desc.StartSector * 512 // Convert sectors to bytes (assuming 512-byte sectors)
-	length := desc.NrSectors * 512   // Convert sectors to bytes
+	op := desc.GetOp()                                 // Use the provided method to get operation
+	offset := desc.StartSector * uint64(r.blockSize)   // Convert sectors to bytes
+	length := uint32(desc.NrSectors) * uint32(r.blockSize) // Convert sectors to bytes
 
 	// Calculate buffer pointer for this tag
 	bufOffset := int(tag) * constants.IOBufferSizePerTag // 64KB per buffer
@@ -683,10 +692,17 @@ func mmapQueues(fd int, queueID uint16, depth int) (unsafe.Pointer, unsafe.Point
 func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
 
+	// Default block size to 512 if not specified
+	blockSize := config.BlockSize
+	if blockSize <= 0 {
+		blockSize = 512
+	}
+
 	return &Runner{
 		deviceID:     config.DevID,
 		queueID:      config.QueueID,
 		depth:        config.Depth,
+		blockSize:    blockSize,
 		backend:      config.Backend,
 		charDeviceFd: -1,  // No real device
 		ring:         nil, // No real ring

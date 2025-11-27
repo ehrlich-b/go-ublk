@@ -278,17 +278,16 @@ func unmarshalCtrlDevInfo(data []byte, info *UblksrvCtrlDevInfo) error {
 	info.Flags = binary.LittleEndian.Uint64(data[24:32])
 	info.UblksrvFlags = binary.LittleEndian.Uint64(data[32:40])
 
-	// The 64-byte layout ends here at reserved[2].
+	// OwnerUID/GID are at bytes 40-48 in the 64-byte struct
+	if len(data) >= 48 {
+		info.OwnerUID = binary.LittleEndian.Uint32(data[40:44])
+		info.OwnerGID = binary.LittleEndian.Uint32(data[44:48])
+	}
+
+	// Reserved fields at bytes 48-64
 	if len(data) >= 64 {
 		info.Reserved1 = binary.LittleEndian.Uint64(data[48:56])
 		info.Reserved2 = binary.LittleEndian.Uint64(data[56:64])
-	}
-
-	// Some kernels include owner uid/gid in a longer (80-byte) layout.
-	if len(data) >= 80 {
-		info.OwnerUID = binary.LittleEndian.Uint32(data[40:44])
-		info.OwnerGID = binary.LittleEndian.Uint32(data[44:48])
-		// bytes 64-80 may be padding
 	}
 
 	return nil

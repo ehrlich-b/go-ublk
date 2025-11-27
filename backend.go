@@ -243,6 +243,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			DevID:       deviceID,
 			QueueID:     uint16(i),
 			Depth:       params.QueueDepth,
+			BlockSize:   params.LogicalBlockSize,
 			Backend:     params.Backend,
 			Logger:      options.Logger,
 			Observer:    observer,
@@ -408,6 +409,27 @@ func (d *Device) Start(ctx context.Context) error {
 
 	d.ctx, d.cancel = context.WithCancel(ctx)
 
+	// Open character device once (kernel only allows single open)
+	// Share the fd among all queues (each queue dups it)
+	logger := logging.Default()
+	charPath := fmt.Sprintf("/dev/ublkc%d", d.ID)
+	charDeviceFd := -1
+	for i := 0; i < constants.CharDeviceOpenRetries; i++ {
+		var err error
+		charDeviceFd, err = syscall.Open(charPath, syscall.O_RDWR, 0)
+		if err == nil {
+			logger.Info("opened char device for multi-queue", "fd", charDeviceFd, "path", charPath)
+			break
+		}
+		if err != syscall.ENOENT {
+			return fmt.Errorf("failed to open %s: %v", charPath, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if charDeviceFd < 0 {
+		return fmt.Errorf("character device did not appear: %s", charPath)
+	}
+
 	// Initialize queue runners
 	d.runners = make([]*queue.Runner, d.queues)
 	for i := 0; i < d.queues; i++ {
@@ -415,10 +437,12 @@ func (d *Device) Start(ctx context.Context) error {
 			DevID:       d.ID,
 			QueueID:     uint16(i),
 			Depth:       d.depth,
+			BlockSize:   d.blockSize,
 			Backend:     d.Backend,
 			Logger:      d.options.Logger,
 			Observer:    d.observer,
 			CPUAffinity: d.params.CPUAffinity,
+			CharFd:      charDeviceFd, // Share the fd (runner will dup it)
 		}
 
 		runner, err := queue.NewRunner(d.ctx, runnerConfig)
@@ -479,7 +503,6 @@ func (d *Device) Start(ctx context.Context) error {
 	d.started = true
 
 	// Small delay to ensure kernel has processed FETCH_REQs
-	logger := logging.Default()
 	time.Sleep(1 * time.Millisecond)
 	logger.Info("device started")
 
