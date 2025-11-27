@@ -6,15 +6,17 @@
 - `TODO.md` - Production roadmap
 - `STYLE.md` - Code style and visual consistency rules
 - `CLAUDE.md` - This file
+- `docs/INTERNALS.md` - io_uring and ublk struct reference
 
 ## Project Status: Stable Working Prototype
 
-go-ublk is a pure Go implementation of Linux ublk (userspace block device).
+go-ublk is a pure Go, dependency-free implementation of Linux ublk (userspace block device).
 
 **Verified working:**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
 - Block I/O: Read, Write, Flush, Discard
-- Performance: ~500k IOPS, 1.6-2.0 GB/s throughput
+- Multi-queue: 4 queues with batched io_uring submissions
+- Performance: ~100k IOPS (85-91% of kernel loop device)
 - Stability: Passes 10x stress test cycles
 
 ## Build and Test Commands
@@ -45,19 +47,19 @@ go-ublk/
 ├── *.go              # Public API (ublk package)
 ├── backend/          # Backend implementations (mem.go)
 ├── examples/ublk-mem/ # Memory-backed device example
-├── docs/             # Documentation (REVIEW.md, etc.)
-├── scripts/          # Shell scripts (vm-ssh.sh, etc.)
+├── docs/             # Documentation
+├── scripts/          # VM test scripts
 └── internal/
     ├── ctrl/         # Control plane (device lifecycle)
-    ├── queue/        # Data plane (I/O processing, runner.go)
+    ├── queue/        # Data plane (I/O processing)
     ├── uring/        # io_uring implementation
     └── uapi/         # Kernel UAPI structs
 ```
 
 **Key design decisions:**
-- **Pure Go** - no cgo, builds with `CGO_ENABLED=0`
-- io_uring stays internal (see TODO.md section 1.1 for rationale)
-- Single queue currently, multi-queue planned
+- **Pure Go** - no cgo, no external dependencies, builds with `CGO_ENABLED=0`
+- io_uring stays internal (tightly coupled to ublk's URING_CMD requirements)
+- Multi-queue with sharded memory backend for parallelism
 
 ## Critical Files
 
@@ -77,13 +79,9 @@ go-ublk/
 
 ## Technical Constraints
 
-- Linux kernel >= 6.1 (ublk was introduced)
+- Linux kernel >= 6.8 (IOCTL encoding required)
 - io_uring with URING_CMD support required
 - Device creation requires root or CAP_SYS_ADMIN
-
-## Known Issues
-
-**Slow initialization:** Device takes ~9 seconds to initialize (queue_depth * 250ms). This is a setup-time issue only, not a runtime issue. Low priority to fix.
 
 ## Security Rules
 
@@ -103,4 +101,4 @@ scripts/vm-ssh.sh               # Interactive shell
 
 - Linux kernel docs: docs.kernel.org/block/ublk.html
 - Kernel UAPI: include/uapi/linux/ublk_cmd.h
-- io_uring man pages for URING_CMD
+- Project internals: docs/INTERNALS.md
