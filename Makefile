@@ -177,7 +177,7 @@ check-module:
 # VM Testing (requires VM_HOST, VM_USER configured)
 #==============================================================================
 
-.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz
 
 # Check VM configuration before running VM targets
 vm-check:
@@ -250,6 +250,12 @@ vm-stress: ublk-mem
 	done
 	@echo "All 10 iterations passed"
 
+vm-fuzz: vm-copy
+	@echo "Running comprehensive fuzz test on VM..."
+	@$(VM_SCP) scripts/vm-fuzz.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-fuzz.sh && sudo ./vm-fuzz.sh"
+	@echo "VM fuzz test completed"
+
 # Alias for backwards compatibility
 test-vm: vm-simple-e2e
 
@@ -291,6 +297,7 @@ help:
 	@echo "  make vm-simple-e2e  Simple I/O test"
 	@echo "  make vm-e2e         Full e2e test"
 	@echo "  make vm-benchmark   Performance benchmark"
+	@echo "  make vm-fuzz        Comprehensive fuzz test (30s/test)"
 	@echo "  make vm-stress      10x stress test"
 	@echo "  make vm-reset       Hard reset VM"
 	@echo ""
