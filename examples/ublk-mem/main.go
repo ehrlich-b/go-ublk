@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/ehrlich-b/go-ublk"
-	"github.com/ehrlich-b/go-ublk/backend"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 )
 
@@ -52,7 +51,7 @@ func main() {
 	}
 
 	// Create memory backend
-	memBackend := backend.NewMemory(size)
+	memBackend := newMemoryBackend(size)
 	defer memBackend.Close()
 
 	// Create device parameters

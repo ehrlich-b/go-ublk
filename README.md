@@ -48,51 +48,48 @@ sudo umount /mnt
 # Stop with Ctrl+C
 ```
 
-## Library Usage
+## API
+
+Implement the `Backend` interface and call `CreateAndServe`:
 
 ```go
 package main
 
 import (
     "context"
-    "log"
+    "os/signal"
+    "syscall"
 
     "github.com/ehrlich-b/go-ublk"
-    "github.com/ehrlich-b/go-ublk/backend"
 )
 
+// NullBackend discards writes and returns zeros on read
+type NullBackend struct{ size int64 }
+
+func (b *NullBackend) ReadAt(p []byte, off int64) (int, error) {
+    clear(p)
+    return len(p), nil
+}
+func (b *NullBackend) WriteAt(p []byte, off int64) (int, error) { return len(p), nil }
+func (b *NullBackend) Size() int64                              { return b.size }
+func (b *NullBackend) Flush() error                             { return nil }
+func (b *NullBackend) Close() error                             { return nil }
+
 func main() {
-    ctx := context.Background()
+    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
+    defer stop()
 
-    memBackend := backend.NewMemory(512 << 20) // 512MB
-    defer memBackend.Close()
+    backend := &NullBackend{size: 1 << 30} // 1GB
+    params := ublk.DefaultParams(backend)
 
-    params := ublk.DefaultParams(memBackend)
-    device, err := ublk.CreateAndServe(ctx, params, &ublk.Options{})
-    if err != nil {
-        log.Fatal(err)
-    }
+    device, _ := ublk.CreateAndServe(ctx, params, nil)
+    defer device.Close()
 
-    log.Printf("Device: %s", device.Info().BlockPath)
     <-ctx.Done()
 }
 ```
 
-## Implementing a Backend
-
-Only the `Backend` interface is required:
-
-```go
-type Backend interface {
-    ReadAt(p []byte, off int64) (n int, err error)
-    WriteAt(p []byte, off int64) (n int, err error)
-    Size() int64
-    Close() error
-    Flush() error
-}
-```
-
-See [examples/README.md](examples/README.md) for a complete walkthrough with a `/dev/null` implementation and optional interfaces.
+The `Backend` interface matches Go's `io.ReaderAt`/`io.WriterAt` plus `Size`, `Flush`, and `Close`.
 
 ## Testing
 
