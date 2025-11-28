@@ -7,6 +7,7 @@
 - `STYLE.md` - Code style and visual consistency rules
 - `CLAUDE.md` - This file
 - `docs/INTERNALS.md` - io_uring and ublk struct reference
+- `docs/VM_TESTING.md` - VM test setup and troubleshooting
 
 ## Project Status: Stable Working Prototype
 
@@ -44,16 +45,19 @@ make vm-stress          # 10x alternating e2e + benchmark
 
 ```
 go-ublk/
-├── *.go              # Public API (ublk package)
-├── backend/          # Backend implementations (mem.go)
+├── *.go               # Public API (ublk package)
 ├── examples/ublk-mem/ # Memory-backed device example
-├── docs/             # Documentation
-├── scripts/          # VM test scripts
+├── docs/              # Documentation
+├── scripts/           # VM test scripts
+├── test/              # Unit and integration tests
 └── internal/
-    ├── ctrl/         # Control plane (device lifecycle)
-    ├── queue/        # Data plane (I/O processing)
-    ├── uring/        # io_uring implementation
-    └── uapi/         # Kernel UAPI structs
+    ├── ctrl/          # Control plane (device lifecycle)
+    ├── queue/         # Data plane (I/O processing)
+    ├── uring/         # io_uring implementation
+    ├── uapi/          # Kernel UAPI structs
+    ├── interfaces/    # Internal interfaces (Backend)
+    ├── logging/       # Structured logger
+    └── constants/     # Shared constants
 ```
 
 **Key design decisions:**

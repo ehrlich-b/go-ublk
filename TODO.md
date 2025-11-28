@@ -1,277 +1,50 @@
 # TODO.md - Production Roadmap
 
----
-
-## ✅ Code Quality Fixes (2025-11-26) - DONE
-
-### Hardcoded 512-byte sector size ✅
-**File:** `internal/queue/runner.go:537-539`
-- [x] Added `BlockSize` field to `queue.Config`
-- [x] Runner now uses `r.blockSize` instead of hardcoded 512
-- [x] `backend.go` passes `params.LogicalBlockSize` to runners
-
-### unmarshalCtrlDevInfo offset inconsistency ✅
-**File:** `internal/uapi/marshal.go:281-291`
-- [x] OwnerUID/GID now read when `len >= 48` (correct offset in 64-byte struct)
-
-### NewError doesn't set Queue to NoQueue ✅
-**File:** `errors.go:110-117`
-- [x] `NewError()` now initializes `Queue: NoQueue`
-- [x] `WrapError()` also initializes `Queue: NoQueue`
-- [x] Updated test expectations
-
-### Start() doesn't share char device fd ✅
-**File:** `backend.go:410-460`
-- [x] `Start()` now opens char device once and shares via `CharFd`
-- [x] Matches `CreateAndServe()` pattern
-
----
-
-## ✅ Kernel Support - CONFIRMED 6.8+
-
-**Minimum supported kernel: 6.8** (Ubuntu 24.04 LTS base kernel)
-
-**Tested configurations:**
-| Kernel | Distro | Status |
-|--------|--------|--------|
-| 6.8.0-31 | Ubuntu 24.04 | ✅ Verified |
-| 6.11.0-24 | Ubuntu 24.04 HWE | ✅ Verified |
-
-**Kernel management commands:**
-```bash
-make vm-kernel          # Show current kernel
-make vm-kernel-list     # List available kernels
-make vm-kernel-6.8      # Downgrade to 6.8 (minimum)
-make vm-kernel-latest   # Switch to latest kernel
-```
-
-**Technical requirements:**
-| Feature | Minimum | Notes |
-|---------|---------|-------|
-| ublk driver | 6.1 | When ublk was merged |
-| IORING_OP_URING_CMD | 6.0 | Opcode 46 |
-| SQE128/CQE32 | 5.19 | Required for URING_CMD |
-| IOCTL encoding | 6.8+ | Required (UBLK_F_CMD_IOCTL_ENCODE) |
-
-**Not implemented (low priority):**
-- NEED_GET_DATA two-phase write path
-- Runtime kernel version detection
-- Graceful fallbacks for older kernels
-
----
-
-## ✅ PERFORMANCE STATUS
-
-**Current Results (2025-11-26 with 4 queues, depth=64, batched submissions):**
-| Workload | go-ublk | Loop (RAM) | % of Loop |
-|----------|---------|------------|-----------|
-| 4K Read (1 job, QD=64) | 85.5k IOPS / 334 MB/s | 220k IOPS / 860 MB/s | 39% |
-| 4K Read (4 jobs, QD=64) | 98.9k IOPS / 386 MB/s | 116k IOPS / 455 MB/s | 85% |
-| 4K Write (4 jobs, QD=64) | 90.1k IOPS / 352 MB/s | 98.6k IOPS / 385 MB/s | 91% |
-
-**Massive improvement from batched io_uring submissions (2025-11-26):**
-| Workload | Before | After | Improvement |
-|----------|--------|-------|-------------|
-| 4K Read (1 job) | 68k IOPS | 85.5k IOPS | 26% faster |
-| 4K Read (4 jobs) | 17k IOPS | 98.9k IOPS | **5.8x faster** |
-| 4K Write (4 jobs) | 9k IOPS | 90.1k IOPS | **10x faster** |
-
-Multi-queue now achieves 85-91% of kernel loop device performance (up from 9-17%).
-
-**Optimizations completed:**
-- [x] Pre-allocated SQE structs in io_uring (avoid 128-byte allocation per I/O)
-- [x] Pre-allocated result pool for CQE completions
-- [x] Pre-allocated UblksrvIOCmd structs per tag
-- [x] Removed hot path logging entirely (was causing mutex contention)
-- [x] Moved time.Now() behind observer nil check
-- [x] Increased default queue depth to 64 (configurable with --depth flag)
-- [x] Sharded memory backend (64KB shards for parallel access)
-- [x] Multi-queue support (4 queues by default)
-- [x] Buffer pool for >64KB allocations (700x faster than make)
-- [x] **Batched io_uring submissions** - PrepareIOCmd + FlushSubmissions pattern
-  - All completions in a batch prepare SQEs without syscalls
-  - Single io_uring_enter() call submits entire batch
-  - Reduced syscall overhead from 50%+ to negligible
-
-**Future optimization opportunities:**
-- Registered buffers for zero-copy I/O
-- io_uring SQPOLL for kernel-side polling
-
----
-
 ## Current Status: Stable Working Prototype
 
 go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 **What works:**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block device: /dev/ublkb0 appears and accepts I/O
-- Data integrity: Verified via MD5 across all I/O patterns
-- Multi-queue: 4 queues with sharded memory backend
-- Stability: Passes stress tests (10x alternating e2e + benchmark)
+- Block I/O: Read, Write, Flush, Discard
+- Multi-queue: 4 queues with batched io_uring submissions
+- Performance: ~100k IOPS (85-91% of kernel loop device)
+- Stability: Passes 10x stress test cycles
+
+**Minimum kernel:** 6.8+ (IOCTL encoding required)
 
 ---
 
-## Phase 0: Code Cleanup ✅ COMPLETED
+## Remaining Work
 
-### 0.1 Delete Dead Code ✅ DONE
-- [x] Deleted unused `giouring` build tag files
-- [x] Deleted unused logging domain methods (~100 lines)
-- [x] Deleted deprecated `StopAndDelete()` function - use `device.Close()` instead
-- [x] Removed hard-coded `useIoctl` field (always true, now always uses ioctl encoding)
-- [x] Fixed stub fallback to return errors instead of fake success
+### Performance Optimization
 
-### 0.2 Fix Bugs ✅ DONE
-- [x] Fixed `directUnmarshal` in marshal.go (already using reflect correctly)
-- [x] Fixed `waitLive` in backend.go (returns error on timeout)
-- [x] Fixed `charFd` initialization bug (now correctly initialized to -1)
-- [x] Fixed error string formatting (now joins all context parts with commas)
+**Memory:**
+- [ ] Registered buffers for zero-copy I/O
+- [ ] io_uring SQPOLL for kernel-side polling
+- [ ] Profile and optimize remaining hot paths
 
-### 0.3 Code Quality Improvements ✅ DONE
-- [x] Added `const NoQueue = -1` for error queue sentinel value
-- [x] Added `const CharDeviceOpenRetries = 50` for device open retry count
-- [x] Added runtime check for `numLatencyBuckets` consistency with `LatencyBuckets`
-- [x] Simplified interfaces to Backend, DiscardBackend, Logger
-- [x] DeviceParams duplication intentionally kept (blocked by circular imports)
-
-### 0.4 Environment Variable Hacks ✅ DONE
-- [x] Removed `UBLK_DEVINFO_LEN` env var hack
-- [x] `UBLK_CTRL_ENC` only in Makefile (not in Go code)
-
-### 0.5 Documentation ✅ DONE
-- [x] Documented all magic timing constants with WHY comments
-- [x] Hot-path logging moved to debug level
-- [x] All unit tests passing
-
----
-
-## Phase 1: Stabilization
-
-### 1.1 io_uring Architecture
-**Decision: Keep io_uring internal** (internal/uring)
-
-Rationale:
-- Pure Go implementation using `golang.org/x/sys/unix` syscalls
-- Memory barriers via `atomic.AddInt64` (LOCK XADD on x86-64)
-- Tightly coupled to ublk's URING_CMD requirements
-- Interface types are ublk-specific (UblksrvCtrlCmd, UblksrvIOCmd)
-
-The code is well-abstracted behind the `Ring` interface.
-
-### 1.2 Testing Infrastructure ✅ DONE
-- [x] Add `make test-unit` to CI/pre-commit (GitHub Actions in `.github/workflows/ci.yml`)
-- [x] Add race detector to VM tests: `make vm-e2e-racedetect` or `RACE=1 make vm-e2e`
-- [x] Document VM testing setup for contributors (`docs/VM_TESTING.md`)
-
----
-
-## Phase 2: API Polish
-
-### 2.1 Structured Error Handling ✅ DONE
-- [x] Create `Error` type with errno mapping
-- [x] Simplify to single error type (removed legacy `UblkError` string type)
-- [x] Support `errors.Is()` and `errors.As()` via sentinel errors
-
-### 2.2 Device Lifecycle API ✅ DONE
-Implemented staged lifecycle for better control:
-```go
-device, err := ublk.Create(params, options)  // validate, allocate
-err = device.Start(ctx)                       // start I/O processing
-device.Stop()                                 // stop I/O, keep device
-device.Close()                                // full cleanup
-```
-
-- [x] Implement `Create()` function for device creation without starting I/O
-- [x] Implement `Start()` method to begin I/O processing
-- [x] Implement `Stop()` method to stop I/O but keep device registered
-- [x] Implement `Close()` method for full cleanup
-- [x] Deprecate `StopAndDelete()` in favor of `Close()`
-- [x] Delete deprecated `StopAndDelete()` function - all code now uses `device.Close()`
-- [x] Add `DeviceStateClosed` state for fully closed devices
-- [x] Add unit tests for lifecycle state machine
-
-### 2.3 Observability ✅ DONE
-- [x] Wire up existing Metrics to I/O loop via Observer interface
-- [x] Expose metrics interface (Observer pattern, compatible with custom backends)
-- [x] Add latency histogram with P50, P99, P999 percentiles
-
----
-
-## Phase 3: Performance
-
-### 3.1 Multi-Queue Support ✅ DONE
-- [x] Add NumQueues parameter (auto-detects CPU count when 0)
-- [x] Per-queue goroutine with CPU affinity support
-- [x] `--queues` CLI flag for ublk-mem
-- [x] Multi-queue device initialization (all queues start, START_DEV completes)
-- [x] Multi-queue I/O handling (reads and writes working)
-- [x] Root cause analysis: backend mutex contention (2025-11-26)
-- [x] Fix: Implemented sharded memory backend (64KB shards)
-
-**Resolution:** Memory backend now uses sharded locking (64KB per shard).
-Concurrent I/O to different memory regions no longer contends on a single mutex.
-
-**Performance improvement (multi-queue with sharded backend vs old single-mutex):**
-- Write: 53k IOPS (+37% from 39k)
-- Read: 66k IOPS (+17% from 57k)
-
-**Remaining gap to 50% target (~100k IOPS) likely due to:**
-- Go runtime overhead (goroutine scheduling, GC pauses)
-- io_uring submission latency in userspace
-- Memory copy overhead (kernel ↔ userspace)
-- Context switches between kernel and userspace
-
-### 3.2 Memory Optimization
-- [x] Buffer pool to eliminate >64KB dynamic allocation on hot path
-  - Implemented size-bucketed sync.Pool (128KB, 256KB, 512KB, 1MB)
-  - 700-5,500x faster than raw allocation (41ns vs 29μs-272μs)
-  - Pool used automatically for I/O > 64KB in queue runner
-- [ ] Consider registered buffers for zero-copy
-- [ ] Profile and optimize hot paths
-
-### 3.3 Backend Improvements
+**Backends:**
 - [ ] Async backend interface for non-blocking I/O
 - [ ] File backend (backed by real file)
 - [ ] NBD backend (network block device passthrough)
 
----
+### Production Hardening
 
-## Phase 4: Production Hardening
-
-### 4.1 Safety & Robustness
+**Safety:**
 - [ ] Fuzzing for UAPI marshal/unmarshal
 - [ ] Invariant assertions around unsafe operations
 - [ ] Graceful handling of kernel version differences
-- [ ] **Kernel compatibility testing matrix**
-  - [ ] Define minimum supported kernel version (6.1? 6.6?)
-  - [ ] Test on: Ubuntu 22.04 LTS (5.15), 24.04 LTS (6.8)
-  - [ ] Test on: Fedora 39 (6.6), Fedora 40 (6.8)
-  - [ ] Test on: Arch (latest stable), Debian stable
-  - [ ] Document ublk feature availability by kernel version
-  - [ ] CI matrix testing across kernel versions (GitHub Actions or similar)
 
-### 4.2 Feature Completeness
-- [ ] NEED_GET_DATA path for kernel compatibility
-- [ ] Discard/TRIM support
+**Feature Completeness:**
+- [ ] NEED_GET_DATA path for older kernel compatibility
+- [ ] Discard/TRIM support verification
 - [ ] Flush/FUA batching
 
-### 4.3 Documentation
+**Documentation:**
 - [ ] Architecture overview
 - [ ] Backend implementation guide
 - [ ] Performance tuning guide
-
----
-
-## Known Issues
-
-### Slow Device Initialization
-**Symptom:** Device takes `queue_depth * 250ms` to initialize (9+ seconds for QD=32)
-
-**Cause:** Each FETCH_REQ takes ~250ms to complete during setup.
-
-**Workaround:** Currently sleep during device creation. Not a runtime issue.
-
-**Status:** Low priority - doesn't affect operation once device is running.
 
 ---
 
@@ -291,6 +64,40 @@ make vm-stress         # 10x alternating e2e + benchmark
 
 ---
 
+## Known Issues
+
+### Slow Device Initialization
+**Symptom:** Device takes `queue_depth * 250ms` to initialize (9+ seconds for QD=32)
+
+**Cause:** Each FETCH_REQ takes ~250ms to complete during setup.
+
+**Status:** Low priority - doesn't affect operation once device is running.
+
+---
+
+## Completed Work (Summary)
+
+### Phase 0-2: Foundation (Complete)
+- Code cleanup: Removed dead code, fixed bugs, improved constants
+- API polish: Structured errors with `errors.Is()`/`errors.As()`, staged device lifecycle
+- Observability: Metrics interface with latency histograms (P50/P99/P999)
+- Testing infrastructure: Unit tests, VM testing, race detector support
+
+### Phase 3: Performance (Mostly Complete)
+- Multi-queue with sharded memory backend (64KB shards)
+- Buffer pool for large allocations (700x faster than make)
+- Batched io_uring submissions (5-10x improvement for parallel workloads)
+- Pre-allocated structs on hot path
+
+**Performance results (2025-11-26):**
+| Workload | go-ublk | Loop (RAM) | % of Loop |
+|----------|---------|------------|-----------|
+| 4K Read (1 job, QD=64) | 85.5k IOPS | 220k IOPS | 39% |
+| 4K Read (4 jobs, QD=64) | 98.9k IOPS | 116k IOPS | 85% |
+| 4K Write (4 jobs, QD=64) | 90.1k IOPS | 98.6k IOPS | 91% |
+
+---
+
 ## Historical Context
 
 Major bugs fixed during development:
@@ -300,5 +107,3 @@ Major bugs fixed during development:
 4. **Logging deadlock** - Thread-locked goroutines can't block on I/O
 5. **EINTR handling** - Retry io_uring_enter on signal interruption
 6. **Memory barriers** - Sfence before SQ tail update for SQE visibility
-
-All core functionality now works reliably.
