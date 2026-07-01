@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ehrlich-b/go-ublk"
+	"github.com/ehrlich-b/go-ublk/internal/ctrl"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 )
 
@@ -27,8 +28,18 @@ func main() {
 		queueDepth = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
 		cpuprofile = flag.String("cpuprofile", "", "Write CPU profile to file")
 		memprofile = flag.String("memprofile", "", "Write memory profile to file")
+		delSpec    = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all' to reap every registered device")
 	)
 	flag.Parse()
+
+	// Cleanup mode: reap devices left registered by an ungracefully-killed
+	// daemon (which pin the ublk_drv module), then exit without serving.
+	if *delSpec != "" {
+		if err := reapDevices(*delSpec); err != nil {
+			log.Fatalf("reap failed: %v", err)
+		}
+		return
+	}
 
 	// Start CPU profiling if requested
 	if *cpuprofile != "" {
@@ -201,6 +212,47 @@ func main() {
 	}
 
 	os.Exit(0)
+}
+
+// reapDevices deletes stuck ublk devices left registered in the kernel by a
+// daemon that was killed ungracefully (e.g. SIGKILL). Such devices have no
+// server, cannot service I/O, and pin the ublk_drv module so it can't be
+// unloaded. spec is a single device ID or "all" to scan every possible ID.
+// Best effort: STOP is attempted before DEL and its error is ignored, since a
+// serverless device may already be quiesced.
+func reapDevices(spec string) error {
+	c, err := ctrl.NewController()
+	if err != nil {
+		return fmt.Errorf("open control device: %w", err)
+	}
+	defer c.Close()
+
+	reap := func(id uint32) {
+		// GET_DEV_INFO probes existence; skip IDs with no registered device.
+		if _, err := c.GetDeviceInfo(id); err != nil {
+			return
+		}
+		_ = c.StopDevice(id) // may already be stopped; ignore
+		if err := c.DeleteDevice(id); err != nil {
+			fmt.Printf("device %d: delete failed: %v\n", id, err)
+		} else {
+			fmt.Printf("device %d: deleted\n", id)
+		}
+	}
+
+	if spec == "all" {
+		for id := uint32(0); id < 64; id++ {
+			reap(id)
+		}
+		return nil
+	}
+
+	id, err := strconv.Atoi(spec)
+	if err != nil || id < 0 {
+		return fmt.Errorf("invalid -del value %q (want a device ID or 'all')", spec)
+	}
+	reap(uint32(id))
+	return nil
 }
 
 // parseSize parses a size string like "64M", "1G", "512K"
