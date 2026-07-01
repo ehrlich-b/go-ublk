@@ -677,15 +677,25 @@ func mmapQueues(fd int, queueID uint16, depth int) (unsafe.Pointer, unsafe.Point
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
 	bufSize := depth * constants.IOBufferSizePerTag // 64KB per request buffer
 
-	// Page-round the mmap size
+	// Page-round the mmap length (we only read `depth` descriptors per queue).
 	pageSize := os.Getpagesize()
 	if rem := descSize % pageSize; rem != 0 {
 		descSize += pageSize - rem
 	}
 
-	// Calculate per-queue offset for mmap
-	// Formula: offset = queueID * round_up(queue_depth * sizeof(desc), PAGE_SIZE)
-	mmapOffset := uintptr(queueID) * uintptr(descSize)
+	// Per-queue mmap offset MUST match the kernel's fixed stride, not our depth.
+	// ublk_ch_mmap derives the queue from the offset as q_id = phys_off / max_sz,
+	// where max_sz = round_up(UBLK_MAX_QUEUE_DEPTH * sizeof(ublksrv_io_desc),
+	// PAGE_SIZE) — a FIXED stride keyed on UBLK_MAX_QUEUE_DEPTH (4096), NOT the
+	// actual queue depth. Using descSize (actual depth, typically one page) here
+	// floors every queue's offset to q_id 0, so queues >= 1 alias queue 0's
+	// descriptor buffer. That aliasing is the root cause of multi-queue data
+	// corruption and unkillable D-state I/O hangs.
+	descStride := uapi.UBLK_MAX_QUEUE_DEPTH * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
+	if rem := descStride % pageSize; rem != 0 {
+		descStride += pageSize - rem
+	}
+	mmapOffset := uintptr(uapi.UBLKSRV_CMD_BUF_OFFSET) + uintptr(queueID)*uintptr(descStride)
 
 	// Map descriptor array as READ-ONLY from userspace perspective
 	// The kernel writes to descriptors internally, userspace only reads
