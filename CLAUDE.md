@@ -9,20 +9,23 @@
 - `docs/INTERNALS.md` - io_uring and ublk struct reference
 - `docs/VM_TESTING.md` - VM test setup and troubleshooting
 
-## Project Status: Prototype — NOT production-ready
+## Project Status: Prototype — approaching usable, not yet production-hardened
 
 go-ublk is a pure Go, dependency-free implementation of Linux ublk (userspace block device).
-See **`TODO.md` → Critical Bugs** before relying on any of this.
+See **`TODO.md` → Critical Bugs** for the full state before relying on this.
 
-**Works (single-queue):**
+**Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard (`--queues=1`)
+- Block I/O: Read, Write, Flush, Discard
+- **Multi-queue is now correct** (arm64): the descriptor-mmap-offset bug that caused data
+  corruption + unkillable D-state hangs is fixed (TODO Critical Bugs #1/#2). Verified
+  Q=1/2/4/8, O_DIRECT, concurrent — 0 hangs / 0 mismatches. Honest O_DIRECT perf is now
+  ~1.37M IOPS 4K randread / 816k randwrite (RAM backend, ublk-path ceiling).
+- `ublk-mem --del=all` reaps stuck/zombie devices; failed startup tears down cleanly.
 
-**Known broken:**
-- **Multi-queue (≥2) loses I/O under concurrent load** → data corruption and unkillable
-  D-state hangs. This is the whole "~100k IOPS multi-queue" performance story, and it is
-  not currently trustworthy. Prior "passes 10x stress" used buffered I/O that masks it.
-- Crash / power-fail consistency: untested.
+**Still open before prod:**
+- x86_64 confirmation (validated on arm64; fix is arch-independent by construction).
+- Crash / power-fail consistency: untested — the big remaining BCDR gap.
 
 ## Build and Test Commands
 

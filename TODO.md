@@ -1,36 +1,44 @@
 # TODO.md - Production Roadmap
 
-## Current Status: Prototype — NOT production-ready
+## Current Status: Prototype — approaching usable, not yet production-hardened
 
 go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
-**Works (single-queue):**
+**Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard (single queue)
+- Block I/O: Read, Write, Flush, Discard
+- **Multi-queue (≥2) now correct** on arm64: the descriptor-mmap-offset bug that caused
+  data corruption and D-state hangs is fixed (Critical Bugs #1/#2). Verified Q=1/2/4/8,
+  O_DIRECT, concurrent read-after-write — 0 hangs / 0 mismatches across many runs.
+- Failed startup and killed daemons no longer wedge the host: startup tears down cleanly
+  (#7) and `ublk-mem --del=all` reaps zombie devices.
 
-**Broken / unverified:**
-- **Multi-queue data path loses I/O under concurrent load** (see Critical Bugs below).
-  The "~100k IOPS / passes 10x stress" numbers were buffered benchmarks that mask it.
+**Still unverified / open (see roadmap):**
+- x86_64 confirmation of the multi-queue fix (validated on arm64 so far; fix is arch-independent).
 - Crash / power-fail consistency: untested (matters a lot for BCDR).
+- Honest O_DIRECT performance numbers (old "~100k IOPS" figures were buffered benchmarks).
 
-**Minimum kernel:** 6.8+ (IOCTL encoding required). Bugs below reproduced on arm64, kernel 6.17.
+**Minimum kernel:** 6.8+ (IOCTL encoding required). Fixes verified on arm64, kernel 6.17.
 
 ---
 
 ## Critical Bugs (found 2026-06-30)
 
-1. **[OPEN — CRITICAL] Multi-queue completion loss → unkillable I/O hang.**
-   With ≥2 queues under concurrent load, I/O completions are dropped: the block request
-   never finishes and the issuing process wedges in **D-state (survives SIGKILL)**. Rate
-   scales with queue count — 1q reliable, 2q ~50% (7/14), 4q ~70% (10/14). All queue
-   goroutines stay alive (no deadlock/crash); the completion just never returns.
-   Root area: hand-rolled io_uring submit/complete accounting in `internal/uring/minimal.go`.
-   Exact dropped-completion line not yet pinned. **Workaround: `--queues=1`.** Disqualifying
-   for prod until fixed. (`vm-simple-e2e.sh` already special-cases "dd in D state" — this is old.)
+1. **[FIXED — commit 9eb3b17] Multi-queue completion loss → unkillable I/O hang.**
+   Root cause was NOT dropped io_uring completions: `mmapQueues` computed the per-queue
+   descriptor mmap offset as `queueID * round_up(queue_depth*24, PAGE)`, but the kernel
+   (`ublk_ch_mmap`) derives the queue as `phys_off / round_up(UBLK_MAX_QUEUE_DEPTH*24, PAGE)`
+   — a FIXED stride keyed on `UBLK_MAX_QUEUE_DEPTH` (4096), independent of the actual depth.
+   For any realistic depth that offset floored to q_id 0, so every queue ≥1 aliased queue 0's
+   descriptor buffer → wrong descriptors → state-machine violations that killed the queue's
+   ioLoop → its requests wedged in D-state. Rate scaled as (N−1)/N (2q ~50%, 4q ~70%),
+   exactly the fraction of I/O landing on a non-zero queue. Fixed by using the kernel's fixed
+   stride. Verified: Q=1/2/4/8, O_DIRECT, concurrent, on arm64 — 0 hangs across many runs.
 
-2. **[OPEN — CRITICAL] Intermittent data corruption, multi-queue.**
-   Read-after-write occasionally returns wrong bytes (~1/10, buffered). Same root area as #1;
-   page cache hides it in most buffered workloads.
+2. **[FIXED — commit 9eb3b17] Intermittent data corruption, multi-queue.**
+   Same root cause as #1 (descriptor aliasing): queues ≥1 read queue 0's descriptors and
+   did I/O to the wrong offsets. Fixed by the same change. Verified byte-exact O_DIRECT
+   read-after-write across all queues (taskset-pinned) — 0 mismatches across many runs.
 
 3. **[FIXED — commit b3846fe] DEL_DEV teardown hang.**
    Four stacked bugs: `runner.Close()` never joined the ioLoop goroutine; `Device.Close()`
@@ -38,12 +46,35 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
    was never closed; the io_uring fixed-file registration wasn't unregistered before close.
    DEL_DEV blocked forever, masked by the example's 1s watchdog + `os.Exit(0)`.
 
-4. **[OPEN] Verbose logging stalls I/O under load.**
+4. **[OPEN — low, debug-only] Verbose logging stalls I/O under load.**
    `logging.Logger` holds one mutex across a blocking `write()`; `-v` + multi-queue starves
-   the I/O goroutines (regression of historical bug #4).
+   the I/O goroutines. But `log()` filters by level BEFORE taking the lock, and the data-plane
+   hot loop (`WaitForCompletion`→`handleCompletion`→…→`FlushSubmissions`) makes no log calls,
+   so at the prod default (INFO) there is zero hot-path logging overhead. Only bites under `-v`.
+   The wrapped stdlib `log.Logger` is already concurrent-safe, so the wrapper mutex is largely
+   redundant. Real fix (async/buffered logging) is Phase 5 polish, not a prod blocker.
 
 5. **[OPEN — minor] Memory fences use one shared global** (`barrierDummy`, `atomic.AddInt64(...,0)`)
-   hammered by every queue — correct on arm64 but a needless contention point.
+   hammered by every queue — correct (a `LOCK`/`LDADDAL` RMW is a full hardware fence regardless
+   of the address it touches), just a contention point. The multi-queue data path is now proven
+   correct WITH this barrier, so changing it is pure perf with real memory-ordering risk on arm64.
+   Leave unless profiling shows it matters. (Open question for review — see roadmap.)
+
+6. **[FIXED — commit 5f23336] Requested queue count not reconciled with kernel.**
+   The kernel clamps `nr_hw_queues` at ADD_DEV (notably to the online CPU count). We created a
+   runner per *requested* queue, so asking for more queues than CPUs made the extra queues'
+   descriptor mmap fail with EINVAL and wedged startup. Now we read back the kernel's actual
+   `nr_hw_queues` after ADD_DEV and create exactly that many runners (`--queues=8` on a 4-CPU
+   box → 4 queues, starts cleanly).
+
+7. **[FIXED — commits 55303ca, 5f23336] Failed multi-queue startup wedged the process.**
+   The creation-failure cleanup closed runners while their ioLoops were parked in an UNBOUNDED
+   `io_uring_enter` (nothing woke them, since the device was never STARTed so STOP_DEV is a
+   no-op), then called DEL_DEV while the original `/dev/ublkcN` fd was still open (DEL blocks on
+   the refcount) → permanent hang requiring a reboot. Fixed two ways: (a) the data-plane wait is
+   now BOUNDED (`IORING_ENTER_EXT_ARG`, 100ms) so ioLoops observe context cancellation and exit
+   without kernel help; (b) the error path releases every char-device fd (dups + original) before
+   DEL_DEV. A mid-startup failure now tears down in ~0.1s with no zombie device, no reboot.
 
 ---
 
@@ -56,17 +87,21 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
 - [x] Fix DEL_DEV teardown hang (commit b3846fe)
 - [x] Correct overclaimed "stable / ~100k IOPS / 10x stress" status in TODO.md + CLAUDE.md
 
-### Phase 1 — Data-path correctness — BLOCKER (nothing else matters until done)
-- [ ] Pin the exact dropped-completion line for the multi-queue hang (bug #1) in
-      `internal/uring/minimal.go` — add per-tag submit/complete counters, reproduce on VM
-- [ ] **Core decision gate:** given whether the bug is a shallow accounting slip or
-      structural, decide — harden the pure-Go io_uring core, or replace it with cgo+liburing.
-      Default for prod BCDR: don't hand-own io_uring unless pure-Go is a hard requirement.
-- [ ] Fix multi-queue completion loss (#1) and corruption (#2) — likely one root cause
-- [ ] Verify: multi-queue + O_DIRECT + concurrent long-run = 0 hangs / 0 mismatches, on
-      **both arm64 and x86_64**
-- [ ] Interim: operate single-queue only (reliable today); scale with multiple
-      single-queue devices, not multi-queue, until this phase closes
+### Phase 1 — Data-path correctness — mostly DONE (multi-queue now trustworthy on arm64)
+- [x] Root-cause the multi-queue hang (bug #1): it was the per-queue descriptor mmap
+      offset stride, NOT dropped io_uring completions (commit 9eb3b17)
+- [x] **Core decision gate — RESOLVED: keep pure-Go.** The bug was a shallow one-line
+      offset mistake (wrong stride constant), not a structural flaw in the hand-rolled
+      io_uring core. The SQ/CQ accounting, barriers, and state machine were correct all
+      along. No reason to take on cgo+liburing; pure-Go stays.
+- [x] Fix multi-queue completion loss (#1) and corruption (#2) — one root cause (9eb3b17)
+- [x] Fix queue-count-vs-CPU startup wedge and make failed startup tear down cleanly
+      (commits 5f23336, 55303ca)
+- [x] Verify on arm64: Q=1/2/4/8, O_DIRECT, concurrent read-after-write + burst =
+      0 hangs / 0 mismatches across many runs
+- [ ] **Verify on x86_64** (prod arch) — repeat the same suite on an AWS spot box; the fix
+      is arch-independent by construction but confirm (weak-ordering bug classes differ)
+- [ ] Multi-queue is now the reliable default (≤ CPU count); single-queue no longer required
 
 ### Phase 2 — Data-integrity discipline — BCDR-critical
 - [ ] End-to-end checksums / verify-on-read at the application layer (never trust the block path)
@@ -87,7 +122,16 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
 - [ ] Graceful handling of kernel-version differences
 
 ### Phase 5 — Performance (only after correctness is proven)
-- [ ] Re-benchmark honestly (O_DIRECT + multi-queue) — current numbers are buffered
+- [x] Re-benchmark honestly (O_DIRECT + multi-queue). fio `--direct=1`, RAM backend, on the
+      arm64 M4 Lima VM (4 vCPU) — this is the ublk-path ceiling, NOT end-to-end (a real
+      file/network backend will be backend-bound):
+      | Workload (4K, numjobs=4, QD=32) | Q=1 | Q=4 |
+      |---|---|---|
+      | randread  | 801k IOPS | **1.37M IOPS** (93µs avg) |
+      | randwrite | 680k IOPS | **816k IOPS** (155µs avg) |
+      Multi-queue scales ~1.7x read / ~1.2x write over single-queue here; more CPUs + real
+      backends should widen that. Point: the ublk path is not the bottleneck. The old
+      "~100k IOPS" figures were buffered and/or different hardware — superseded.
 - [ ] Fix verbose-logging mutex stall (#4) and shared-global barrier contention (#5)
 - [ ] Registered buffers / zero-copy; io_uring SQPOLL; hot-path profiling
 - [ ] Async backend interface; File backend; NBD backend
@@ -136,7 +180,7 @@ make vm-stress         # 10x alternating e2e + benchmark
 - Batched io_uring submissions (5-10x improvement for parallel workloads)
 - Pre-allocated structs on hot path
 
-**Performance results (2025-11-26):**
+**Performance results (2025-11-26) — SUPERSEDED (buffered; see Phase 5 for honest O_DIRECT):**
 | Workload | go-ublk | Loop (RAM) | % of Loop |
 |----------|---------|------------|-----------|
 | 4K Read (1 job, QD=64) | 85.5k IOPS | 220k IOPS | 39% |
