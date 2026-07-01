@@ -9,16 +9,20 @@
 - `docs/INTERNALS.md` - io_uring and ublk struct reference
 - `docs/VM_TESTING.md` - VM test setup and troubleshooting
 
-## Project Status: Stable Working Prototype
+## Project Status: Prototype — NOT production-ready
 
 go-ublk is a pure Go, dependency-free implementation of Linux ublk (userspace block device).
+See **`TODO.md` → Critical Bugs** before relying on any of this.
 
-**Verified working:**
+**Works (single-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard
-- Multi-queue: 4 queues with batched io_uring submissions
-- Performance: ~100k IOPS (85-91% of kernel loop device)
-- Stability: Passes 10x stress test cycles
+- Block I/O: Read, Write, Flush, Discard (`--queues=1`)
+
+**Known broken:**
+- **Multi-queue (≥2) loses I/O under concurrent load** → data corruption and unkillable
+  D-state hangs. This is the whole "~100k IOPS multi-queue" performance story, and it is
+  not currently trustworthy. Prior "passes 10x stress" used buffered I/O that masks it.
+- Crash / power-fail consistency: untested.
 
 ## Build and Test Commands
 

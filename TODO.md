@@ -1,17 +1,49 @@
 # TODO.md - Production Roadmap
 
-## Current Status: Stable Working Prototype
+## Current Status: Prototype — NOT production-ready
 
 go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
-**What works:**
+**Works (single-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard
-- Multi-queue: 4 queues with batched io_uring submissions
-- Performance: ~100k IOPS (85-91% of kernel loop device)
-- Stability: Passes 10x stress test cycles
+- Block I/O: Read, Write, Flush, Discard (single queue)
 
-**Minimum kernel:** 6.8+ (IOCTL encoding required)
+**Broken / unverified:**
+- **Multi-queue data path loses I/O under concurrent load** (see Critical Bugs below).
+  The "~100k IOPS / passes 10x stress" numbers were buffered benchmarks that mask it.
+- Crash / power-fail consistency: untested (matters a lot for BCDR).
+
+**Minimum kernel:** 6.8+ (IOCTL encoding required). Bugs below reproduced on arm64, kernel 6.17.
+
+---
+
+## Critical Bugs (found 2026-06-30)
+
+1. **[OPEN — CRITICAL] Multi-queue completion loss → unkillable I/O hang.**
+   With ≥2 queues under concurrent load, I/O completions are dropped: the block request
+   never finishes and the issuing process wedges in **D-state (survives SIGKILL)**. Rate
+   scales with queue count — 1q reliable, 2q ~50% (7/14), 4q ~70% (10/14). All queue
+   goroutines stay alive (no deadlock/crash); the completion just never returns.
+   Root area: hand-rolled io_uring submit/complete accounting in `internal/uring/minimal.go`.
+   Exact dropped-completion line not yet pinned. **Workaround: `--queues=1`.** Disqualifying
+   for prod until fixed. (`vm-simple-e2e.sh` already special-cases "dd in D state" — this is old.)
+
+2. **[OPEN — CRITICAL] Intermittent data corruption, multi-queue.**
+   Read-after-write occasionally returns wrong bytes (~1/10, buffered). Same root area as #1;
+   page cache hides it in most buffered workloads.
+
+3. **[FIXED — commit b3846fe] DEL_DEV teardown hang.**
+   Four stacked bugs: `runner.Close()` never joined the ioLoop goroutine; `Device.Close()`
+   tore down queue rings *before* STOP_DEV; the original `/dev/ublkcN` fd (dup'd to each queue)
+   was never closed; the io_uring fixed-file registration wasn't unregistered before close.
+   DEL_DEV blocked forever, masked by the example's 1s watchdog + `os.Exit(0)`.
+
+4. **[OPEN] Verbose logging stalls I/O under load.**
+   `logging.Logger` holds one mutex across a blocking `write()`; `-v` + multi-queue starves
+   the I/O goroutines (regression of historical bug #4).
+
+5. **[OPEN — minor] Memory fences use one shared global** (`barrierDummy`, `atomic.AddInt64(...,0)`)
+   hammered by every queue — correct on arm64 but a needless contention point.
 
 ---
 
