@@ -438,6 +438,16 @@ func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
 }
 
 func (r *minimalRing) Close() error {
+	// Drop the fixed-file registration synchronously before closing the ring.
+	// NewRing registers the (char device) fd as an io_uring fixed file, which
+	// pins the ublk char device open. io_uring otherwise only releases fixed
+	// files during its asynchronous exit work, which can stall long enough to
+	// block DEL_DEV on the device refcount. Unregistering here drops that
+	// reference immediately. Errors are ignored: nothing may be registered.
+	const IORING_UNREGISTER_FILES = 3
+	_, _, _ = syscall.Syscall6(unix.SYS_IO_URING_REGISTER,
+		uintptr(r.ringFd), IORING_UNREGISTER_FILES, 0, 0, 0, 0)
+
 	// This is a minimal implementation - full cleanup would unmap regions
 	return syscall.Close(r.ringFd)
 }

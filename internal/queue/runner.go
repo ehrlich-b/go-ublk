@@ -64,6 +64,10 @@ type Runner struct {
 	tagMutexes []sync.Mutex // Per-tag mutexes to prevent double submission
 	// Pre-allocated per-tag command structs to avoid hot path allocations
 	ioCmds []uapi.UblksrvIOCmd
+	// Lifecycle: done is closed when the ioLoop goroutine exits; launched marks
+	// whether ioLoop was ever started, so Wait() is safe if it wasn't.
+	done     chan struct{}
+	launched bool
 }
 
 const (
@@ -195,6 +199,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		tagStates:    make([]TagState, config.Depth),
 		tagMutexes:   make([]sync.Mutex, config.Depth),
 		ioCmds:       make([]uapi.UblksrvIOCmd, config.Depth),
+		done:         make(chan struct{}),
 	}
 
 	return runner, nil
@@ -207,6 +212,7 @@ func (r *Runner) Start() error {
 	}
 
 	startErr := make(chan error, 1)
+	r.launched = true
 	go r.ioLoop(startErr)
 
 	err := <-startErr
@@ -247,9 +253,34 @@ func (r *Runner) Stop() error {
 	return nil
 }
 
-// Close cleans up resources
+// Wait blocks until the ioLoop goroutine has exited, or the timeout elapses.
+// Returns true if the goroutine exited. Safe to call if the runner was never
+// started. The goroutine parks in io_uring_enter and only wakes once the kernel
+// aborts its outstanding FETCH_REQs, so callers MUST issue STOP_DEV before Wait.
+func (r *Runner) Wait(timeout time.Duration) bool {
+	if !r.launched {
+		return true
+	}
+	select {
+	case <-r.done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// Close cleans up resources. Callers MUST have issued STOP_DEV first: the ioLoop
+// goroutine is parked in io_uring_enter and only exits once the kernel aborts its
+// FETCH_REQs. Close joins that goroutine before freeing the ring and mmaps it
+// uses; otherwise the munmap/close races a live goroutine — a use-after-free that
+// is benign on x86-TSO but a deterministic hang on weaker memory models (arm64).
 func (r *Runner) Close() error {
-	_ = r.Stop() // Cleanup, ignore error
+	_ = r.Stop() // cancel context so ioLoop returns once it wakes
+
+	// Join the ioLoop goroutine before touching the memory it reads.
+	if !r.Wait(2*time.Second) && r.logger != nil {
+		r.logger.Printf("Queue %d: ioLoop did not exit before Close (was STOP_DEV issued?)", r.queueID)
+	}
 
 	if r.ring != nil {
 		r.ring.Close()
@@ -282,6 +313,9 @@ func (r *Runner) ioLoop(started chan<- error) {
 	// ublk_drv records one thread per queue and rejects commands from different threads
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	// Signal exit so Close()/Wait() can join this goroutine before freeing the
+	// io_uring and mmap'd regions it touches.
+	defer close(r.done)
 
 	// Set CPU affinity if configured
 	// Uses round-robin assignment: queue N -> CPU (CPUAffinity[N % len(CPUAffinity)])
@@ -714,6 +748,7 @@ func NewStubRunner(ctx context.Context, config Config) *Runner {
 		tagStates:    make([]TagState, config.Depth),
 		tagMutexes:   make([]sync.Mutex, config.Depth),
 		ioCmds:       make([]uapi.UblksrvIOCmd, config.Depth),
+		done:         make(chan struct{}),
 	}
 }
 

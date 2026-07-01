@@ -237,6 +237,13 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		return nil, fmt.Errorf("character device did not appear: %s", charPath)
 	}
 
+	// The runners each dup this fd; the original is only needed to seed those
+	// dups. Close it once we return so it doesn't keep /dev/ublkcN referenced for
+	// the process lifetime — a leaked reference makes DEL_DEV block forever at
+	// teardown. The dups sustain the device while serving and are released by
+	// runner.Close().
+	defer syscall.Close(charDeviceFd)
+
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
 		runnerConfig := queue.Config{
@@ -430,6 +437,13 @@ func (d *Device) Start(ctx context.Context) error {
 		return fmt.Errorf("character device did not appear: %s", charPath)
 	}
 
+	// The runners each dup this fd; the original is only needed to seed those
+	// dups. Close it once we return so it doesn't keep /dev/ublkcN referenced for
+	// the process lifetime — a leaked reference makes DEL_DEV block forever at
+	// teardown. The dups sustain the device while serving and are released by
+	// runner.Close().
+	defer syscall.Close(charDeviceFd)
+
 	// Initialize queue runners
 	d.runners = make([]*queue.Runner, d.queues)
 	for i := 0; i < d.queues; i++ {
@@ -527,7 +541,7 @@ func (d *Device) Stop() error {
 		return fmt.Errorf("device is not started")
 	}
 
-	// Cancel context to signal goroutines to stop
+	// Cancel context so the ioLoop goroutines return once they wake.
 	if d.cancel != nil {
 		d.cancel()
 	}
@@ -537,17 +551,6 @@ func (d *Device) Stop() error {
 		d.metrics.Stop()
 	}
 
-	// Give goroutines a moment to see the cancellation
-	time.Sleep(10 * time.Millisecond)
-
-	// Stop queue runners
-	for _, runner := range d.runners {
-		if runner != nil {
-			runner.Close()
-		}
-	}
-	d.runners = nil
-
 	// Create controller to stop device
 	controller, err := createController()
 	if err != nil {
@@ -555,12 +558,22 @@ func (d *Device) Stop() error {
 	}
 	defer controller.Close()
 
-	// Stop device in kernel (device stays registered)
+	// STOP_DEV first: the kernel aborts each queue's outstanding FETCH_REQs,
+	// which is the only thing that wakes an ioLoop goroutine parked in
+	// io_uring_enter. Tearing runners down before this would try to join a
+	// goroutine that can never wake (and munmap a ring it's still using).
 	err = controller.StopDevice(d.ID)
 	if err != nil {
 		return fmt.Errorf("failed to stop device: %v", err)
 	}
 
+	// Now the goroutines can wake — join them and free their resources.
+	for _, runner := range d.runners {
+		if runner != nil {
+			runner.Close()
+		}
+	}
+	d.runners = nil
 	d.started = false
 
 	if d.options != nil && d.options.Logger != nil {
@@ -580,9 +593,16 @@ func (d *Device) Close() error {
 		return nil // Already closed, idempotent
 	}
 
+	// Create controller for cleanup
+	controller, err := createController()
+	if err != nil {
+		return fmt.Errorf("failed to create controller for close: %v", err)
+	}
+	defer controller.Close()
+
 	// Stop first if running
 	if d.started {
-		// Cancel context
+		// Cancel context so the ioLoop goroutines return once they wake.
 		if d.cancel != nil {
 			d.cancel()
 		}
@@ -592,9 +612,11 @@ func (d *Device) Close() error {
 			d.metrics.Stop()
 		}
 
-		time.Sleep(10 * time.Millisecond)
+		// STOP_DEV first: aborts each queue's outstanding FETCH_REQs and wakes
+		// the ioLoop goroutines parked in io_uring_enter so they can exit.
+		_ = controller.StopDevice(d.ID)
 
-		// Stop queue runners
+		// Join the goroutines and free their rings/mmaps (runner.Close waits).
 		for _, runner := range d.runners {
 			if runner != nil {
 				runner.Close()
@@ -602,20 +624,13 @@ func (d *Device) Close() error {
 		}
 		d.runners = nil
 		d.started = false
+	} else {
+		// Created but never started: make sure the kernel side is stopped.
+		_ = controller.StopDevice(d.ID)
 	}
 
-	// Create controller for cleanup
-	controller, err := createController()
-	if err != nil {
-		return fmt.Errorf("failed to create controller for close: %v", err)
-	}
-	defer controller.Close()
-
-	// Stop device if not already stopped
-	// Ignore error here - device might already be stopped
-	_ = controller.StopDevice(d.ID)
-
-	// Delete device from kernel
+	// Delete device last. With the queues fully torn down, the char-device
+	// references are released, so DEL_DEV no longer blocks on the refcount.
 	err = controller.DeleteDevice(d.ID)
 	if err != nil {
 		return fmt.Errorf("failed to delete device: %v", err)
