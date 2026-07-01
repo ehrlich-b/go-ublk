@@ -47,36 +47,51 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 ---
 
-## Remaining Work
+## Production Roadmap (BCDR use)
 
-### Performance Optimization
+Ordering principle for a backup/DR product: **correctness and recoverability first,
+performance last.** Nothing holding customer data ships before Phase 2 closes.
 
-**Memory:**
-- [ ] Registered buffers for zero-copy I/O
-- [ ] io_uring SQPOLL for kernel-side polling
-- [ ] Profile and optimize remaining hot paths
+### Phase 0 — Honesty + teardown — DONE
+- [x] Fix DEL_DEV teardown hang (commit b3846fe)
+- [x] Correct overclaimed "stable / ~100k IOPS / 10x stress" status in TODO.md + CLAUDE.md
 
-**Backends:**
-- [ ] Async backend interface for non-blocking I/O
-- [ ] File backend (backed by real file)
-- [ ] NBD backend (network block device passthrough)
+### Phase 1 — Data-path correctness — BLOCKER (nothing else matters until done)
+- [ ] Pin the exact dropped-completion line for the multi-queue hang (bug #1) in
+      `internal/uring/minimal.go` — add per-tag submit/complete counters, reproduce on VM
+- [ ] **Core decision gate:** given whether the bug is a shallow accounting slip or
+      structural, decide — harden the pure-Go io_uring core, or replace it with cgo+liburing.
+      Default for prod BCDR: don't hand-own io_uring unless pure-Go is a hard requirement.
+- [ ] Fix multi-queue completion loss (#1) and corruption (#2) — likely one root cause
+- [ ] Verify: multi-queue + O_DIRECT + concurrent long-run = 0 hangs / 0 mismatches, on
+      **both arm64 and x86_64**
+- [ ] Interim: operate single-queue only (reliable today); scale with multiple
+      single-queue devices, not multi-queue, until this phase closes
 
-### Production Hardening
+### Phase 2 — Data-integrity discipline — BCDR-critical
+- [ ] End-to-end checksums / verify-on-read at the application layer (never trust the block path)
+- [ ] Correct + tested FLUSH / FUA / fsync durability semantics
+- [ ] Crash / power-fail consistency harness: kill the daemon mid-write, verify no
+      torn / lost / silently-wrong data on recovery
 
-**Safety:**
-- [ ] Fuzzing for UAPI marshal/unmarshal
-- [ ] Invariant assertions around unsafe operations
-- [ ] Graceful handling of kernel version differences
+### Phase 3 — Resilience & recovery
+- [ ] `UBLK_F_USER_RECOVERY` — recover a device across a daemon restart (not implemented)
+- [ ] Daemon supervision + host fencing: a wedged daemon must not require a host reboot;
+      auto-detect and clean up stuck devices (D-state currently needs a reboot)
+- [ ] Graceful degradation on daemon crash (no permanent D-state on a customer host)
 
-**Feature Completeness:**
-- [ ] NEED_GET_DATA path for older kernel compatibility
-- [ ] Discard/TRIM support verification
-- [ ] Flush/FUA batching
+### Phase 4 — Testing infrastructure (close the gap that shipped "stable")
+- [ ] Fault-injection suite: multi-queue, O_DIRECT, concurrent, long-running, under GC/memory pressure
+- [ ] CI that runs the real failure modes (not buffered happy-path dd/fio), on x86_64 + arm64
+- [ ] Fuzzing for UAPI marshal/unmarshal; invariant assertions around `unsafe`
+- [ ] Graceful handling of kernel-version differences
 
-**Documentation:**
-- [ ] Architecture overview
-- [ ] Backend implementation guide
-- [ ] Performance tuning guide
+### Phase 5 — Performance (only after correctness is proven)
+- [ ] Re-benchmark honestly (O_DIRECT + multi-queue) — current numbers are buffered
+- [ ] Fix verbose-logging mutex stall (#4) and shared-global barrier contention (#5)
+- [ ] Registered buffers / zero-copy; io_uring SQPOLL; hot-path profiling
+- [ ] Async backend interface; File backend; NBD backend
+- [ ] NEED_GET_DATA path (older kernels); Discard/TRIM verification; Flush/FUA batching
 
 ---
 
