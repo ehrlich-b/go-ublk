@@ -692,11 +692,16 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 		return r.resultsPool, nil // Return empty slice if no work - NOT an error
 	}
 
-	// Block for at least one completion (only if no timeout)
-	// Retry on EINTR - signals can interrupt the syscall
+	// Block for at least one completion, but bounded so the caller's ioLoop can
+	// periodically observe context cancellation and exit — even when there is no
+	// I/O and no STOP_DEV to abort the outstanding FETCH_REQs (e.g. tearing down
+	// a device that was primed but never started). An unbounded wait here parks
+	// in the kernel forever and wedges shutdown. Retry on EINTR; treat ETIME
+	// (timed out with nothing ready) like an empty wakeup.
+	const waitTimeoutNs = 100 * 1000 * 1000 // 100ms
 	for {
-		_, _, errno := r.submitAndWaitRing(0, 1)
-		if errno == 0 {
+		errno := r.enterBoundedWait(1, waitTimeoutNs)
+		if errno == 0 || errno == syscall.ETIME {
 			break
 		}
 		if errno == syscall.EINTR {
@@ -829,6 +834,43 @@ func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted
 	logger.Debug("io_uring_enter returned", "r1", r1, "r2", r2, "err", err)
 
 	return uint32(r1), uint32(r2), err
+}
+
+// ioUringGeteventsArg is the extra-argument struct for IORING_ENTER_EXT_ARG,
+// which lets io_uring_enter wait with a timeout (kernel 5.11+). ts holds a
+// pointer to a __kernel_timespec (layout matches syscall.Timespec on 64-bit).
+type ioUringGeteventsArg struct {
+	sigmask   uint64
+	sigmaskSz uint32
+	pad       uint32
+	ts        uint64
+}
+
+// enterBoundedWait waits for up to minComplete completions but returns after
+// timeoutNs even if none arrive. Bounding the park time lets the data-plane
+// ioLoop observe context cancellation and exit during teardown even when no I/O
+// and no STOP_DEV ever wake it (e.g. tearing down a device that was primed but
+// never started) — an unbounded io_uring_enter there wedges shutdown forever.
+// Returns ETIME on timeout with no completions; callers treat that like a
+// spurious wakeup and drain whatever (if anything) arrived.
+func (r *minimalRing) enterBoundedWait(minComplete uint32, timeoutNs int64) syscall.Errno {
+	const (
+		IORING_ENTER_GETEVENTS = 1 << 0
+		IORING_ENTER_EXT_ARG   = 1 << 3
+	)
+	ts := syscall.NsecToTimespec(timeoutNs)
+	arg := ioUringGeteventsArg{ts: uint64(uintptr(unsafe.Pointer(&ts)))}
+	_, _, errno := syscall.Syscall6(
+		unix.SYS_IO_URING_ENTER,
+		uintptr(r.ringFd),
+		0, // toSubmit: submissions are flushed separately
+		uintptr(minComplete),
+		uintptr(IORING_ENTER_GETEVENTS|IORING_ENTER_EXT_ARG),
+		uintptr(unsafe.Pointer(&arg)),
+		unsafe.Sizeof(arg),
+	)
+	runtime.KeepAlive(&ts)
+	return errno
 }
 
 // submitOnly calls io_uring_enter to submit without waiting
