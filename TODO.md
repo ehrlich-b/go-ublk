@@ -76,6 +76,17 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
    without kernel help; (b) the error path releases every char-device fd (dups + original) before
    DEL_DEV. A mid-startup failure now tears down in ~0.1s with no zombie device, no reboot.
 
+8. **[OPEN — intermittent, low rate] START_DEV completion race.**
+   The control-plane `submitAndWait` occasionally returns "no completions available after
+   retries" for START_DEV, failing device creation (cleanly, thanks to #7). Pre-existing; the
+   control path was not touched this session. Hypothesis: `UBLK_F_URING_CMD_COMP_IN_TASK` defers
+   the command completion to task_work, so the CQE isn't in the ring when
+   `io_uring_enter(min_complete=1)` returns and `processCompletion`'s fixed 5×10µs poll gives up
+   too early. Proposed low-risk fix: replace the fixed poll with a bounded blocking RE-WAIT
+   (`io_uring_enter(0,1)` + EINTR retry) until the completion appears — mirrors the data-plane
+   `WaitForCompletion` pattern. NOT applied yet: it touches the shared control path (every
+   ADD/SET/START/STOP/DEL), so it wants review + heavy repro before landing.
+
 ---
 
 ## Production Roadmap (BCDR use)
