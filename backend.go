@@ -189,10 +189,21 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		observer = NewMetricsObserver(metrics)
 	}
 
-	// Determine actual number of queues (default to number of CPUs)
+	// Determine the number of queues. The kernel clamps nr_hw_queues at ADD_DEV
+	// (notably to the online CPU count), so honor the count it actually assigned
+	// rather than what we requested: creating a runner for a queue the kernel
+	// never allocated makes that queue's descriptor mmap fail with EINVAL and
+	// wedges startup.
 	numQueues := params.NumQueues
 	if numQueues == 0 {
 		numQueues = runtime.NumCPU()
+	}
+	if info, gerr := ctrl.GetDeviceInfo(deviceID); gerr == nil && info.NrHwQueues > 0 {
+		if actual := int(info.NrHwQueues); actual != numQueues {
+			logging.Default().Info("kernel adjusted hardware queue count",
+				"requested", numQueues, "actual", actual)
+			numQueues = actual
+		}
 	}
 
 	// Create Device struct
@@ -241,8 +252,40 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	// dups. Close it once we return so it doesn't keep /dev/ublkcN referenced for
 	// the process lifetime — a leaked reference makes DEL_DEV block forever at
 	// teardown. The dups sustain the device while serving and are released by
-	// runner.Close().
-	defer syscall.Close(charDeviceFd)
+	// runner.Close(). teardownPartial may close it earlier on an error path, so
+	// guard against a double close.
+	defer func() {
+		if charDeviceFd >= 0 {
+			syscall.Close(charDeviceFd)
+			charDeviceFd = -1
+		}
+	}()
+
+	// teardownPartial cleans up a partially-initialized device on the error
+	// paths below. Ordering matters: cancel the ioLoop contexts so the runners'
+	// bounded io_uring waits observe it and their goroutines exit (no STOP_DEV is
+	// needed to wake them, unlike a live device); best-effort STOP_DEV in case
+	// the device did reach LIVE; join/free the runners, which releases their
+	// dup'd char-device fds; then release the ORIGINAL char-device fd and DEL_DEV
+	// last. DEL_DEV blocks forever while ANY /dev/ublkcN reference remains open,
+	// so every dup and the original must be closed first. This is how a failed
+	// multi-queue startup now tears down cleanly instead of wedging the process.
+	teardownPartial := func() {
+		if device.cancel != nil {
+			device.cancel()
+		}
+		_ = ctrl.StopDevice(deviceID)
+		for _, r := range device.runners {
+			if r != nil {
+				r.Close()
+			}
+		}
+		if charDeviceFd >= 0 {
+			syscall.Close(charDeviceFd)
+			charDeviceFd = -1
+		}
+		_ = ctrl.DeleteDevice(deviceID)
+	}
 
 	device.runners = make([]*queue.Runner, numQueues)
 	for i := 0; i < numQueues; i++ {
@@ -260,13 +303,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 		runner, err := queue.NewRunner(device.ctx, runnerConfig)
 		if err != nil {
-			// Cleanup already created runners
-			for j := 0; j < i; j++ {
-				if device.runners[j] != nil {
-					device.runners[j].Close()
-				}
-			}
-			_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
+			teardownPartial()
 			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
 		}
 		device.runners[i] = runner
@@ -274,12 +311,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		// Start this runner immediately (submit FETCH_REQs)
 		// This must happen before creating the next queue
 		if err := runner.Start(); err != nil {
-			for j := 0; j <= i; j++ {
-				if device.runners[j] != nil {
-					device.runners[j].Close()
-				}
-			}
-			_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
+			teardownPartial()
 			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
 		}
 	}
@@ -290,12 +322,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	// Submit START_DEV after FETCH_REQs are in place
 	err = ctrl.StartDevice(deviceID)
 	if err != nil {
-		for j := 0; j < len(device.runners); j++ {
-			if device.runners[j] != nil {
-				device.runners[j].Close()
-			}
-		}
-		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
+		teardownPartial()
 		return nil, fmt.Errorf("failed to START_DEV: %v", err)
 	}
 
