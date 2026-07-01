@@ -171,7 +171,13 @@ func main() {
 	// Cancel the context to signal all goroutines to stop
 	cancel()
 
-	// Try cleanup with a timeout
+	// Try cleanup with a generous backstop timeout. device.Close() is now
+	// reliable and bounded (STOP_DEV then join then DEL_DEV), but aborting many
+	// in-flight requests under heavy load legitimately takes a second or two, so
+	// this must be well above that — the old 1s value fired mid-Close under load
+	// and force-exited, LEAKING a registered device. The backstop only guards
+	// against a genuine wedge; if it ever fires, reap the leak with
+	// `ublk-mem --del=all`.
 	cleanupDone := make(chan bool)
 	go func() {
 		if err := device.Close(); err != nil {
@@ -185,9 +191,9 @@ func main() {
 	select {
 	case <-cleanupDone:
 		// Cleanup completed
-	case <-time.After(1 * time.Second):
-		// Cleanup taking too long, exit anyway
-		logger.Info("cleanup timeout, forcing exit")
+	case <-time.After(15 * time.Second):
+		// Cleanup wedged well past the expected bound — exit anyway.
+		logger.Info("cleanup timeout, forcing exit (device may be left registered; reap with --del=all)")
 	}
 
 	// Write memory profile if requested
