@@ -14,9 +14,13 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
   (#7) and `ublk-mem --del=all` reaps zombie devices.
 
 **Still unverified / open (see roadmap):**
+- **Graceful stop of a BUSY device hangs** — control-plane STOP_DEV completion is unreliable
+  under load (Critical Bug #8). Idle stop is fine; stopping mid-I/O wedges. Top priority next.
 - x86_64 confirmation of the multi-queue fix (validated on arm64 so far; fix is arch-independent).
 - Crash / power-fail consistency: untested (matters a lot for BCDR).
-- Honest O_DIRECT performance numbers (old "~100k IOPS" figures were buffered benchmarks).
+
+Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 816k randwrite
+(RAM backend, Q=4) — the old "~100k IOPS" figures were buffered and are superseded.
 
 **Minimum kernel:** 6.8+ (IOCTL encoding required). Fixes verified on arm64, kernel 6.17.
 
@@ -76,16 +80,24 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
    without kernel help; (b) the error path releases every char-device fd (dups + original) before
    DEL_DEV. A mid-startup failure now tears down in ~0.1s with no zombie device, no reboot.
 
-8. **[OPEN — intermittent, low rate] START_DEV completion race.**
-   The control-plane `submitAndWait` occasionally returns "no completions available after
-   retries" for START_DEV, failing device creation (cleanly, thanks to #7). Pre-existing; the
-   control path was not touched this session. Hypothesis: `UBLK_F_URING_CMD_COMP_IN_TASK` defers
-   the command completion to task_work, so the CQE isn't in the ring when
-   `io_uring_enter(min_complete=1)` returns and `processCompletion`'s fixed 5×10µs poll gives up
-   too early. Proposed low-risk fix: replace the fixed poll with a bounded blocking RE-WAIT
-   (`io_uring_enter(0,1)` + EINTR retry) until the completion appears — mirrors the data-plane
-   `WaitForCompletion` pattern. NOT applied yet: it touches the shared control path (every
-   ADD/SET/START/STOP/DEL), so it wants review + heavy repro before landing.
+8. **[OPEN — CRITICAL under load] Control-plane completion wait is unreliable.**
+   The hand-rolled control-plane `submitAndWait` (`submitAndWaitRing(1,1)` then a fixed 5×10µs
+   `processCompletion` poll) does not reliably observe its command's completion. Two observed
+   failure modes, same root:
+   - **START_DEV**: intermittently returns "no completions available after retries" → device
+     creation fails (cleanly, thanks to #7). Low rate at idle.
+   - **STOP_DEV**: under active I/O load, `device.Close()` hangs in `StopDevice` →
+     `submitAndWaitRing(1,1)` (io_uring_enter blocks forever); the graceful-shutdown watchdog
+     eventually force-exits, leaking the device and leaving the issuing app wedged in D-state
+     (`blk_mq_get_tag`). **Graceful stop of a busy device is currently broken.**
+   Pre-existing: reproduced identically on the pre-bounded-wait binary (4b45061), so NOT caused
+   by this session's data-plane changes. Likely `UBLK_F_URING_CMD_COMP_IN_TASK` defers the
+   completion to task_work such that `io_uring_enter(min_complete=1)` doesn't observe it under
+   load. Proposed fix: make `submitAndWait` a bounded blocking RE-WAIT loop
+   (`io_uring_enter(0,1)` + EINTR/ETIME retry, with a timeout) until the completion appears —
+   mirrors the now-robust data-plane `WaitForCompletion`. NOT applied: touches the shared control
+   path (every ADD/SET/START/STOP/DEL), so wants review before landing — but there is now a
+   RELIABLE repro (teardown under fio load), so it is verifiable. **Top priority for next session.**
 
 ---
 
