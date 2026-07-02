@@ -568,11 +568,6 @@ func (d *Device) Stop() error {
 		return fmt.Errorf("device is not started")
 	}
 
-	// Cancel context so the ioLoop goroutines return once they wake.
-	if d.cancel != nil {
-		d.cancel()
-	}
-
 	// Mark metrics as stopped
 	if d.metrics != nil {
 		d.metrics.Stop()
@@ -585,16 +580,21 @@ func (d *Device) Stop() error {
 	}
 	defer controller.Close()
 
-	// STOP_DEV first: the kernel aborts each queue's outstanding FETCH_REQs,
-	// which is the only thing that wakes an ioLoop goroutine parked in
-	// io_uring_enter. Tearing runners down before this would try to join a
-	// goroutine that can never wake (and munmap a ring it's still using).
+	// STOP_DEV BEFORE cancelling the ioLoops. The kernel's stop path
+	// (del_gendisk) drains in-flight requests before STOP_DEV returns, and those
+	// requests can only be completed by the still-running ioLoops. Cancelling
+	// first strands the in-flight I/O and STOP_DEV blocks (Critical Bug #8).
 	err = controller.StopDevice(d.ID)
 	if err != nil {
 		return fmt.Errorf("failed to stop device: %v", err)
 	}
 
-	// Now the goroutines can wake — join them and free their resources.
+	// Device is drained and DEAD; cancel the ioLoop contexts and join them,
+	// freeing their resources. STOP_DEV aborted the outstanding FETCH_REQs, so
+	// the goroutines are already unblocking; cancel backstops any still parked.
+	if d.cancel != nil {
+		d.cancel()
+	}
 	for _, runner := range d.runners {
 		if runner != nil {
 			runner.Close()
@@ -629,21 +629,28 @@ func (d *Device) Close() error {
 
 	// Stop first if running
 	if d.started {
-		// Cancel context so the ioLoop goroutines return once they wake.
-		if d.cancel != nil {
-			d.cancel()
-		}
-
 		// Mark metrics as stopped
 		if d.metrics != nil {
 			d.metrics.Stop()
 		}
 
-		// STOP_DEV first: aborts each queue's outstanding FETCH_REQs and wakes
-		// the ioLoop goroutines parked in io_uring_enter so they can exit.
+		// STOP_DEV BEFORE cancelling the ioLoops. The kernel's stop path
+		// (del_gendisk) drains the request queue — it waits for in-flight
+		// requests to complete — before the STOP_DEV command returns, and those
+		// requests can only be completed by the still-running ioLoops
+		// (COMMIT_AND_FETCH). Cancelling the ioLoops first strands the in-flight
+		// I/O, so del_gendisk never drains and STOP_DEV blocks: graceful stop of a
+		// BUSY device (Critical Bug #8). With the ioLoops alive the drain finishes
+		// in milliseconds.
 		_ = controller.StopDevice(d.ID)
 
-		// Join the goroutines and free their rings/mmaps (runner.Close waits).
+		// Device is now DEAD and drained. Cancel the ioLoop contexts and join the
+		// goroutines, freeing their rings/mmaps (runner.Close waits). STOP_DEV
+		// already aborted the outstanding FETCH_REQs, so the ioLoops are unblocking
+		// on their own; cancel is a backstop for any parked in the bounded wait.
+		if d.cancel != nil {
+			d.cancel()
+		}
 		for _, runner := range d.runners {
 			if runner != nil {
 				runner.Close()

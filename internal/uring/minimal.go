@@ -745,6 +745,18 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 	logger.Debug("submitAndWait called", "fd", sqe.fd, "opcode", sqe.opcode)
 	logger.Debug("submitting URING_CMD via io_uring", "fd", sqe.fd, "opcode", sqe.opcode)
 
+	// Discard any straggler completion left in the CQ by a previously timed-out
+	// control command, so the completion we wait for below is unambiguously ours.
+	// The control ring is strictly synchronous (one command in flight at a time),
+	// so in normal operation the CQ is already empty here and this is a single
+	// non-blocking check.
+	for {
+		if _, ok := r.pollCtrlCompletion(); !ok {
+			break
+		}
+		logger.Warn("discarded stale control completion before submit")
+	}
+
 	// This is the real io_uring submission implementation
 	// Step 1: Get next available SQ entry
 	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
@@ -795,17 +807,101 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 
 	logger.Debug("updated SQ tail", "old", oldTail, "new", newTail)
 
-	// Submit and wait for completion
-	submitted, completed, errno := r.submitAndWaitRing(1, 1)
-	if errno != 0 {
-		logger.Error("io_uring_enter failed", "errno", errno, "submitted", submitted, "completed", completed)
-		return nil, fmt.Errorf("io_uring_enter failed: %v", errno)
+	// Submit the prepared SQE, then wait for its completion in a bounded re-wait
+	// loop (see waitCtrlCompletion). The previous code did a single
+	// submitAndWaitRing(1,1) followed by a 50µs poll, which is not robust for
+	// control commands: UBLK_F_URING_CMD_COMP_IN_TASK defers the completion to
+	// the target task's task_work, so the first io_uring_enter can return before
+	// the CQE is posted, and Go's async preemption (SIGURG) interrupts the wait
+	// with EINTR. That turned a completion we WILL receive into a hard failure
+	// ("no completions available after retries") and, for STOP_DEV on a busy
+	// device, an unbounded hang (Critical Bug #8).
+
+	// submitOnly does not wait for completions, so it cannot block; retry only if
+	// async preemption interrupts the submit itself. The SQ tail was advanced
+	// above, so the kernel consumes exactly this one SQE.
+	for {
+		submitted, serrno := r.submitOnly(1)
+		if serrno == syscall.EINTR {
+			continue
+		}
+		if serrno != 0 {
+			logger.Error("io_uring_enter submit failed", "errno", serrno)
+			return nil, fmt.Errorf("io_uring_enter submit failed: %v", serrno)
+		}
+		logger.Debug("control SQE submitted", "submitted", submitted)
+		break
 	}
 
-	logger.Debug("io_uring_enter succeeded", "submitted", submitted, "completed", completed)
+	return r.waitCtrlCompletion()
+}
 
-	// Step 5: Process completion
-	return r.processCompletion()
+// waitCtrlCompletion blocks until the control ring's single outstanding
+// completion is available and returns it. The control ring is strictly
+// synchronous — one command in flight at a time — so the head CQE is the
+// completion for the command just submitted.
+//
+// It re-waits across EINTR (Go's async-preemption SIGURG) and timed-out/empty
+// wakeups until the completion appears, bounded by an overall deadline. The
+// deadline is what makes STOP_DEV on a busy device fail cleanly instead of
+// wedging forever (Critical Bug #8): a single io_uring_enter here can never
+// block past perWaitNs, and the loop as a whole can never block past
+// ctrlCmdTimeout.
+func (r *minimalRing) waitCtrlCompletion() (Result, error) {
+	const (
+		perWaitNs      = 100 * 1000 * 1000 // 100ms per bounded io_uring_enter
+		ctrlCmdTimeout = 10 * time.Second  // overall cap for one control command
+	)
+	deadline := time.Now().Add(ctrlCmdTimeout)
+	for {
+		// The completion may already be posted (fast path or a prior wakeup).
+		if res, ok := r.pollCtrlCompletion(); ok {
+			return res, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("timeout waiting for control command completion after %s", ctrlCmdTimeout)
+		}
+		// Block (bounded) for at least one completion. Retry on EINTR; treat
+		// ETIME (nothing ready within perWaitNs) as a wakeup and re-poll.
+		switch errno := r.enterBoundedWait(1, perWaitNs); errno {
+		case 0, syscall.ETIME, syscall.EINTR:
+			// fall through to re-poll / re-wait
+		default:
+			return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)
+		}
+	}
+}
+
+// pollCtrlCompletion consumes and returns the head CQE if one is present,
+// without blocking; ok is false when the CQ is currently empty. The control
+// ring is synchronous (at most one command in flight), so the head CQE belongs
+// to the command being awaited.
+func (r *minimalRing) pollCtrlCompletion() (Result, bool) {
+	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
+	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
+
+	// Load tail with acquire semantics (kernel publishes with release), then a
+	// full fence so the CQE payload written before the tail bump is visible.
+	currentTail := atomic.LoadUint32(cqTail)
+	Mfence()
+	currentHead := atomic.LoadUint32(cqHead)
+	if currentHead == currentTail {
+		return nil, false
+	}
+
+	cqMask := r.params.cqEntries - 1
+	cqIndex := currentHead & cqMask
+	cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{}))*uintptr(cqIndex))
+	cqe := (*cqe32)(cqeSlot)
+
+	result := &minimalResult{userData: cqe.userData, value: cqe.res}
+	if cqe.res < 0 {
+		result.err = fmt.Errorf("operation failed with result: %d", cqe.res)
+	}
+
+	// Consume: advance head with release semantics.
+	atomic.StoreUint32(cqHead, currentHead+1)
+	return result, true
 }
 
 // submitAndWaitRing calls io_uring_enter to submit and wait for completions
@@ -986,61 +1082,4 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	}
 
 	return submitted, nil
-}
-
-// processCompletion processes a completion from the CQ ring
-func (r *minimalRing) processCompletion() (Result, error) {
-	logger := logging.Default()
-
-	// Get CQ head and tail
-	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
-	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
-
-	// Read tail with acquire semantics (kernel publishes with release)
-	currentTail := atomic.LoadUint32(cqTail)
-	currentHead := *cqHead
-
-	// Check if we have completions, with a retry loop for memory visibility.
-	// After io_uring_enter returns, the kernel has updated CQ tail, but the
-	// store may not be visible to this CPU yet due to cache coherence latency.
-	// 5 retries * 10µs = 50µs max wait, which is sufficient for cross-CPU
-	// visibility on modern x86-64 systems (typically <1µs).
-	const maxRetries = 5
-	const retryDelay = 10 * time.Microsecond
-	for i := 0; i < maxRetries; i++ {
-		currentTail = atomic.LoadUint32(cqTail)
-		if currentHead != currentTail {
-			break
-		}
-		time.Sleep(retryDelay)
-	}
-
-	if currentHead == currentTail {
-		logger.Warn("no completions available after retries")
-		return nil, fmt.Errorf("no completions available after retries")
-	}
-
-	// Get CQE
-	cqMask := r.params.cqEntries - 1
-	cqIndex := currentHead & cqMask
-	cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(cqIndex)))
-	cqe := (*cqe32)(cqeSlot)
-
-	logger.Debug("processing completion", "user_data", cqe.userData, "res", cqe.res, "flags", cqe.flags)
-
-	// Extract result
-	result := &minimalResult{
-		userData: cqe.userData,
-		value:    cqe.res,
-		err:      nil,
-	}
-
-	if cqe.res < 0 {
-		result.err = fmt.Errorf("operation failed with result: %d", cqe.res)
-	}
-
-	// Update head with release semantics to consume the completion
-	atomic.StoreUint32(cqHead, currentHead+1)
-
-	return result, nil
 }

@@ -168,8 +168,11 @@ func main() {
 
 	logger.Info("received shutdown signal")
 
-	// Cancel the context to signal all goroutines to stop
-	cancel()
+	// Do NOT cancel the context before Close(): device.Close() must run STOP_DEV
+	// while the ioLoop goroutines are still processing, so the kernel can drain
+	// in-flight I/O before the device stops. Close() then stops the ioLoops itself,
+	// in order (STOP_DEV, cancel, DEL_DEV). Cancelling here first strands in-flight
+	// requests and hangs STOP_DEV on a busy device (Critical Bug #8).
 
 	// Try cleanup with a generous backstop timeout. device.Close() is now
 	// reliable and bounded (STOP_DEV then join then DEL_DEV), but aborting many
