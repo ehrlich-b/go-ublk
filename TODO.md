@@ -12,11 +12,13 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
   O_DIRECT, concurrent read-after-write — 0 hangs / 0 mismatches across many runs.
 - Failed startup and killed daemons no longer wedge the host: startup tears down cleanly
   (#7) and `ublk-mem --del=all` reaps zombie devices.
+- **Graceful stop of a BUSY device now works** (#8): STOP_DEV runs while the ioLoops still
+  drain in-flight I/O, and the control-plane completion wait is bounded. 50+ teardown-under-load
+  cycles (Q=1/4/8, O_DIRECT fio, SIGINT mid-load) exit in ~0.13s with 0 leaks / 0 D-state hangs.
 
 **Still unverified / open (see roadmap):**
-- **Graceful stop of a BUSY device hangs** — control-plane STOP_DEV completion is unreliable
-  under load (Critical Bug #8). Idle stop is fine; stopping mid-I/O wedges. Top priority next.
-- x86_64 confirmation of the multi-queue fix (validated on arm64 so far; fix is arch-independent).
+- x86_64 confirmation of the multi-queue + teardown fixes (validated on arm64 so far; fixes are
+  arch-independent by construction).
 - Crash / power-fail consistency: untested (matters a lot for BCDR).
 
 Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 816k randwrite
@@ -80,24 +82,26 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
    without kernel help; (b) the error path releases every char-device fd (dups + original) before
    DEL_DEV. A mid-startup failure now tears down in ~0.1s with no zombie device, no reboot.
 
-8. **[OPEN — CRITICAL under load] Control-plane completion wait is unreliable.**
-   The hand-rolled control-plane `submitAndWait` (`submitAndWaitRing(1,1)` then a fixed 5×10µs
-   `processCompletion` poll) does not reliably observe its command's completion. Two observed
-   failure modes, same root:
-   - **START_DEV**: intermittently returns "no completions available after retries" → device
-     creation fails (cleanly, thanks to #7). Low rate at idle.
-   - **STOP_DEV**: under active I/O load, `device.Close()` hangs in `StopDevice` →
-     `submitAndWaitRing(1,1)` (io_uring_enter blocks forever); the graceful-shutdown watchdog
-     eventually force-exits, leaking the device and leaving the issuing app wedged in D-state
-     (`blk_mq_get_tag`). **Graceful stop of a busy device is currently broken.**
-   Pre-existing: reproduced identically on the pre-bounded-wait binary (4b45061), so NOT caused
-   by this session's data-plane changes. Likely `UBLK_F_URING_CMD_COMP_IN_TASK` defers the
-   completion to task_work such that `io_uring_enter(min_complete=1)` doesn't observe it under
-   load. Proposed fix: make `submitAndWait` a bounded blocking RE-WAIT loop
-   (`io_uring_enter(0,1)` + EINTR/ETIME retry, with a timeout) until the completion appears —
-   mirrors the now-robust data-plane `WaitForCompletion`. NOT applied: touches the shared control
-   path (every ADD/SET/START/STOP/DEL), so wants review before landing — but there is now a
-   RELIABLE repro (teardown under fio load), so it is verifiable. **Top priority for next session.**
+8. **[FIXED — commit 8ae839c] Control-plane completion wait + LIVE-teardown ordering.**
+   Two distinct defects shared one symptom (STOP-under-load hang / START flakiness):
+   - **Control-plane wait.** `submitAndWait` did one `submitAndWaitRing(1,1)` then a fixed 5×10µs
+     poll. `UBLK_F_URING_CMD_COMP_IN_TASK` defers the completion to task_work and Go's async
+     preemption (SIGURG) interrupts the wait with EINTR, so the single wait + short poll could
+     miss a completion it WOULD receive → START_DEV intermittently failed ("no completions
+     available after retries"), and a stuck STOP blocked forever. Fixed with a bounded blocking
+     RE-WAIT loop (reliable submit, then re-enter `io_uring_enter` across EINTR/ETIME until the
+     CQE appears, 10s overall cap) plus a stale-completion drain — mirrors the data-plane
+     `WaitForCompletion`. This alone made START reliable and converted the STOP hang from an
+     unkillable D-state into a clean bounded timeout.
+   - **Teardown ordering (the real STOP hang).** The kernel's `del_gendisk` drains in-flight I/O
+     before STOP_DEV returns, and only the running ioLoops can complete that I/O
+     (`COMMIT_AND_FETCH`). But `Close()`/`Stop()` (and the example's SIGINT handler) cancelled the
+     ioLoops FIRST, stranding the in-flight requests so the drain never finished → STOP_DEV
+     blocked. Reordered the LIVE path to **STOP_DEV → cancel ioLoops → join → DEL_DEV**.
+     `teardownPartial` (creation-failure, device not yet LIVE) correctly keeps cancel-first (#7).
+   Verified on arm64: START reliable; 50+ teardown-under-load cycles (Q=1/4/8, O_DIRECT fio,
+   SIGINT mid-load) all exit in ~0.13s with 0 leaks / 0 D-state; 128MB O_DIRECT read-after-write
+   byte-exact; idle stop 0.11s; unit tests green.
 
 ---
 
