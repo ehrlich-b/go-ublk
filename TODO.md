@@ -21,6 +21,24 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
   arch-independent by construction).
 - Crash / power-fail consistency: untested (matters a lot for BCDR).
 
+**Host kernel caveats (checked 2026-07-24) — these are KERNEL bugs, not go-ublk bugs:**
+- **ADD_DEV NULL-deref on Ubuntu 6.17.0-{~29..40}:** their NUMA backport `529d4d632788` landed
+  without its prerequisite `011af85ccd87`, so `ublk_init_queues()` runs before the tag set exists
+  and derefs a NULL `mq_map`. Unconditional — any ublk server oopses the host on first device add.
+  FIXED in `linux-aws-6.17` 6.17.0-1020 (already in noble-updates) and `linux-hwe-6.17` 6.17.0-41
+  (noble-proposed, ready-for-promote); -35/-38/-40 generic are still broken. Ubuntu's 6.18 line
+  currently repeats the same omission — check before trusting a future 6.18 HWE.
+- **Teardown double-completion (`io_req_uring_cleanup` NULL-deref):** one real oops on x86
+  6.17.0-14, and the fixes are in kernel.org stable 7.1.y but in no Ubuntu 6.17/6.18 build.
+  Severity is UNKNOWN, not "reliable": the arm64 "reproduces within ≤120 cycles" claim was a
+  harness bug — `daemon_pid()` picked the "1" out of "USR1" and SIGINT'd pid 1 (systemd), i.e.
+  the churn was rebooting the VM and blaming a traceless kernel panic. Fixed in
+  `scripts/vm-churn.sh` + `scripts/vm-verify.sh`, which now also refuse to signal pid ≤ 1.
+- **Validated on 6.17.0-41-generic (arm64) with the fixed harness, 2026-07-24:** integrity sweep
+  24/24 combos byte-exact (Q=1/2/4/8 x depth=1/64/128 x buffered/O_DIRECT), 150/150
+  teardown-under-load cycles and 20/20 zero-I/O graceful stops clean — 0 hangs, 0 leaks,
+  refcount→0, no reboot.
+
 Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 816k randwrite
 (RAM backend, Q=4) — the old "~100k IOPS" figures were buffered and are superseded.
 
