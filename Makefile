@@ -52,7 +52,7 @@ endif
 # Core Targets
 #==============================================================================
 
-.PHONY: all build clean test test-unit test-integration deps tidy fmt lint vet help
+.PHONY: all build verify clean test test-unit test-integration deps tidy fmt lint vet help
 
 all: deps build test
 
@@ -63,6 +63,13 @@ ublk-mem: FORCE
 	@mkdir -p bin
 	@echo "Building ublk-mem$(if $(BUILD_FLAGS), (with race detector),)..."
 	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ublk-mem ./examples/ublk-mem
+
+# Standalone data-integrity oracle (test/verify) — drives the block device with
+# a shadow-copy op stream; cross-compiles CGO-free for the target arch.
+verify: FORCE
+	@mkdir -p bin
+	@echo "Building verify$(if $(BUILD_FLAGS), (with race detector),)..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/verify ./test/verify
 
 ublk-file: FORCE
 	@echo "Building ublk-file (Phase 4)"
@@ -205,7 +212,7 @@ check-module:
 # VM Testing (requires VM_HOST, VM_USER configured)
 #==============================================================================
 
-.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify
 
 # Check VM configuration before running VM targets
 vm-check:
@@ -283,6 +290,18 @@ vm-fuzz: vm-copy
 	@$(VM_SCP) scripts/vm-fuzz.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-fuzz.sh && sudo ./vm-fuzz.sh"
 	@echo "VM fuzz test completed"
+
+# Shadow-oracle data-integrity sweep across a queue/depth/direct matrix.
+VERIFY_SIZE ?= 256M
+VERIFY_DURATION ?= 15
+vm-verify: ublk-mem verify
+	@echo "Copying ublk-mem + verify + sweep driver to VM..."
+	@$(VM_SSH) "mkdir -p $(VM_DIR); sudo killall ublk-mem 2>/dev/null || true"
+	@$(VM_SCP) bin/ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) bin/verify $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) scripts/vm-verify.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@echo "Running integrity sweep on VM..."
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-verify.sh && ./vm-verify.sh $(VERIFY_SIZE) $(VERIFY_DURATION)"
 
 # Alias for backwards compatibility
 test-vm: vm-simple-e2e
