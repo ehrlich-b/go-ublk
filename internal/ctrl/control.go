@@ -131,16 +131,45 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 	return info.DevID, nil
 }
 
+// basicAttrs maps the caller-visible device attributes onto UBLK_ATTR_* bits.
+// The kernel only honors what we actually send here: read-only, for example, is
+// applied by ublk_dev_param_basic_apply -> set_disk_ro(), so dropping the bit
+// silently hands the caller a writable device.
+//
+// EnableFUA is deliberately NOT advertised. Nothing consumes the per-IO
+// UBLK_IO_F_FUA flag yet, and claiming FUA support we do not honor would turn a
+// power cut into silent corruption. Advertising a volatile cache without FUA is
+// safe: the block layer then emulates FUA as write + post-flush, so a caller
+// asking for FUA still gets those semantics, just via a flush we do implement.
+func basicAttrs(params *DeviceParams) uint32 {
+	var attrs uint32
+	if params.ReadOnly {
+		attrs |= uapi.UBLK_ATTR_READ_ONLY
+	}
+	if params.Rotational {
+		attrs |= uapi.UBLK_ATTR_ROTATIONAL
+	}
+	if params.VolatileCache {
+		attrs |= uapi.UBLK_ATTR_VOLATILE_CACHE
+	}
+	return attrs
+}
+
 func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 	c.logger.Debug("setting device parameters",
 		"logical_bs", params.LogicalBlockSize,
 		"max_io", params.MaxIOSize,
 		"backend_size", params.Backend.Size())
 
+	if params.EnableFUA {
+		c.logger.Warn("EnableFUA requested but not advertised: per-IO FUA is not implemented; " +
+			"set VolatileCache to get FUA semantics via block-layer post-flush emulation")
+	}
+
 	ublkParams := &uapi.UblkParams{
 		Types: uapi.UBLK_PARAM_TYPE_BASIC,
 		Basic: uapi.UblkParamBasic{
-			Attrs:            0,
+			Attrs:            basicAttrs(params),
 			LogicalBSShift:   uint8(sizeToShift(params.LogicalBlockSize)),
 			PhysicalBSShift:  uint8(sizeToShift(params.LogicalBlockSize)),
 			IOOptShift:       0,
