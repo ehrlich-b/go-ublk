@@ -16,17 +16,30 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
   drain in-flight I/O, and the control-plane completion wait is bounded. 50+ teardown-under-load
   cycles (Q=1/4/8, O_DIRECT fio, SIGINT mid-load) exit in ~0.13s with 0 leaks / 0 D-state hangs.
 
+**x86_64 CONFIRMED (2026-07-24)** on a c6i.xlarge spot box, kernel `6.17.0-1020-aws`:
+integrity sweep 24/24 byte-exact, 150/150 teardown-under-load cycles, 20/20 zero-I/O graceful
+stops — 0 hangs, 0 leaks, refcount→0. Same binary on the same box booted into `6.17.0-1019-aws`
+oopses instantly at ADD_DEV (see host-kernel caveats), which is the clean A/B proving the
+multi-queue and teardown fixes are correct on x86 and that the remaining failure is the kernel's.
+
 **Still unverified / open (see roadmap):**
-- x86_64 confirmation of the multi-queue + teardown fixes (validated on arm64 so far; fixes are
-  arch-independent by construction).
 - Crash / power-fail consistency: untested (matters a lot for BCDR).
+- Host-reboot-under-load: the one teardown scenario never exercised — a systemd shutdown storm
+  (SIGTERM to everything, filesystems unmounting) while a ublk device is serving I/O. This is the
+  path the single real x86 oops came from, and it is a genuine production event (host reboots
+  mid-backup), so it deserves its own test.
 
 **Host kernel caveats (checked 2026-07-24) — these are KERNEL bugs, not go-ublk bugs:**
 - **ADD_DEV NULL-deref on Ubuntu 6.17.0-{~29..40}:** their NUMA backport `529d4d632788` landed
   without its prerequisite `011af85ccd87`, so `ublk_init_queues()` runs before the tag set exists
   and derefs a NULL `mq_map`. Unconditional — any ublk server oopses the host on first device add.
   FIXED in `linux-aws-6.17` 6.17.0-1020 (already in noble-updates) and `linux-hwe-6.17` 6.17.0-41
-  (noble-proposed, ready-for-promote); -35/-38/-40 generic are still broken. Ubuntu's 6.18 line
+  (noble-proposed, ready-for-promote); -35/-38/-40 generic are still broken. Confirmed live on
+  x86 2026-07-24: on `6.17.0-1019-aws` (ublk_drv srcversion 6A00163FD3030280266148D) a plain
+  `ublk-mem --queues=1 --depth=1` gives `BUG: kernel NULL pointer dereference, address: 0` at
+  `ublk_init_queues+0x4e` in an `iou-wrk` worker via `ublk_ctrl_add_dev`, and ADD_DEV never
+  returns; on `6.17.0-1020-aws` (srcversion 8F3FCC0225E19BF890B533B) the same binary is clean.
+  Note `ublk_drv` ships in `linux-modules-extra-*-aws`, not the base AWS kernel image. Ubuntu's 6.18 line
   currently repeats the same omission — check before trusting a future 6.18 HWE.
 - **Teardown double-completion (`io_req_uring_cleanup` NULL-deref):** one real oops on x86
   6.17.0-14, and the fixes are in kernel.org stable 7.1.y but in no Ubuntu 6.17/6.18 build.
@@ -34,6 +47,9 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
   harness bug — `daemon_pid()` picked the "1" out of "USR1" and SIGINT'd pid 1 (systemd), i.e.
   the churn was rebooting the VM and blaming a traceless kernel panic. Fixed in
   `scripts/vm-churn.sh` + `scripts/vm-verify.sh`, which now also refuse to signal pid ≤ 1.
+  x86 note: 150 churn cycles + 24 sweep combos on `6.17.0-1020-aws` — which carries NONE of the
+  three upstream ublk teardown fixes — produced 0 incidents, so normal graceful stop does not
+  appear to trigger it on x86 either.
 - **Validated on 6.17.0-41-generic (arm64) with the fixed harness, 2026-07-24:** integrity sweep
   24/24 combos byte-exact (Q=1/2/4/8 x depth=1/64/128 x buffered/O_DIRECT), 150/150
   teardown-under-load cycles and 20/20 zero-I/O graceful stops clean — 0 hangs, 0 leaks,
