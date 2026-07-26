@@ -35,9 +35,10 @@ const (
 	DefaultMaxDiscardSectors = 0xffffffff
 
 	// DefaultMaxDiscardSegments is the default maximum segments per discard.
-	// 256 segments balances supporting scattered discards with kernel
-	// memory overhead for tracking discard bio segments.
-	DefaultMaxDiscardSegments = 256
+	// ublk_validate_params() rejects SET_PARAMS with -EINVAL for any value
+	// other than 1 ("So far, only support single segment discard"), so this is
+	// the only value the protocol accepts.
+	DefaultMaxDiscardSegments = 1
 
 	// AutoAssignDeviceID is passed to ADD_DEV to let the kernel auto-assign
 	// a device ID. This is the kernel's API contract (-1 means auto-assign).

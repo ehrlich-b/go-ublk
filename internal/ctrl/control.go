@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
@@ -155,6 +156,35 @@ func basicAttrs(params *DeviceParams) uint32 {
 	return attrs
 }
 
+// discardParams builds the discard limits to advertise, and reports whether
+// they should be sent at all. See the call site in SetParams for why this is
+// gated on the backend implementing DiscardBackend.
+func discardParams(params *DeviceParams) (uapi.UblkParamDiscard, bool) {
+	if _, ok := params.Backend.(interfaces.DiscardBackend); !ok {
+		return uapi.UblkParamDiscard{}, false
+	}
+	if params.MaxDiscardSectors == 0 {
+		return uapi.UblkParamDiscard{}, false
+	}
+
+	// ublk_validate_params() rejects the whole SET_PARAMS with -EINVAL unless
+	// max_discard_segments is exactly 1 ("So far, only support single segment
+	// discard") and discard_granularity is non-zero. Neither is expressible any
+	// other way, so normalize rather than let a caller's value fail device
+	// creation outright.
+	granularity := params.DiscardGranularity
+	if granularity == 0 {
+		granularity = uint32(params.LogicalBlockSize)
+	}
+
+	return uapi.UblkParamDiscard{
+		DiscardAlignment:   params.DiscardAlignment,
+		DiscardGranularity: granularity,
+		MaxDiscardSectors:  params.MaxDiscardSectors,
+		MaxDiscardSegments: 1,
+	}, true
+}
+
 func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 	c.logger.Debug("setting device parameters",
 		"logical_bs", params.LogicalBlockSize,
@@ -186,7 +216,27 @@ func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 		"max_sectors", ublkParams.Basic.MaxSectors,
 		"dev_sectors", ublkParams.Basic.DevSectors)
 
-	// TODO: Add discard parameters if backend supports it
+	// Discard limits are only advertised when the backend can actually service
+	// a discard: the queue runner dispatches UBLK_IO_OP_DISCARD through
+	// interfaces.DiscardBackend, so advertising limits for a backend without it
+	// would invite discards we silently drop. MaxDiscardSectors == 0 means the
+	// caller opted out.
+	//
+	// MaxWriteZeroesSectors is deliberately left at 0: there is no
+	// UBLK_IO_OP_WRITE_ZEROES case in the runner, so advertising a write-zeroes
+	// limit would claim an operation we do not implement.
+	if discard, ok := discardParams(params); ok {
+		if params.MaxDiscardSegments != 1 {
+			c.logger.Warn("clamping MaxDiscardSegments to 1: ublk only supports single-segment discard",
+				"requested", params.MaxDiscardSegments)
+		}
+		ublkParams.Types |= uapi.UBLK_PARAM_TYPE_DISCARD
+		ublkParams.Discard = discard
+		c.logger.Debug("advertising discard limits",
+			"max_discard_sectors", params.MaxDiscardSectors,
+			"granularity", params.DiscardGranularity,
+			"max_segments", params.MaxDiscardSegments)
+	}
 
 	// Marshal params - the Len field is set automatically by the marshal function
 	buf := uapi.Marshal(ublkParams)
