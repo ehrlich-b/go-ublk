@@ -5,6 +5,21 @@
 
 set -euo pipefail
 
+# Resolve the real ublk-mem pid from the pid of the `sudo` that launched it.
+# Falls back to the sudo pid if the child never appears.
+resolve_daemon_pid() {
+    local sudo_pid=$1 child
+    for _ in $(seq 1 25); do
+        child=$(pgrep -P "$sudo_pid" -x ublk-mem 2>/dev/null | head -1 || true)
+        if [ -n "$child" ]; then
+            echo "$child"
+            return
+        fi
+        sleep 0.2
+    done
+    echo "$sudo_pid"
+}
+
 # Function to check for D state processes and report them
 check_d_state_processes() {
     echo "=== CHECKING FOR D STATE PROCESSES ==="
@@ -76,7 +91,10 @@ echo "Starting ublk-mem with maximum verbosity..."
 echo "All logs will go to stdout for immediate visibility"
 # Using multi-queue (auto-detect based on CPUs) with sharded memory backend
 sudo ./ublk-mem --size=16M -v &
-UBLK_PID=$!
+# $! is SUDO's pid, not the daemon's. SIGINT is forwarded, but a SIGKILL to sudo
+# only orphans ublk-mem and leaves its device registered, which then looks like
+# a leak. Resolve the real child pid so escalation hits the daemon.
+UBLK_PID=$(resolve_daemon_pid $!)
 echo "Started ublk-mem with PID $UBLK_PID"
 
 # Add PID to kernel trace filtering

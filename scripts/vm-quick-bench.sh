@@ -3,6 +3,21 @@
 
 set -e
 
+# Resolve the real ublk-mem pid from the pid of the `sudo` that launched it.
+# Falls back to the sudo pid if the child never appears.
+resolve_daemon_pid() {
+    local sudo_pid=$1 child
+    for _ in $(seq 1 25); do
+        child=$(pgrep -P "$sudo_pid" -x ublk-mem 2>/dev/null | head -1 || true)
+        if [ -n "$child" ]; then
+            echo "$child"
+            return
+        fi
+        sleep 0.2
+    done
+    echo "$sudo_pid"
+}
+
 echo "=== go-ublk Overhead Benchmark ==="
 echo "Testing on kernel: $(uname -r)"
 echo ""
@@ -70,7 +85,10 @@ run_fio_test() {
 # Using multi-queue with depth=64 for optimal performance
 echo "Starting ublk memory device (256MB, multi-queue, depth=64)..."
 sudo ./ublk-mem --size=256M --depth=64 &
-UBLK_PID=$!
+# $! is SUDO's pid; signalling it works for SIGINT but a SIGKILL would orphan
+# the daemon. Keep both: signal the daemon, wait on the child we actually own.
+SUDO_PID=$!
+UBLK_PID=$(resolve_daemon_pid $SUDO_PID)
 sleep 3
 
 # Verify device exists
@@ -91,7 +109,7 @@ run_fio_test /dev/ublkb0 randwrite 64 4 "ublk 4K Write (4 jobs, QD=64)"
 # Stop ublk device
 echo "Stopping ublk device..."
 sudo kill -SIGINT $UBLK_PID
-wait $UBLK_PID 2>/dev/null || true
+wait $SUDO_PID 2>/dev/null || true
 sleep 1
 
 # Create RAM-backed loop device for fair comparison
