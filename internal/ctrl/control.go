@@ -160,10 +160,13 @@ func basicAttrs(params *DeviceParams) uint32 {
 // they should be sent at all. See the call site in SetParams for why this is
 // gated on the backend implementing DiscardBackend.
 func discardParams(params *DeviceParams) (uapi.UblkParamDiscard, bool) {
-	if _, ok := params.Backend.(interfaces.DiscardBackend); !ok {
-		return uapi.UblkParamDiscard{}, false
-	}
-	if params.MaxDiscardSectors == 0 {
+	// Discard and write-zeroes share one param block but are separate
+	// capabilities, and each is advertised only if the backend can service it —
+	// the runner dispatches them through these two interfaces. MaxDiscardSectors
+	// doubles as the write-zeroes limit; nothing has yet needed them to differ.
+	_, canDiscard := params.Backend.(interfaces.DiscardBackend)
+	_, canWriteZeroes := params.Backend.(interfaces.WriteZeroesBackend)
+	if params.MaxDiscardSectors == 0 || (!canDiscard && !canWriteZeroes) {
 		return uapi.UblkParamDiscard{}, false
 	}
 
@@ -171,18 +174,25 @@ func discardParams(params *DeviceParams) (uapi.UblkParamDiscard, bool) {
 	// max_discard_segments is exactly 1 ("So far, only support single segment
 	// discard") and discard_granularity is non-zero. Neither is expressible any
 	// other way, so normalize rather than let a caller's value fail device
-	// creation outright.
+	// creation outright. Granularity is required even when only write-zeroes is
+	// advertised.
 	granularity := params.DiscardGranularity
 	if granularity == 0 {
 		granularity = uint32(params.LogicalBlockSize)
 	}
 
-	return uapi.UblkParamDiscard{
+	discard := uapi.UblkParamDiscard{
 		DiscardAlignment:   params.DiscardAlignment,
 		DiscardGranularity: granularity,
-		MaxDiscardSectors:  params.MaxDiscardSectors,
-		MaxDiscardSegments: 1,
-	}, true
+	}
+	if canDiscard {
+		discard.MaxDiscardSectors = params.MaxDiscardSectors
+		discard.MaxDiscardSegments = 1
+	}
+	if canWriteZeroes {
+		discard.MaxWriteZeroesSectors = params.MaxDiscardSectors
+	}
+	return discard, true
 }
 
 func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
@@ -199,14 +209,17 @@ func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 	ublkParams := &uapi.UblkParams{
 		Types: uapi.UBLK_PARAM_TYPE_BASIC,
 		Basic: uapi.UblkParamBasic{
-			Attrs:            basicAttrs(params),
-			LogicalBSShift:   uint8(sizeToShift(params.LogicalBlockSize)),
-			PhysicalBSShift:  uint8(sizeToShift(params.LogicalBlockSize)),
-			IOOptShift:       0,
-			IOMinShift:       uint8(sizeToShift(params.LogicalBlockSize)),
-			MaxSectors:       uint32(params.MaxIOSize / params.LogicalBlockSize),
+			Attrs:           basicAttrs(params),
+			LogicalBSShift:  uint8(sizeToShift(params.LogicalBlockSize)),
+			PhysicalBSShift: uint8(sizeToShift(params.LogicalBlockSize)),
+			IOOptShift:      0,
+			IOMinShift:      uint8(sizeToShift(params.LogicalBlockSize)),
+			// Both of these count 512-byte sectors, NOT logical blocks: the
+			// kernel checks max_sectors against max_io_buf_bytes >> 9 and
+			// derives capacity from dev_sectors << 9.
+			MaxSectors:       uint32(params.MaxIOSize / uapi.SectorSize),
 			ChunkSectors:     0,
-			DevSectors:       uint64(params.Backend.Size() / int64(params.LogicalBlockSize)),
+			DevSectors:       uint64(params.Backend.Size() / uapi.SectorSize),
 			VirtBoundaryMask: 0,
 		},
 	}
@@ -216,17 +229,11 @@ func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 		"max_sectors", ublkParams.Basic.MaxSectors,
 		"dev_sectors", ublkParams.Basic.DevSectors)
 
-	// Discard limits are only advertised when the backend can actually service
-	// a discard: the queue runner dispatches UBLK_IO_OP_DISCARD through
-	// interfaces.DiscardBackend, so advertising limits for a backend without it
-	// would invite discards we silently drop. MaxDiscardSectors == 0 means the
-	// caller opted out.
-	//
-	// MaxWriteZeroesSectors is deliberately left at 0: there is no
-	// UBLK_IO_OP_WRITE_ZEROES case in the runner, so advertising a write-zeroes
-	// limit would claim an operation we do not implement.
+	// Limits are only advertised for operations the backend can actually
+	// service, since advertising one we drop invites silent data loss.
+	// MaxDiscardSectors == 0 means the caller opted out of both.
 	if discard, ok := discardParams(params); ok {
-		if params.MaxDiscardSegments != 1 {
+		if params.MaxDiscardSegments != 1 && discard.MaxDiscardSectors != 0 {
 			c.logger.Warn("clamping MaxDiscardSegments to 1: ublk only supports single-segment discard",
 				"requested", params.MaxDiscardSegments)
 		}

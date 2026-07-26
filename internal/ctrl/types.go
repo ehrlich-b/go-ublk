@@ -1,6 +1,9 @@
 package ctrl
 
-import "github.com/ehrlich-b/go-ublk/internal/interfaces"
+import (
+	"github.com/ehrlich-b/go-ublk/internal/interfaces"
+	"github.com/ehrlich-b/go-ublk/internal/uapi"
+)
 
 type DeviceParams struct {
 	Backend interfaces.Backend
@@ -54,7 +57,7 @@ func DefaultDeviceParams(backend interfaces.Backend) DeviceParams {
 		DiscardAlignment:   4096,
 		DiscardGranularity: 4096,
 		MaxDiscardSectors:  0xffffffff,
-		MaxDiscardSegments: 256,
+		MaxDiscardSegments: 1, // ublk_validate_params only accepts single-segment discard
 	}
 }
 
@@ -72,5 +75,6 @@ type DeviceInfo struct {
 }
 
 func (d *DeviceInfo) Size() int64 {
-	return int64(d.DevSectors) * int64(d.BlockSize)
+	// dev_sectors counts 512-byte sectors, not logical blocks.
+	return int64(d.DevSectors) * uapi.SectorSize
 }

@@ -1,6 +1,16 @@
 // Package uapi provides Linux kernel UAPI definitions for ublk
 package uapi
 
+// A "sector" is always 512 bytes in the block layer and therefore in every
+// ublk structure that counts them: ublk_param_basic.dev_sectors and max_sectors,
+// and ublksrv_io_desc.start_sector and nr_sectors. This is independent of the
+// device's logical block size, which is carried separately as logical_bs_shift.
+// Conflating the two reports the wrong capacity and does I/O at the wrong offset.
+const (
+	SectorSize  = 512
+	SectorShift = 9
+)
+
 // Control Commands (Legacy - don't use in new applications)
 const (
 	UBLK_CMD_GET_QUEUE_AFFINITY  = 0x01

@@ -4,7 +4,9 @@ package ublk
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/ehrlich-b/go-ublk/internal/ctrl"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/queue"
+	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
 // Device represents a ublk block device
@@ -85,22 +88,39 @@ type DeviceParams struct {
 	CPUAffinity []int  // CPU affinity mask for queue threads
 }
 
-// validateParams rejects parameter combinations the data plane does not
-// actually implement, so a caller finds out at creation time instead of
-// discovering it as corrupted data.
+// validateParams rejects parameters the kernel or the data plane cannot honor,
+// so a caller finds out at creation time rather than from a device that fails
+// in a confusing way later.
 func validateParams(params *DeviceParams) error {
-	// The ublk UAPI counts sectors in 512-byte units everywhere:
-	// ublk_param_basic.dev_sectors, and ublksrv_io_desc.start_sector /
-	// nr_sectors. But the control plane derives dev_sectors from
-	// LogicalBlockSize and the data plane multiplies start_sector by it, so
-	// both are only correct at 512. A 4096-byte block size reports an eighth of
-	// the real capacity and then reads and writes at eight times the intended
-	// offset — verified as byte-level corruption on a file backend. A zero
-	// value divides by zero in the control plane.
-	if params.LogicalBlockSize != 512 {
-		return fmt.Errorf("LogicalBlockSize is %d; only 512 is supported (start from DefaultParams)",
-			params.LogicalBlockSize)
+	if params.Backend == nil {
+		return fmt.Errorf("Backend is nil")
 	}
+
+	// The kernel requires 9 <= logical_bs_shift <= PAGE_SHIFT, i.e. a power of
+	// two from one sector up to one page.
+	page := os.Getpagesize()
+	bs := params.LogicalBlockSize
+	if bs < uapi.SectorSize || bs > page || bs&(bs-1) != 0 {
+		return fmt.Errorf("LogicalBlockSize is %d; must be a power of two from %d to the page size (%d)",
+			bs, uapi.SectorSize, page)
+	}
+
+	// max_sectors is derived from MaxIOSize, and the kernel rejects a value
+	// below one page (PAGE_SECTORS) or not addressable in whole blocks.
+	if params.MaxIOSize < page {
+		return fmt.Errorf("MaxIOSize is %d; must be at least the page size (%d)", params.MaxIOSize, page)
+	}
+	if params.MaxIOSize%bs != 0 {
+		return fmt.Errorf("MaxIOSize %d is not a multiple of LogicalBlockSize %d", params.MaxIOSize, bs)
+	}
+
+	// Capacity is reported in whole sectors, so a tail shorter than a block
+	// would be addressable by the kernel but outside the backend.
+	if size := params.Backend.Size(); size <= 0 || size%int64(bs) != 0 {
+		return fmt.Errorf("Backend.Size() is %d; must be positive and a multiple of LogicalBlockSize %d",
+			size, bs)
+	}
+
 	return nil
 }
 
@@ -120,9 +140,16 @@ func DefaultParams(backend Backend) DeviceParams {
 		EnableZoned:        false, // Regular block device
 		EnableIoctlEncode:  false, // Use URING_CMD (modern approach)
 
-		ReadOnly:      false,
-		Rotational:    false, // SSD-like by default
-		VolatileCache: false,
+		ReadOnly:   false,
+		Rotational: false, // SSD-like by default
+		// Default to advertising a volatile write cache. The library cannot know
+		// whether a backend's completed write is durable, and the two mistakes
+		// are not symmetric: claiming a cache that does not exist costs a no-op
+		// flush round-trip, while hiding one that does exist loses data on power
+		// failure with no error anywhere. A backend that makes every write
+		// durable before returning should set this to false, which also stops
+		// the kernel from sending flushes it does not need.
+		VolatileCache: true,
 		EnableFUA:     false,
 
 		// Discard defaults
@@ -140,11 +167,41 @@ type Options struct {
 	// Context for cancellation (if nil, uses context.Background())
 	Context context.Context
 
-	// Logger for debug/info messages (if nil, no logging)
+	// Logger receives the library's log output, including the internal
+	// control-plane and queue diagnostics (if nil, output goes to stderr).
 	Logger Logger
+
+	// Debug enables debug-level logging. The data plane's hot loop does not log
+	// at all, but debug logging elsewhere is heavy enough to affect timing.
+	Debug bool
 
 	// Observer for metrics collection (if nil, uses no-op observer)
 	Observer Observer
+}
+
+// loggerWriter adapts a caller's Logger to the io.Writer the internal logger
+// writes lines to, so Options.Logger receives the internal diagnostics instead
+// of only the handful of messages this file emits directly.
+type loggerWriter struct{ l Logger }
+
+func (w loggerWriter) Write(p []byte) (int, error) {
+	w.l.Printf("%s", strings.TrimRight(string(p), "\n"))
+	return len(p), nil
+}
+
+// configureLogging points the library's package-level logger at the caller's
+// Logger and level. Note this is process-wide: creating two devices with
+// different Options means the most recent call wins.
+func configureLogging(options *Options) {
+	config := logging.DefaultConfig()
+	if options.Debug {
+		config.Level = logging.LevelDebug
+	}
+	if options.Logger != nil {
+		config.Output = loggerWriter{options.Logger}
+		config.NoTimestamp = true // the caller's logger stamps its own lines
+	}
+	logging.SetDefault(logging.NewLogger(config))
 }
 
 // Logger interface is now defined in interfaces.go
@@ -174,6 +231,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	if err := validateParams(&params); err != nil {
 		return nil, err
 	}
+	configureLogging(options)
 
 	if options.Context != nil {
 		ctx = options.Context
@@ -316,7 +374,6 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			DevID:       deviceID,
 			QueueID:     uint16(i),
 			Depth:       params.QueueDepth,
-			BlockSize:   params.LogicalBlockSize,
 			Backend:     params.Backend,
 			Logger:      options.Logger,
 			Observer:    observer,
@@ -388,6 +445,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	if err := validateParams(&params); err != nil {
 		return nil, err
 	}
+	configureLogging(options)
 
 	// Create controller
 	controller, err := createController()
@@ -505,7 +563,6 @@ func (d *Device) Start(ctx context.Context) error {
 			DevID:       d.ID,
 			QueueID:     uint16(i),
 			Depth:       d.depth,
-			BlockSize:   d.blockSize,
 			Backend:     d.Backend,
 			Logger:      d.options.Logger,
 			Observer:    d.observer,
