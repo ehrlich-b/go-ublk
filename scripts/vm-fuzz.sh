@@ -38,8 +38,8 @@ run_test() {
 
 cleanup() {
     echo "Cleaning up..."
-    sudo pkill -9 fio 2>/dev/null || true
-    sudo pkill -9 ublk-mem 2>/dev/null || true
+    sudo pkill -9 -x fio 2>/dev/null || true
+    sudo pkill -9 -x ublk-mem 2>/dev/null || true
     sleep 1
 }
 
@@ -54,7 +54,7 @@ echo ""
 
 # Start ublk-mem
 echo "Starting ublk-mem..."
-sudo pkill -9 ublk-mem 2>/dev/null || true
+sudo pkill -9 -x ublk-mem 2>/dev/null || true
 sleep 1
 sudo modprobe -r ublk_drv 2>/dev/null || true
 sudo modprobe ublk_drv

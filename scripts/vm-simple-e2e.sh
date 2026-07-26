@@ -38,15 +38,23 @@ check_d_state_processes() {
 # Function to cleanup what we can (D state processes can't be killed)
 cleanup_force() {
     echo "=== CLEANUP (skipping D state processes) ==="
-    # Only kill processes that aren't in D state
-    local killable_pids=$(ps aux | grep -E "(ublk-mem|timeout)" | grep -v grep | awk '$8 !~ /D/ {print $2}' || true)
+    # Match the daemon by EXACT process name. The old version grepped `ps aux`
+    # for "(ublk-mem|timeout)" and SIGKILLed every hit, which meant it killed
+    # any unrelated process whose command line merely mentioned those strings —
+    # including the ssh session or shell running this script, which then looked
+    # like the script had hung.
+    local killable_pids=$(pgrep -x ublk-mem 2>/dev/null || true)
     if [ -n "$killable_pids" ]; then
-        echo "Killing non-D state processes: $killable_pids"
+        # Skip anything already in D state: it cannot be killed anyway.
+        killable_pids=$(ps -o stat=,pid= -p $killable_pids 2>/dev/null | awk '$1 !~ /D/ {print $2}' || true)
+    fi
+    if [ -n "$killable_pids" ]; then
+        echo "Killing non-D state ublk-mem processes: $killable_pids"
         sudo kill -9 $killable_pids 2>/dev/null || true
     fi
 
     # Check if dd is in D state and report it (but don't try to kill)
-    local dd_d_state=$(ps aux | grep dd | grep -v grep | awk '$8 ~ /D/ {print $2}' || true)
+    local dd_d_state=$(ps -eo stat=,pid=,comm= | awk '$3 == "dd" && $1 ~ /D/ {print $2}' || true)
     if [ -n "$dd_d_state" ]; then
         echo "❌ dd processes in D state (can't be killed): $dd_d_state"
         echo "This indicates kernel I/O hang - VM reset required"
@@ -183,7 +191,9 @@ for i in $(seq 1 10); do
         # Don't try to cleanup gracefully when I/O is broken - force exit
         echo "❌ TEST FAILED: I/O hangs detected - VM reset recommended"
         echo "Force killing all processes due to I/O hang..."
-        sudo killall -9 ublk-mem timeout dd 2>/dev/null || true
+        # Exact names only: `killall timeout` would also kill the wrapper that
+        # bounds this very script, and there is no reason to kill every dd.
+        sudo pkill -9 -x ublk-mem 2>/dev/null || true
         # Disable cleanup trap to prevent hanging
         trap - EXIT
         exit 1
