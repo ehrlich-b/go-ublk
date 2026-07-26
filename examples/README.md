@@ -51,11 +51,11 @@ That's it. Five methods, and you have a block device.
 
 ## Optional Interfaces
 
-For better performance or additional features, implement these optional interfaces:
+### DiscardBackend — wired
 
-### DiscardBackend
-
-Handle TRIM/discard operations (useful for SSDs and sparse files):
+Handle TRIM/discard operations (useful for SSDs and sparse files). Implementing
+it is also what makes the device advertise discard support at all: without it,
+`discard_max_bytes` is 0 and `blkdiscard` reports "operation not supported".
 
 ```go
 func (b *MyBackend) Discard(offset, length int64) error {
@@ -64,42 +64,68 @@ func (b *MyBackend) Discard(offset, length int64) error {
 }
 ```
 
-### WriteZeroesBackend
+### Not yet wired
 
-Efficiently zero a region without allocating a buffer:
+`WriteZeroesBackend`, `SyncBackend`, `StatBackend` and `ResizeBackend` are
+declared in the public API but **nothing calls them yet** — the I/O loop only
+dispatches Read, Write, Flush and Discard. Implementing them today is harmless
+but has no effect; don't rely on them for correctness.
 
-```go
-func (b *MyBackend) WriteZeroes(offset, length int64) error {
-    // Zero the region efficiently
-    return nil
-}
-```
+## Durability
 
-### SyncBackend
+A completed write is durable only if your backend made it durable. The device
+tells the kernel which of those two worlds it lives in, and that decides whether
+you ever receive a `Flush`:
 
-Fine-grained sync control:
+- `params.VolatileCache = true` — writes may still be in a cache when `WriteAt`
+  returns. The kernel sends a FLUSH whenever something above needs durability (a
+  journal commit, an `fsync`, a barrier), and your `Flush()` must make previous
+  writes durable before it returns.
+- `params.VolatileCache = false` (the current default) — you are promising every
+  completed write is *already* durable. The kernel then never sends a flush at
+  all: it completes empty flushes itself and drops `REQ_PREFLUSH`. Claiming this
+  when it isn't true loses data on power failure, with no error anywhere.
 
-```go
-func (b *MyBackend) Sync() error {
-    // Sync all data to stable storage
-    return nil
-}
-
-func (b *MyBackend) SyncRange(offset, length int64) error {
-    // Sync only the specified range
-    return nil
-}
-```
+`ublk-loop` shows both, honestly: buffered by default (volatile cache, flush →
+`fsync`), and `-sync` for `O_DSYNC` (write-through, no flushes needed).
 
 ## Included Examples
 
-### ublk-mem
+### ublk-mem — RAM disk, optionally compressed
 
-A memory-backed block device. Useful for testing and as a RAM disk.
+The smallest useful backend: a `[]byte` behind sharded locks. With `--zip` it
+stores 64KB chunks flate-compressed instead, which shows the block layer cannot
+tell what a backend does with the bytes — 128MB of compressible data fits in
+about 1MB of RAM, and reads back byte-exact.
 
 ```bash
 make build
-sudo ./bin/ublk-mem --size=512M
+sudo ./bin/ublk-mem --size=512M            # plain RAM disk
+sudo ./bin/ublk-mem --size=512M --zip      # compressed in RAM
+sudo ./bin/ublk-mem --del=all              # reap devices a killed daemon left behind
 ```
 
-See [ublk-mem/main.go](ublk-mem/main.go) for the full implementation.
+### ublk-loop — export a file, like losetup
+
+The backend a real user is more likely to write: positional file I/O, sparse
+allocation, discard that punches holes and actually returns space to the
+filesystem, and an explicit answer to the durability question above.
+
+```bash
+make build
+sudo ./bin/ublk-loop --file=/var/tmp/disk.img --size=1G   # creates a sparse file
+sudo ./bin/ublk-loop --file=/var/tmp/disk.img --sync      # O_DSYNC, write-through
+sudo ./bin/ublk-loop --file=/var/tmp/disk.img --read-only
+```
+
+Both examples use only the public API, so they compile the same way outside this
+repository. `scripts/vm-loop-e2e.sh` is their test.
+
+## Teardown
+
+Both examples share one non-obvious shutdown rule, and copying it matters:
+
+**Do not cancel the context before calling `Close()`.** The kernel drains
+in-flight I/O before `STOP_DEV` returns, and only the running I/O goroutines can
+complete that drain. `Close()` stops them itself, in the right order. Cancelling
+first strands the in-flight requests and hangs teardown on a busy device.

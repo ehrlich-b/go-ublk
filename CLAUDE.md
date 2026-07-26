@@ -55,7 +55,8 @@ make vm-stress          # 10x alternating e2e + benchmark
 ```
 go-ublk/
 ├── *.go               # Public API (ublk package)
-├── examples/ublk-mem/ # Memory-backed device example
+├── examples/ublk-mem/  # RAM-backed device example (--zip = compressed)
+├── examples/ublk-loop/ # File-backed device example (losetup-style)
 ├── docs/              # Documentation
 ├── scripts/           # VM test scripts
 ├── test/              # Unit and integration tests

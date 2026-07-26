@@ -14,7 +14,14 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
   data corruption and D-state hangs is fixed (Critical Bugs #1/#2). Verified Q=1/2/4/8,
   O_DIRECT, concurrent read-after-write — 0 hangs / 0 mismatches across many runs.
 - Failed startup and killed daemons no longer wedge the host: startup tears down cleanly
-  (#7) and `ublk-mem --del=all` reaps zombie devices.
+  (#7) and `ublk-mem --del=all` reaps zombie devices (now public API: `ublk.ListDevices`,
+  `ublk.DeleteDevice`).
+- **Two examples, both on the public API only** (2026-07-26): `ublk-mem` (RAM, `--zip` for
+  flate-compressed 64KB chunks — 128MB of compressible data in ~1MB, byte-exact) and
+  `ublk-loop` (exports a file like losetup: sparse, punch-hole discard, and both durability
+  modes — buffered + volatile cache, or `-sync` O_DSYNC + write-through). `make vm-loop-e2e`
+  covers offset-in-file mapping across teardown, space reclaim, cache attrs and read-only:
+  14/14 on arm64 6.17.0-41.
 - **Graceful stop of a BUSY device now works** (#8): STOP_DEV runs while the ioLoops still
   drain in-flight I/O, and the control-plane completion wait is bounded. 50+ teardown-under-load
   cycles (Q=1/4/8, O_DIRECT fio, SIGINT mid-load) exit in ~0.13s with 0 leaks / 0 D-state hangs.
@@ -140,6 +147,52 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
    SIGINT mid-load) all exit in ~0.13s with 0 leaks / 0 D-state; 128MB O_DIRECT read-after-write
    byte-exact; idle stop 0.11s; unit tests green.
 
+9. **[FIXED — 2026-07-26] Any discard over 1MB panicked the whole daemon.**
+   `handleIORequest` acquired a data buffer sized from the request length for
+   *every* op. A DISCARD's length is a range to deallocate, not bytes to move, so
+   `blkdiscard` over a few MB — or an `fstrim` on a mounted filesystem — called
+   `GetBuffer(32MB)`, which resliced a 1MB pooled buffer past its capacity:
+   `panic: slice bounds out of range [:33554432] with capacity 1048576`. The
+   process died, every device it served went to EIO, and the kernel logged
+   `I/O error, dev ublkb0, sector 0 op 0x3:(DISCARD)`. Reachable by anything with
+   write access to the device, and it existed from the moment discard was first
+   advertised (commit ff53e7a) — the earlier discard test only used a small range.
+   Fixed two ways: only READ/WRITE acquire a buffer, and `GetBuffer` now allocates
+   exactly rather than reslicing a pooled buffer past its capacity. Found by the
+   `ublk-loop` e2e, which discards 64MB.
+
+10. **[OPEN — guarded] `LogicalBlockSize` other than 512 silently corrupts data.**
+    The ublk UAPI counts sectors in 512-byte units everywhere
+    (`ublk_param_basic.dev_sectors`, `ublksrv_io_desc.start_sector`/`nr_sectors`),
+    but `control.go:209` derives `DevSectors` from `LogicalBlockSize` and
+    `runner.go:572` multiplies `StartSector` by it. The two disagree with
+    `submitCommitAndFetch`, which hardcodes `NrSectors << 9` — the inconsistency
+    that gives it away. Verified with a 4096-byte build of `ublk-loop`: a 256MB
+    device reports 32MB (`blockdev --getsz` = 65536), reads and writes land at 8x
+    the intended offset, and the shadow oracle fails byte-exact
+    (`FULL-READBACK MISMATCH at dev-offset 25096192: got 0x00 want 0x95`). A zero
+    value divides by zero. **Mitigated, not fixed:** `validateParams` now rejects
+    anything but 512 at Create time, so it fails loudly instead of corrupting.
+    Real fix is to treat sectors as 512 bytes throughout and derive block-size
+    shifts separately; needed before 4Kn support or zero-copy (which wants 4K).
+
+11. **[OPEN — API honesty] Four of five optional backend interfaces are never called.**
+    `WriteZeroesBackend`, `SyncBackend`, `StatBackend` and `ResizeBackend` are
+    public, documented, and asserted by `backend_test.go`, but nothing in the I/O
+    loop consults them — only `DiscardBackend` is wired. A user implements one and
+    it silently never fires. Either wire them or drop them; documenting them as
+    "not yet wired" (done in examples/README.md) is a stopgap.
+
+12. **[PARTLY FIXED — 2026-07-26] The examples could not be compiled by a library user.**
+    `examples/ublk-mem` imported `internal/ctrl` (to reap leaked devices) and
+    `internal/logging` (for `-v`), neither reachable from outside the module — so
+    the flagship example was not a valid demonstration of the public API. Reaping
+    is now public (`ublk.ListDevices`, `ublk.DeleteDevice`) and `ublk-loop` uses
+    only the public API. Still open: there is no public way to enable the
+    internal debug logging that `-v` turns on, so `ublk-mem` still imports
+    `internal/logging`. `Options.Logger` only reaches ~10 `Printf` call sites in
+    `backend.go` and nothing in the data plane.
+
 ---
 
 ## Production Roadmap (BCDR use)
@@ -163,8 +216,9 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
       (commits 5f23336, 55303ca)
 - [x] Verify on arm64: Q=1/2/4/8, O_DIRECT, concurrent read-after-write + burst =
       0 hangs / 0 mismatches across many runs
-- [ ] **Verify on x86_64** (prod arch) — repeat the same suite on an AWS spot box; the fix
-      is arch-independent by construction but confirm (weak-ordering bug classes differ)
+- [x] **Verify on x86_64** (prod arch) — done 2026-07-24 on `6.17.0-1020-aws`: sweep 24/24,
+      churn 150/150, zero-I/O stops 20/20, plus the `-1019` A/B pinning the remaining
+      failure on the kernel. See the x86_64 CONFIRMED block at the top.
 - [ ] Multi-queue is now the reliable default (≤ CPU count); single-queue no longer required
 
 ### Phase 2 — Data-integrity discipline — BCDR-critical
@@ -198,7 +252,7 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
       "~100k IOPS" figures were buffered and/or different hardware — superseded.
 - [ ] Fix verbose-logging mutex stall (#4) and shared-global barrier contention (#5)
 - [ ] Registered buffers / zero-copy; io_uring SQPOLL; hot-path profiling
-- [ ] Async backend interface; File backend; NBD backend
+- [ ] Async backend interface; NBD backend (a file backend now exists as `examples/ublk-loop`)
 - [ ] NEED_GET_DATA path (older kernels); Discard/TRIM verification; Flush/FUA batching
 
 ---
@@ -213,6 +267,8 @@ make test-unit
 make vm-reset          # Reset VM state
 make vm-simple-e2e     # Basic I/O test
 make vm-e2e            # Full test suite
+make vm-verify         # Shadow-oracle integrity sweep (queues x depth x direct)
+make vm-loop-e2e       # File-backend + compressed-backend behavior
 make vm-benchmark      # Performance benchmark
 make vm-stress         # 10x alternating e2e + benchmark
 ```
