@@ -36,8 +36,16 @@ stops — 0 hangs, 0 leaks, refcount→0. Same binary on the same box booted int
 oopses instantly at ADD_DEV (see host-kernel caveats), which is the clean A/B proving the
 multi-queue and teardown fixes are correct on x86 and that the remaining failure is the kernel's.
 
+**Crash / power-fail consistency TESTED (2026-07-26)** on arm64 `6.17.0-41`: 8 SIGKILL-mid-write
+cycles (both durability flavors) and 4 sysrq hard resets mid-write, all with 0 lost / 0 torn /
+0 aliased blocks, and clean host recovery every time. The oracle is shown able to fail — it
+detects injected lost/torn/aliased blocks, and the post-reset image checked against an
+over-claiming witness correctly reports loss. See Phase 2 for the design and for what the
+guest-level reset does not cover (the host's own cache of the virtual disk).
+
 **Still unverified / open (see roadmap):**
-- Crash / power-fail consistency: untested (matters a lot for BCDR).
+- Host power cut, as opposed to a guest reset: `sysrq-b` drops the guest page cache but not
+  macOS's cache of the VM's disk, so the last link in the durability chain is untested.
 - Host-reboot-under-load: the one teardown scenario never exercised — a systemd shutdown storm
   (SIGTERM to everything, filesystems unmounting) while a ublk device is serving I/O. This is the
   path the single real x86 oops came from, and it is a genuine production event (host reboots
@@ -260,15 +268,55 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
 
 ### Phase 2 — Data-integrity discipline — BCDR-critical
 - [ ] End-to-end checksums / verify-on-read at the application layer (never trust the block path)
-- [ ] Correct + tested FLUSH / FUA / fsync durability semantics
-- [ ] Crash / power-fail consistency harness: kill the daemon mid-write, verify no
-      torn / lost / silently-wrong data on recovery
+- [x] Correct + tested FLUSH / fsync durability semantics — both flavors of `ublk-loop`
+      (volatile cache -> FLUSH -> `fsync`, and `-sync` -> `O_DSYNC` write-through) hold
+      their promise across a hard reset. Per-IO **FUA** is still not implemented; see
+      Phase 3.
+- [x] **Crash / power-fail consistency harness** — `test/crash` + `scripts/vm-crash.sh`,
+      run by `make vm-crash` and `make vm-powerfail`. Results on arm64 `6.17.0-41`:
+      | Scenario | Runs | Lost | Torn | Aliased |
+      |---|---|---|---|---|
+      | SIGKILL daemon mid-write (buffered + `-sync`) | 8 cycles, 16 checks | 0 | 0 | 0 |
+      | sysrq hard reset mid-write | 4 | 0 | 0 | 0 |
+      Every cycle also asserted clean recovery: the writer's in-flight I/O errors out
+      instead of wedging, no leaked device after reap, the device comes back on the same
+      image, a graceful stop still works afterwards, no oops, and an unchanged `boot_id`
+      (the hard-reset runs show it changing, which is how we know the reset was real).
+
+      How it avoids being a test that cannot fail:
+      - Blocks are **self-describing** (magic + block index + generation + a stream derived
+        from both), so the expected content survives the death of the process holding it.
+        A block at the wrong offset is *aliased*, a block whose body disagrees with its
+        header is *torn*, both without remembering anything.
+      - Region A is rewritten generation by generation, each pass followed by `fdatasync`,
+        and only then is a **durability witness** advanced (fsync + rename + dir fsync, so
+        the oracle's own state is crash-safe). Any A block older than the witness is a
+        *lost* acknowledged write. The driver waits for 3 flushed generations before
+        crashing, because at a witness of 1 the requirement is "gen >= 0" and nothing can
+        violate it — `-min-flushed` enforces that rather than trusting the timing.
+      - Region B is never synced, so a crash always lands with unflushed writes in flight;
+        it is striped one writer per block so "torn" is a verdict and not a race.
+      - `vm-crash.sh selftest` (which `kill` runs first) injects a lost, an aliased and a
+        torn block into a plain file and asserts each is caught, and the power-fail verify
+        re-checks the *surviving* image against an over-claiming witness and asserts that
+        fails. So both the detector and the live assertion are shown to be able to fail.
+
+      What it does **not** prove: the reset is a guest-level `sysrq-b`, so it kills the
+      guest page cache but not the macOS host's cache of the VM's virtual disk. It
+      establishes the chain ublk -> ublk-loop -> `fsync` -> ext4 -> virtio; a real
+      host power cut is still untested.
 
 ### Phase 3 — Resilience & recovery
 - [ ] `UBLK_F_USER_RECOVERY` — recover a device across a daemon restart (not implemented)
 - [ ] Daemon supervision + host fencing: a wedged daemon must not require a host reboot;
       auto-detect and clean up stuck devices (D-state currently needs a reboot)
-- [ ] Graceful degradation on daemon crash (no permanent D-state on a customer host)
+- [x] Graceful degradation on daemon crash (no permanent D-state on a customer host) —
+      asserted every `vm-crash` cycle: after the daemon is SIGKILLed mid-write, the writer
+      blocked in `pwrite` on the dead device is reaped by the kernel within 20s, and no task
+      remains in D-state across 5s of samples. Note the assertion has to be *persistent*:
+      a single sample flags unrelated `kworker/.../events_unbound` threads, which dip into D
+      constantly and are idle again seconds later.
+- [ ] Per-IO **FUA** (`UBLK_ATTR_FUA`) — the kernel currently emulates it as write + flush
 
 ### Phase 4 — Testing infrastructure (close the gap that shipped "stable")
 - [ ] Fault-injection suite: multi-queue, O_DIRECT, concurrent, long-running, under GC/memory pressure
@@ -297,15 +345,18 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
 ## Testing Commands
 
 ```bash
-# Unit tests (local)
+# Unit tests (local — Linux only; from macOS use make vm-test-unit)
 make test-unit
 
 # VM tests (requires VM setup)
 make vm-reset          # Reset VM state
+make vm-test-unit      # Cross-compile the unit tests and run them on the VM
 make vm-simple-e2e     # Basic I/O test
 make vm-e2e            # Full test suite
 make vm-verify         # Shadow-oracle integrity sweep (queues x depth x direct)
 make vm-loop-e2e       # File-backend + compressed-backend behavior
+make vm-crash          # Crash consistency: SIGKILL the daemon mid-write, recover, verify
+make vm-powerfail      # Power-fail consistency: sysrq hard reset mid-write, then verify
 make vm-benchmark      # Performance benchmark
 make vm-stress         # 10x alternating e2e + benchmark
 ```

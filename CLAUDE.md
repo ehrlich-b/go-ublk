@@ -16,18 +16,24 @@ See **`TODO.md` → Critical Bugs** for the full state before relying on this.
 
 **Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard — but Flush only reaches the backend if the device
-  advertises a volatile write cache (`VolatileCache`, off by default) and Discard only if the
-  backend implements `DiscardBackend`; see TODO.md for the durability contract still to be decided
-- **Multi-queue is now correct** (arm64): the descriptor-mmap-offset bug that caused data
-  corruption + unkillable D-state hangs is fixed (TODO Critical Bugs #1/#2). Verified
-  Q=1/2/4/8, O_DIRECT, concurrent — 0 hangs / 0 mismatches. Honest O_DIRECT perf is now
+- Block I/O: Read, Write, Flush, Discard, Write-Zeroes. Flush reaches the backend only if the
+  device advertises a volatile write cache (`VolatileCache`, now the fail-safe default), Discard
+  only if the backend implements `DiscardBackend`, Write-Zeroes only `WriteZeroesBackend`.
+- **Logical block sizes 512 through PAGE_SIZE**, including 4Kn; out-of-range params are
+  rejected at Create rather than producing a device with the wrong capacity.
+- **Multi-queue is now correct** on both arm64 and x86_64: the descriptor-mmap-offset bug that
+  caused data corruption + unkillable D-state hangs is fixed (TODO Critical Bugs #1/#2).
+  Verified Q=1/2/4/8, O_DIRECT, concurrent — 0 hangs / 0 mismatches. Honest O_DIRECT perf is
   ~1.37M IOPS 4K randread / 816k randwrite (RAM backend, ublk-path ceiling).
 - `ublk-mem --del=all` reaps stuck/zombie devices; failed startup tears down cleanly.
+- Crash / power-fail consistency is tested (`make vm-crash`, `make vm-powerfail`): 8
+  SIGKILL-mid-write cycles and 4 hard resets mid-write, 0 lost / 0 torn / 0 aliased, clean
+  host recovery each time. See TODO.md → Phase 2.
 
 **Still open before prod:**
-- x86_64 confirmation (validated on arm64; fix is arch-independent by construction).
-- Crash / power-fail consistency: untested — the big remaining BCDR gap.
+- Host power cut (not just a guest `sysrq-b`) — the host's cache of the VM disk is untested.
+- Host-reboot-under-load (systemd shutdown storm while a device serves I/O).
+- Per-IO FUA; `UBLK_F_USER_RECOVERY`; no CI.
 
 ## Build and Test Commands
 
@@ -37,13 +43,17 @@ See **`TODO.md` → Critical Bugs** for the full state before relying on this.
 # Build
 make build              # Build all binaries
 
-# Unit tests (local machine)
-make test-unit          # Run unit tests
+# Unit tests. The code is Linux-only (io_uring), so test-unit does not even
+# compile on macOS — cross-compile and run them on the VM instead.
+make test-unit          # Run unit tests (on Linux)
+make vm-test-unit       # Cross-compile the unit tests and run them on the VM
 
 # VM tests (requires VM setup)
 make vm-reset           # Hard reset VM state
 make vm-simple-e2e      # Basic I/O test
 make vm-e2e             # Full test suite
+make vm-crash           # Crash consistency: SIGKILL daemon mid-write, recover, verify
+make vm-powerfail       # Power-fail consistency: sysrq hard reset mid-write, then verify
 make vm-benchmark       # Performance benchmark
 make vm-stress          # 10x alternating e2e + benchmark
 ```
@@ -87,7 +97,7 @@ go-ublk/
 ## Development Workflow
 
 1. Check `TODO.md` for current roadmap and priorities
-2. Run `make test-unit` before committing
+2. Run `make test-unit` before committing (`make vm-test-unit` from a macOS box)
 3. Use `make vm-e2e` to verify I/O functionality
 4. Use `make vm-stress` to verify stability after significant changes
 
