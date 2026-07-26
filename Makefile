@@ -28,7 +28,7 @@ else
 endif
 
 # Binary targets
-BINARIES = ublk-mem ublk-file ublk-null ublk-zip
+BINARIES = ublk-mem ublk-loop
 
 #==============================================================================
 # VM Configuration (override in Makefile.local or environment)
@@ -71,14 +71,10 @@ verify: FORCE
 	@echo "Building verify$(if $(BUILD_FLAGS), (with race detector),)..."
 	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/verify ./test/verify
 
-ublk-file: FORCE
-	@echo "Building ublk-file (Phase 4)"
-
-ublk-null: FORCE
-	@echo "Building ublk-null (Phase 4)"
-
-ublk-zip: FORCE
-	@echo "Building ublk-zip (Phase 4)"
+ublk-loop: FORCE
+	@mkdir -p bin
+	@echo "Building ublk-loop$(if $(BUILD_FLAGS), (with race detector),)..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ublk-loop ./examples/ublk-loop
 
 clean:
 	$(GOCLEAN)
@@ -212,7 +208,7 @@ check-module:
 # VM Testing (requires VM_HOST, VM_USER configured)
 #==============================================================================
 
-.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e
 
 # Check VM configuration before running VM targets
 vm-check:
@@ -302,6 +298,18 @@ vm-verify: ublk-mem verify
 	@$(VM_SCP) scripts/vm-verify.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@echo "Running integrity sweep on VM..."
 	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-verify.sh && ./vm-verify.sh $(VERIFY_SIZE) $(VERIFY_DURATION)"
+
+# Behavior the RAM backend cannot cover: file-offset mapping across teardown,
+# discard that returns space, write-cache honesty, read-only, compression.
+vm-loop-e2e: ublk-mem ublk-loop verify
+	@echo "Copying examples + verify + loop e2e driver to VM..."
+	@$(VM_SSH) "mkdir -p $(VM_DIR); sudo killall ublk-mem ublk-loop 2>/dev/null || true"
+	@$(VM_SCP) bin/ublk-mem $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) bin/ublk-loop $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) bin/verify $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) scripts/vm-loop-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@echo "Running example e2e on VM..."
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-loop-e2e.sh && ./vm-loop-e2e.sh"
 
 # Alias for backwards compatibility
 test-vm: vm-simple-e2e
