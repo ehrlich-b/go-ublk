@@ -15,8 +15,32 @@ import (
 	"time"
 
 	"github.com/ehrlich-b/go-ublk"
-	"github.com/ehrlich-b/go-ublk/internal/logging"
 )
+
+// memLogger is a minimal structured logger for this example. It also satisfies
+// ublk.Logger, so the library's own output lands in the same place and -v turns
+// on both at once — no internal packages needed.
+type memLogger struct{ verbose bool }
+
+func (l memLogger) Info(msg string, kv ...any)  { l.emit("INFO", msg, kv...) }
+func (l memLogger) Error(msg string, kv ...any) { l.emit("ERROR", msg, kv...) }
+
+func (l memLogger) emit(level, msg string, kv ...any) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] %s", level, msg)
+	for i := 0; i+1 < len(kv); i += 2 {
+		fmt.Fprintf(&b, " %v=%v", kv[i], kv[i+1])
+	}
+	log.Print(b.String())
+}
+
+func (l memLogger) Printf(format string, args ...interface{}) { log.Printf(format, args...) }
+
+func (l memLogger) Debugf(format string, args ...interface{}) {
+	if l.verbose {
+		log.Printf("debug: "+format, args...)
+	}
+}
 
 func main() {
 	var (
@@ -89,16 +113,16 @@ func main() {
 	// This sets UBLK_F_CMD_IOCTL_ENCODE in the feature flags sent at ADD_DEV.
 	params.EnableIoctlEncode = true
 
-	// Set up logging
-	logConfig := logging.DefaultConfig()
-	if *verbose {
-		logConfig.Level = logging.LevelDebug
-	}
-	logger := logging.NewLogger(logConfig)
-	logging.SetDefault(logger)
+	// Override the library's fail-safe default: a completed write to RAM is
+	// already as durable as this backend can ever make it, so there is no cache
+	// to flush and no reason to make the kernel send flushes.
+	params.VolatileCache = false
 
-	// Create options
-	options := &ublk.Options{}
+	// Set up logging. Options.Logger receives the library's internal
+	// diagnostics too, and Debug is what -v used to reach into internal/logging
+	// to enable.
+	logger := memLogger{verbose: *verbose}
+	options := &ublk.Options{Logger: logger, Debug: *verbose}
 
 	if *minimal {
 		logger.Info("using minimal queue depth for faster initialization", "depth", params.QueueDepth)

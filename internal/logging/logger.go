@@ -35,6 +35,10 @@ const (
 type Config struct {
 	Level  LogLevel
 	Output io.Writer
+
+	// NoTimestamp drops the timestamp prefix. Set it when Output is a caller's
+	// own logger, which stamps lines itself — otherwise every line carries two.
+	NoTimestamp bool
 }
 
 // DefaultConfig returns a sensible default configuration
@@ -54,8 +58,12 @@ func NewLogger(config *Config) *Logger {
 	if output == nil {
 		output = os.Stderr
 	}
+	flags := log.LstdFlags
+	if config.NoTimestamp {
+		flags = 0
+	}
 	return &Logger{
-		logger: log.New(output, "", log.LstdFlags),
+		logger: log.New(output, "", flags),
 		level:  config.Level,
 	}
 }
