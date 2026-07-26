@@ -181,14 +181,14 @@ func main() {
 				if maxStart < 0 {
 					maxStart = 0
 				}
-				off := (int64(rng.next()%uint64(maxStart+1))) * align
+				off := (int64(rng.next() % uint64(maxStart+1))) * align
 
 				// write + immediate read-back at the same place
 				if !pwriteAt(off, n) || !preadVerify(off, n) {
 					return
 				}
 				// independent random read elsewhere in the stripe
-				roff := (int64(rng.next()%uint64(maxStart+1))) * align
+				roff := (int64(rng.next() % uint64(maxStart+1))) * align
 				if !preadVerify(roff, n) {
 					return
 				}
