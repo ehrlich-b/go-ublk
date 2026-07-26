@@ -34,6 +34,22 @@ func TestGetBuffer_SizeBuckets(t *testing.T) {
 	}
 }
 
+// Every bucket above stops at 1MB, which is how GetBuffer's oversize path went
+// untested: it resliced a 1MB pooled buffer to the requested length, so anything
+// larger panicked with "slice bounds out of range" and killed the caller.
+func TestGetBuffer_LargerThanEveryBucket(t *testing.T) {
+	for _, size := range []uint32{size1m + 1, 4 * 1024 * 1024, 32 * 1024 * 1024} {
+		buf := GetBuffer(size)
+		if len(buf) != int(size) {
+			t.Errorf("GetBuffer(%d) returned len=%d, want %d", size, len(buf), size)
+		}
+		if cap(buf) < int(size) {
+			t.Errorf("GetBuffer(%d) returned cap=%d, which is shorter than its own length", size, cap(buf))
+		}
+		PutBuffer(buf) // must not panic or corrupt a pool with an odd capacity
+	}
+}
+
 func TestBufferPool_Reuse(t *testing.T) {
 	// Get a buffer
 	buf1 := GetBuffer(128 * 1024)

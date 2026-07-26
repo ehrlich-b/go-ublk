@@ -581,12 +581,18 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 	var buffer []byte
 
-	if length > maxBufferSize {
-		// Use buffer pool for large I/Os to avoid hot-path allocations
-		buffer = GetBuffer(length)
-		defer PutBuffer(buffer)
-	} else {
-		buffer = (*[constants.IOBufferSizePerTag]byte)(bufPtr)[:length:length]
+	// Only data-transfer ops need a buffer. A FLUSH carries no data, and a
+	// DISCARD's length describes a range to deallocate rather than bytes to
+	// move — sizing a buffer from it meant any discard larger than the biggest
+	// pool (an fstrim, or blkdiscard over a few MB) panicked the whole daemon.
+	if op == uapi.UBLK_IO_OP_READ || op == uapi.UBLK_IO_OP_WRITE {
+		if length > maxBufferSize {
+			// Use buffer pool for large I/Os to avoid hot-path allocations
+			buffer = GetBuffer(length)
+			defer PutBuffer(buffer)
+		} else {
+			buffer = (*[constants.IOBufferSizePerTag]byte)(bufPtr)[:length:length]
+		}
 	}
 
 	var err error

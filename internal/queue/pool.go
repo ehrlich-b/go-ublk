@@ -43,8 +43,13 @@ func GetBuffer(size uint32) []byte {
 		return (*globalPool.pool256k.Get().(*[]byte))[:size]
 	case size <= size512k:
 		return (*globalPool.pool512k.Get().(*[]byte))[:size]
-	default:
+	case size <= size1m:
 		return (*globalPool.pool1m.Get().(*[]byte))[:size]
+	default:
+		// Bigger than every pool: allocate exactly rather than reslicing a
+		// pooled buffer past its capacity, which panics. PutBuffer drops
+		// non-standard capacities, so this is not returned to a pool.
+		return make([]byte, size)
 	}
 }
 
