@@ -126,121 +126,19 @@ func TestWriteZeroesBackend(t *testing.T) {
 	}
 }
 
-func TestSyncBackend(t *testing.T) {
-	backend := NewMockBackend(1024)
-
-	// Check if backend supports sync
-	syncBackend, ok := Backend(backend).(SyncBackend)
-	if !ok {
-		t.Fatal("Backend should implement SyncBackend")
-	}
-
-	// Test sync
-	err := syncBackend.Sync()
-	if err != nil {
-		t.Errorf("Sync failed: %v", err)
-	}
-	if !backend.IsSynced() {
-		t.Error("backend not marked as synced")
-	}
-
-	// Reset sync flag
-	backend.Reset()
-
-	// Test sync range
-	err = syncBackend.SyncRange(0, 512)
-	if err != nil {
-		t.Errorf("SyncRange failed: %v", err)
-	}
-	if !backend.IsSynced() {
-		t.Error("backend not marked as synced after SyncRange")
-	}
-}
-
-func TestStatBackend(t *testing.T) {
-	backend := NewMockBackend(1024)
-
-	// Set some custom stats
-	backend.SetCustomStats(map[string]interface{}{
-		"custom_stat": 42,
-	})
-
-	// Do some operations to generate call counts
-	_, _ = backend.ReadAt(make([]byte, 10), 0)
-	_, _ = backend.WriteAt([]byte("test"), 0)
-	_ = backend.Flush()
-
-	// Check if backend supports stats
-	statBackend, ok := Backend(backend).(StatBackend)
-	if !ok {
-		t.Fatal("Backend should implement StatBackend")
-	}
-
-	// Get stats
-	stats := statBackend.Stats()
-	if stats == nil {
-		t.Fatal("Stats() returned nil")
-	}
-
-	if customStat, ok := stats["custom_stat"].(int); !ok || customStat != 42 {
-		t.Errorf("Expected custom_stat=42, got %v", stats["custom_stat"])
-	}
-
-	if readCalls, ok := stats["read_calls"].(int); !ok || readCalls != 1 {
-		t.Errorf("Expected read_calls=1, got %v", stats["read_calls"])
-	}
-
-	if writeCalls, ok := stats["write_calls"].(int); !ok || writeCalls != 1 {
-		t.Errorf("Expected write_calls=1, got %v", stats["write_calls"])
-	}
-}
-
-func TestResizeBackend(t *testing.T) {
-	backend := NewMockBackend(1024)
-
-	// Check if backend supports resize
-	resizeBackend, ok := Backend(backend).(ResizeBackend)
-	if !ok {
-		t.Fatal("Backend should implement ResizeBackend")
-	}
-
-	// Test expanding
-	err := resizeBackend.Resize(2048)
-	if err != nil {
-		t.Errorf("Resize failed: %v", err)
-	}
-	if backend.Size() != 2048 {
-		t.Errorf("Size after resize = %d, want 2048", backend.Size())
-	}
-
-	// Test shrinking
-	err = resizeBackend.Resize(512)
-	if err != nil {
-		t.Errorf("Resize failed: %v", err)
-	}
-	if backend.Size() != 512 {
-		t.Errorf("Size after resize = %d, want 512", backend.Size())
-	}
-
-	// Test invalid size
-	err = resizeBackend.Resize(-1)
-	if err == nil {
-		t.Error("Resize with negative size should fail")
-	}
-}
-
-// A block size other than 512 does not fail — it silently reports the wrong
-// capacity and does I/O at the wrong offset — so the guard against it has to
-// stay honest about which values reach the kernel.
+// The kernel requires 9 <= logical_bs_shift <= PAGE_SHIFT, and a bad block size
+// used to be accepted and then corrupt data rather than fail here.
 func TestValidateParamsBlockSize(t *testing.T) {
 	tests := []struct {
 		blockSize int
 		wantErr   bool
 	}{
 		{512, false},
-		{0, true},    // divides by zero in the control plane
-		{4096, true}, // reports 1/8th the capacity, writes at 8x the offset
-		{1024, true},
+		{4096, false}, // 4Kn: valid now that sectors are counted in 512 bytes
+		{0, true},     // would divide by zero in the control plane
+		{511, true},   // below one sector
+		{1536, true},  // not a power of two
+		{8192, true},  // above the page size
 	}
 
 	for _, tt := range tests {
@@ -252,6 +150,30 @@ func TestValidateParamsBlockSize(t *testing.T) {
 				tt.blockSize, err, tt.wantErr)
 		}
 	}
+}
+
+func TestValidateParamsRejectsUnusableSizes(t *testing.T) {
+	t.Run("nil backend", func(t *testing.T) {
+		params := DefaultParams(nil)
+		if err := validateParams(&params); err == nil {
+			t.Error("accepted a nil Backend")
+		}
+	})
+
+	t.Run("MaxIOSize below a page", func(t *testing.T) {
+		params := DefaultParams(NewMockBackend(1 << 20))
+		params.MaxIOSize = 2048
+		if err := validateParams(&params); err == nil {
+			t.Error("accepted MaxIOSize below the page size, which the kernel rejects")
+		}
+	})
+
+	t.Run("backend size not a whole number of blocks", func(t *testing.T) {
+		params := DefaultParams(NewMockBackend(1<<20 + 100))
+		if err := validateParams(&params); err == nil {
+			t.Error("accepted a backend size that is not a multiple of the block size")
+		}
+	})
 }
 
 func TestDefaultParams(t *testing.T) {

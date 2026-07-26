@@ -22,6 +22,17 @@ type discardingBackend struct{ plainBackend }
 
 func (discardingBackend) Discard(offset, length int64) error { return nil }
 
+// zeroingBackend implements interfaces.WriteZeroesBackend but NOT DiscardBackend.
+type zeroingBackend struct{ plainBackend }
+
+func (zeroingBackend) WriteZeroes(offset, length int64) error { return nil }
+
+// bothBackend can service discard and write-zeroes.
+type bothBackend struct{ plainBackend }
+
+func (bothBackend) Discard(offset, length int64) error     { return nil }
+func (bothBackend) WriteZeroes(offset, length int64) error { return nil }
+
 // The device attributes are plumbed all the way from the public DeviceParams
 // into ctrl.DeviceParams, so the only thing that can silently drop them is the
 // SET_PARAMS payload. These tests pin both the flag mapping and the byte the
@@ -92,11 +103,11 @@ func TestDiscardParams(t *testing.T) {
 		MaxDiscardSegments: 1,
 	}
 
-	t.Run("backend without Discard is not advertised", func(t *testing.T) {
+	t.Run("backend with neither capability is not advertised", func(t *testing.T) {
 		p := limits
 		p.Backend = plainBackend{}
 		if _, ok := discardParams(&p); ok {
-			t.Error("advertised discard limits for a backend that cannot discard")
+			t.Error("advertised limits for a backend that can do neither")
 		}
 	})
 
@@ -120,9 +131,48 @@ func TestDiscardParams(t *testing.T) {
 			got.DiscardAlignment != 4096 || got.MaxDiscardSegments != 1 {
 			t.Errorf("limits = %+v, want the caller's values", got)
 		}
-		// Never advertise write-zeroes: the runner has no case for it.
+		// This backend cannot zero, so that limit must stay unadvertised.
 		if got.MaxWriteZeroesSectors != 0 {
-			t.Errorf("MaxWriteZeroesSectors = %d, want 0 (op not implemented)", got.MaxWriteZeroesSectors)
+			t.Errorf("MaxWriteZeroesSectors = %d, want 0 (backend has no WriteZeroes)", got.MaxWriteZeroesSectors)
+		}
+	})
+
+	// Discard and write-zeroes travel in one param block but are independent
+	// capabilities: advertising either one the backend cannot service means the
+	// kernel sends an op we drop on the floor.
+	t.Run("write-zeroes alone advertises only its own limit", func(t *testing.T) {
+		p := limits
+		p.Backend = zeroingBackend{}
+		got, ok := discardParams(&p)
+		if !ok {
+			t.Fatal("limits not advertised for a WriteZeroesBackend")
+		}
+		if got.MaxWriteZeroesSectors != 2048 {
+			t.Errorf("MaxWriteZeroesSectors = %d, want 2048", got.MaxWriteZeroesSectors)
+		}
+		if got.MaxDiscardSectors != 0 {
+			t.Errorf("MaxDiscardSectors = %d, want 0 (backend cannot discard)", got.MaxDiscardSectors)
+		}
+		// Required even when only write-zeroes is advertised, or the kernel
+		// rejects the entire SET_PARAMS.
+		if got.DiscardGranularity == 0 {
+			t.Error("DiscardGranularity is 0, which fails ublk_validate_params")
+		}
+	})
+
+	t.Run("a backend doing both advertises both", func(t *testing.T) {
+		p := limits
+		p.Backend = bothBackend{}
+		got, ok := discardParams(&p)
+		if !ok {
+			t.Fatal("limits not advertised")
+		}
+		if got.MaxDiscardSectors != 2048 || got.MaxWriteZeroesSectors != 2048 {
+			t.Errorf("limits = discard %d / zeroes %d, want 2048 both",
+				got.MaxDiscardSectors, got.MaxWriteZeroesSectors)
+		}
+		if got.MaxDiscardSegments != 1 {
+			t.Errorf("MaxDiscardSegments = %d, want 1", got.MaxDiscardSegments)
 		}
 	})
 

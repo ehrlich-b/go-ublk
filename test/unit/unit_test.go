@@ -42,9 +42,6 @@ func TestBackendInterface(t *testing.T) {
 	// Test optional interfaces
 	var _ ublk.DiscardBackend = backend
 	var _ ublk.WriteZeroesBackend = backend
-	var _ ublk.SyncBackend = backend
-	var _ ublk.StatBackend = backend
-	var _ ublk.ResizeBackend = backend
 
 	// Test operations
 	testData := []byte("test data")

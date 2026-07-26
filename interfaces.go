@@ -60,39 +60,6 @@ type WriteZeroesBackend interface {
 	WriteZeroes(offset, length int64) error
 }
 
-// SyncBackend is an optional interface for fine-grained sync control.
-type SyncBackend interface {
-	Backend
-
-	// Sync synchronizes the backend state to stable storage.
-	// This is different from Flush in that it may also sync metadata.
-	Sync() error
-
-	// SyncRange synchronizes only the specified range to stable storage.
-	// This can be more efficient than syncing the entire backend.
-	SyncRange(offset, length int64) error
-}
-
-// StatBackend is an optional interface that provides device statistics.
-type StatBackend interface {
-	Backend
-
-	// Stats returns backend-specific statistics.
-	// The returned map contains string keys with numeric values.
-	Stats() map[string]interface{}
-}
-
-// ResizeBackend is an optional interface for backends that support resizing.
-type ResizeBackend interface {
-	Backend
-
-	// Resize changes the size of the backend.
-	// The new size must be greater than or equal to 0.
-	// If the new size is smaller, data may be truncated.
-	// If the new size is larger, the new space should read as zeros.
-	Resize(newSize int64) error
-}
-
 // Logger interface for optional logging.
 type Logger interface {
 	Printf(format string, args ...interface{})

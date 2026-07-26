@@ -259,7 +259,4 @@ var (
 	_ Backend            = (*MockBackend)(nil)
 	_ DiscardBackend     = (*MockBackend)(nil)
 	_ WriteZeroesBackend = (*MockBackend)(nil)
-	_ SyncBackend        = (*MockBackend)(nil)
-	_ StatBackend        = (*MockBackend)(nil)
-	_ ResizeBackend      = (*MockBackend)(nil)
 )

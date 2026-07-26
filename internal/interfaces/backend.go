@@ -18,6 +18,13 @@ type DiscardBackend interface {
 	Discard(offset, length int64) error
 }
 
+// WriteZeroesBackend is an optional interface for zeroing a range without
+// transferring a buffer of zeros.
+type WriteZeroesBackend interface {
+	Backend
+	WriteZeroes(offset, length int64) error
+}
+
 // Logger interface for optional logging.
 type Logger interface {
 	Printf(format string, args ...interface{})
