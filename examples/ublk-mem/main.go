@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/ehrlich-b/go-ublk"
-	"github.com/ehrlich-b/go-ublk/internal/ctrl"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 )
 
 func main() {
 	var (
 		sizeStr    = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
+		zip        = flag.Bool("zip", false, "Compress the contents in RAM (flate, 64KB chunks)")
 		verbose    = flag.Bool("v", false, "Verbose output")
 		minimal    = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
 		numQueues  = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
@@ -61,12 +61,20 @@ func main() {
 		log.Fatalf("Invalid size '%s': %v", *sizeStr, err)
 	}
 
-	// Create memory backend
-	memBackend := newMemoryBackend(size)
-	defer memBackend.Close()
+	// Create the backend. Both are plain ublk.Backend implementations; the
+	// device does not know or care which one is behind it.
+	var backend ublk.Backend
+	zipped := (*zipBackend)(nil)
+	if *zip {
+		zipped = newZipBackend(size)
+		backend = zipped
+	} else {
+		backend = newMemoryBackend(size)
+	}
+	defer backend.Close()
 
 	// Create device parameters
-	params := ublk.DefaultParams(memBackend)
+	params := ublk.DefaultParams(backend)
 	if *minimal {
 		// Use minimal parameters for testing
 		params.QueueDepth = 1 // Absolute minimum
@@ -95,7 +103,7 @@ func main() {
 	if *minimal {
 		logger.Info("using minimal queue depth for faster initialization", "depth", params.QueueDepth)
 	}
-	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size)
+	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size, "compressed", *zip)
 
 	// Create and serve the device
 	ctx, cancel := context.WithCancel(context.Background())
@@ -199,6 +207,20 @@ func main() {
 		logger.Info("cleanup timeout, forcing exit (device may be left registered; reap with --del=all)")
 	}
 
+	// Report what the compressed device actually cost in RAM. Holes (all-zero
+	// chunks) are not stored, so an untouched device reports ~0.
+	if zipped != nil {
+		stored := zipped.compressedBytes()
+		ratio := "n/a (nothing stored)"
+		if stored > 0 {
+			ratio = fmt.Sprintf("%.1fx", float64(size)/float64(stored))
+		}
+		logger.Info("compressed backend usage",
+			"stored", formatSize(stored),
+			"addressable", formatSize(size),
+			"ratio", ratio)
+	}
+
 	// Write memory profile if requested
 	if *memprofile != "" {
 		f, err := os.Create(*memprofile)
@@ -226,32 +248,19 @@ func main() {
 // reapDevices deletes stuck ublk devices left registered in the kernel by a
 // daemon that was killed ungracefully (e.g. SIGKILL). Such devices have no
 // server, cannot service I/O, and pin the ublk_drv module so it can't be
-// unloaded. spec is a single device ID or "all" to scan every possible ID.
-// Best effort: STOP is attempted before DEL and its error is ignored, since a
-// serverless device may already be quiesced.
+// unloaded. spec is a single device ID or "all" to reap every registered device.
 func reapDevices(spec string) error {
-	c, err := ctrl.NewController()
-	if err != nil {
-		return fmt.Errorf("open control device: %w", err)
-	}
-	defer c.Close()
-
-	reap := func(id uint32) {
-		// GET_DEV_INFO probes existence; skip IDs with no registered device.
-		if _, err := c.GetDeviceInfo(id); err != nil {
-			return
-		}
-		_ = c.StopDevice(id) // may already be stopped; ignore
-		if err := c.DeleteDevice(id); err != nil {
-			fmt.Printf("device %d: delete failed: %v\n", id, err)
-		} else {
-			fmt.Printf("device %d: deleted\n", id)
-		}
-	}
-
 	if spec == "all" {
-		for id := uint32(0); id < 64; id++ {
-			reap(id)
+		ids, err := ublk.ListDevices()
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := ublk.DeleteDevice(id); err != nil {
+				fmt.Printf("device %d: %v\n", id, err)
+			} else {
+				fmt.Printf("device %d: deleted\n", id)
+			}
 		}
 		return nil
 	}
@@ -260,7 +269,10 @@ func reapDevices(spec string) error {
 	if err != nil || id < 0 {
 		return fmt.Errorf("invalid -del value %q (want a device ID or 'all')", spec)
 	}
-	reap(uint32(id))
+	if err := ublk.DeleteDevice(uint32(id)); err != nil {
+		return err
+	}
+	fmt.Printf("device %d: deleted\n", id)
 	return nil
 }
 
