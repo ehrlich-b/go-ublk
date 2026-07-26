@@ -6,7 +6,10 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 **Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard
+- Block I/O: Read, Write, Flush, Discard. Read/Write are verified byte-exact; Flush is only
+  delivered by the kernel when the device advertises a volatile write cache (`VolatileCache`,
+  off by default), and Discard only when the backend implements `DiscardBackend`. Before
+  2026-07-25 neither was reachable at all, because SET_PARAMS sent no attrs and no discard block.
 - **Multi-queue (≥2) now correct** on arm64: the descriptor-mmap-offset bug that caused
   data corruption and D-state hangs is fixed (Critical Bugs #1/#2). Verified Q=1/2/4/8,
   O_DIRECT, concurrent read-after-write — 0 hangs / 0 mismatches across many runs.

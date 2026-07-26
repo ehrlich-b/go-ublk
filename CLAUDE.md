@@ -16,7 +16,9 @@ See **`TODO.md` → Critical Bugs** for the full state before relying on this.
 
 **Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard
+- Block I/O: Read, Write, Flush, Discard — but Flush only reaches the backend if the device
+  advertises a volatile write cache (`VolatileCache`, off by default) and Discard only if the
+  backend implements `DiscardBackend`; see TODO.md for the durability contract still to be decided
 - **Multi-queue is now correct** (arm64): the descriptor-mmap-offset bug that caused data
   corruption + unkillable D-state hangs is fixed (TODO Critical Bugs #1/#2). Verified
   Q=1/2/4/8, O_DIRECT, concurrent — 0 hangs / 0 mismatches. Honest O_DIRECT perf is now
