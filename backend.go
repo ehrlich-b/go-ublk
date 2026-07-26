@@ -85,6 +85,25 @@ type DeviceParams struct {
 	CPUAffinity []int  // CPU affinity mask for queue threads
 }
 
+// validateParams rejects parameter combinations the data plane does not
+// actually implement, so a caller finds out at creation time instead of
+// discovering it as corrupted data.
+func validateParams(params *DeviceParams) error {
+	// The ublk UAPI counts sectors in 512-byte units everywhere:
+	// ublk_param_basic.dev_sectors, and ublksrv_io_desc.start_sector /
+	// nr_sectors. But the control plane derives dev_sectors from
+	// LogicalBlockSize and the data plane multiplies start_sector by it, so
+	// both are only correct at 512. A 4096-byte block size reports an eighth of
+	// the real capacity and then reads and writes at eight times the intended
+	// offset — verified as byte-level corruption on a file backend. A zero
+	// value divides by zero in the control plane.
+	if params.LogicalBlockSize != 512 {
+		return fmt.Errorf("LogicalBlockSize is %d; only 512 is supported (start from DefaultParams)",
+			params.LogicalBlockSize)
+	}
+	return nil
+}
+
 // DefaultParams returns default device parameters
 func DefaultParams(backend Backend) DeviceParams {
 	return DeviceParams{
@@ -150,6 +169,10 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 
 	if options == nil {
 		options = &Options{}
+	}
+
+	if err := validateParams(&params); err != nil {
+		return nil, err
 	}
 
 	if options.Context != nil {
@@ -360,6 +383,10 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 func Create(params DeviceParams, options *Options) (*Device, error) {
 	if options == nil {
 		options = &Options{}
+	}
+
+	if err := validateParams(&params); err != nil {
+		return nil, err
 	}
 
 	// Create controller

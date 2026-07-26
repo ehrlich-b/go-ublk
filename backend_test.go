@@ -229,6 +229,31 @@ func TestResizeBackend(t *testing.T) {
 	}
 }
 
+// A block size other than 512 does not fail — it silently reports the wrong
+// capacity and does I/O at the wrong offset — so the guard against it has to
+// stay honest about which values reach the kernel.
+func TestValidateParamsBlockSize(t *testing.T) {
+	tests := []struct {
+		blockSize int
+		wantErr   bool
+	}{
+		{512, false},
+		{0, true},    // divides by zero in the control plane
+		{4096, true}, // reports 1/8th the capacity, writes at 8x the offset
+		{1024, true},
+	}
+
+	for _, tt := range tests {
+		params := DefaultParams(NewMockBackend(1 << 20))
+		params.LogicalBlockSize = tt.blockSize
+		err := validateParams(&params)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("validateParams(LogicalBlockSize=%d) error = %v, wantErr %v",
+				tt.blockSize, err, tt.wantErr)
+		}
+	}
+}
+
 func TestDefaultParams(t *testing.T) {
 	backend := NewMockBackend(1024)
 	params := DefaultParams(backend)
