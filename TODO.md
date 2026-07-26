@@ -6,10 +6,14 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 **Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard. Read/Write are verified byte-exact; Flush is only
-  delivered by the kernel when the device advertises a volatile write cache (`VolatileCache`,
-  off by default), and Discard only when the backend implements `DiscardBackend`. Before
-  2026-07-25 neither was reachable at all, because SET_PARAMS sent no attrs and no discard block.
+- Block I/O: Read, Write, Flush, Discard, Write-Zeroes. Read/Write are verified byte-exact.
+  The kernel only delivers Flush when the device advertises a volatile write cache
+  (`VolatileCache`, now the fail-safe default — see #13), Discard when the backend implements
+  `DiscardBackend`, and Write-Zeroes when it implements `WriteZeroesBackend`. Before 2026-07-25
+  none of the three was reachable, because SET_PARAMS sent no attrs and no discard block.
+- **Logical block sizes 512 through PAGE_SIZE**, including 4Kn (#10). Sectors are counted in
+  512-byte units throughout, as the UAPI requires; params outside the kernel's rules are
+  rejected at Create instead of producing a device that reports the wrong capacity.
 - **Multi-queue (≥2) now correct** on arm64: the descriptor-mmap-offset bug that caused
   data corruption and D-state hangs is fixed (Critical Bugs #1/#2). Verified Q=1/2/4/8,
   O_DIRECT, concurrent read-after-write — 0 hangs / 0 mismatches across many runs.
@@ -161,37 +165,70 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
    exactly rather than reslicing a pooled buffer past its capacity. Found by the
    `ublk-loop` e2e, which discards 64MB.
 
-10. **[OPEN — guarded] `LogicalBlockSize` other than 512 silently corrupts data.**
+10. **[FIXED — 2026-07-26] `LogicalBlockSize` other than 512 silently corrupted data.**
     The ublk UAPI counts sectors in 512-byte units everywhere
-    (`ublk_param_basic.dev_sectors`, `ublksrv_io_desc.start_sector`/`nr_sectors`),
-    but `control.go:209` derives `DevSectors` from `LogicalBlockSize` and
-    `runner.go:572` multiplies `StartSector` by it. The two disagree with
-    `submitCommitAndFetch`, which hardcodes `NrSectors << 9` — the inconsistency
-    that gives it away. Verified with a 4096-byte build of `ublk-loop`: a 256MB
-    device reports 32MB (`blockdev --getsz` = 65536), reads and writes land at 8x
-    the intended offset, and the shadow oracle fails byte-exact
-    (`FULL-READBACK MISMATCH at dev-offset 25096192: got 0x00 want 0x95`). A zero
-    value divides by zero. **Mitigated, not fixed:** `validateParams` now rejects
-    anything but 512 at Create time, so it fails loudly instead of corrupting.
-    Real fix is to treat sectors as 512 bytes throughout and derive block-size
-    shifts separately; needed before 4Kn support or zero-copy (which wants 4K).
+    (`ublk_param_basic.dev_sectors` and `max_sectors`,
+    `ublksrv_io_desc.start_sector`/`nr_sectors`), but the control plane derived
+    `DevSectors` from `LogicalBlockSize` and the data plane multiplied
+    `StartSector` by it, while `submitCommitAndFetch` hardcoded `NrSectors << 9`
+    — the internal disagreement that gave it away. A 4096-byte build of
+    `ublk-loop` reported a 256MB device as 32MB and did I/O at 8x the intended
+    offset (`FULL-READBACK MISMATCH at dev-offset 25096192: got 0x00 want 0x95`);
+    a zero value divided by zero. Fixed by counting sectors in `uapi.SectorSize`
+    everywhere and deleting the runner's `blockSize` field entirely so the
+    conflation cannot come back. `validateParams` now enforces the kernel's real
+    rule (power of two, 512..PAGE_SIZE) plus MaxIOSize and backend-size
+    alignment. Verified on arm64: a 4Kn device reports 268435456 bytes and the
+    shadow oracle is CLEAN at Q=4/depth=64/O_DIRECT, and the 512-byte sweep is
+    still 24/24.
 
-11. **[OPEN — API honesty] Four of five optional backend interfaces are never called.**
-    `WriteZeroesBackend`, `SyncBackend`, `StatBackend` and `ResizeBackend` are
-    public, documented, and asserted by `backend_test.go`, but nothing in the I/O
-    loop consults them — only `DiscardBackend` is wired. A user implements one and
-    it silently never fires. Either wire them or drop them; documenting them as
-    "not yet wired" (done in examples/README.md) is a stopgap.
+11. **[FIXED — 2026-07-26] Four of five optional backend interfaces were never called.**
+    `WriteZeroesBackend`, `SyncBackend`, `StatBackend` and `ResizeBackend` were
+    public, documented, and asserted by tests, but nothing in the I/O loop
+    consulted them, so a user could implement one and never have it fire.
+    Resolved by wiring the one with a kernel operation behind it and dropping the
+    three without: `UBLK_IO_OP_WRITE_ZEROES` now dispatches to
+    `WriteZeroesBackend`, and the write-zeroes limit is advertised only when the
+    backend implements it (discard and write-zeroes share one param block but are
+    independent capabilities). `SyncBackend`/`StatBackend`/`ResizeBackend` are
+    removed: ublk has no range-sync op, statistics are the caller's own business
+    since they hold the backend, and resize is a feature rather than a wiring
+    task. Verified: `write_zeroes_max_bytes` is advertised, `blkdiscard -z`
+    succeeds, the range reads back all zeros, and the backing file returns to
+    sparse (the punch-hole path).
 
-12. **[PARTLY FIXED — 2026-07-26] The examples could not be compiled by a library user.**
+12. **[FIXED — 2026-07-26] The examples could not be compiled by a library user.**
     `examples/ublk-mem` imported `internal/ctrl` (to reap leaked devices) and
     `internal/logging` (for `-v`), neither reachable from outside the module — so
-    the flagship example was not a valid demonstration of the public API. Reaping
-    is now public (`ublk.ListDevices`, `ublk.DeleteDevice`) and `ublk-loop` uses
-    only the public API. Still open: there is no public way to enable the
-    internal debug logging that `-v` turns on, so `ublk-mem` still imports
-    `internal/logging`. `Options.Logger` only reaches ~10 `Printf` call sites in
-    `backend.go` and nothing in the data plane.
+    the flagship example was not a valid demonstration of the public API.
+    Reaping is now public (`ublk.ListDevices`, `ublk.DeleteDevice`), and
+    `Options.Debug` plus an adapter that routes the internal logger's output
+    through `Options.Logger` replaces the internal-logging import — so a caller's
+    own logger now receives the control-plane and queue diagnostics instead of
+    only the handful of messages `backend.go` emits directly. Neither example
+    imports `internal/` any more.
+
+13. **[DECIDED — 2026-07-26] Durability default flipped to advertising a volatile write cache.**
+    `DefaultParams` now sets `VolatileCache: true`. The library cannot know
+    whether a backend's completed write is durable, and the two mistakes are not
+    symmetric: claiming a cache that does not exist costs a no-op flush
+    round-trip, while hiding one that does exist loses data on power failure with
+    no error anywhere. A backend that makes every write durable before returning
+    should set it false, which also stops the kernel sending flushes it does not
+    need — `ublk-mem` does exactly that (RAM has no cache below it) and
+    `ublk-loop` sets it from its `-sync` flag. Per-IO FUA remains unadvertised
+    until `UBLK_IO_F_FUA` is honored.
+
+14. **[FIXED — 2026-07-26] `vm-simple-e2e.sh` killed unrelated processes, including its own caller.**
+    `cleanup_force()` ran `ps aux | grep -E "(ublk-mem|timeout)"` and SIGKILLed
+    every match, so any process whose command line merely mentioned those strings
+    died with it — including the ssh session or shell running the script, which
+    then looked exactly like the script hanging after "device stopped
+    successfully". (An earlier note in this file claiming that hang was a real
+    pre-existing defect was wrong; the script exits 0.) Now matched by exact
+    process name via `pgrep -x`, D-state entries skipped, and the `killall -9
+    ublk-mem timeout dd` on the I/O-hang path narrowed the same way.
+    `vm-fuzz.sh`'s unanchored `pkill` patterns were tightened too.
 
 ---
 

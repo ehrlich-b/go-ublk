@@ -64,12 +64,21 @@ func (b *MyBackend) Discard(offset, length int64) error {
 }
 ```
 
-### Not yet wired
+### WriteZeroesBackend — wired
 
-`WriteZeroesBackend`, `SyncBackend`, `StatBackend` and `ResizeBackend` are
-declared in the public API but **nothing calls them yet** — the I/O loop only
-dispatches Read, Write, Flush and Discard. Implementing them today is harmless
-but has no effect; don't rely on them for correctness.
+Zero a range without transferring a buffer of zeros, and likewise what makes the
+device advertise `write_zeroes_max_bytes` at all. Unlike discard, this one is not
+advisory: the range must actually read back as zeros afterwards.
+
+```go
+func (b *MyBackend) WriteZeroes(offset, length int64) error {
+    // Punch a hole, or write zeros — but the bytes must read back zeroed
+    return nil
+}
+```
+
+Those two are the complete set. `Read`, `Write` and `Flush` come from `Backend`
+itself; the I/O loop dispatches exactly these five operations.
 
 ## Durability
 
@@ -77,14 +86,20 @@ A completed write is durable only if your backend made it durable. The device
 tells the kernel which of those two worlds it lives in, and that decides whether
 you ever receive a `Flush`:
 
-- `params.VolatileCache = true` — writes may still be in a cache when `WriteAt`
-  returns. The kernel sends a FLUSH whenever something above needs durability (a
-  journal commit, an `fsync`, a barrier), and your `Flush()` must make previous
-  writes durable before it returns.
-- `params.VolatileCache = false` (the current default) — you are promising every
-  completed write is *already* durable. The kernel then never sends a flush at
-  all: it completes empty flushes itself and drops `REQ_PREFLUSH`. Claiming this
-  when it isn't true loses data on power failure, with no error anywhere.
+- `params.VolatileCache = true` (the default) — writes may still be in a cache
+  when `WriteAt` returns. The kernel sends a FLUSH whenever something above needs
+  durability (a journal commit, an `fsync`, a barrier), and your `Flush()` must
+  make previous writes durable before it returns.
+- `params.VolatileCache = false` — you are promising every completed write is
+  *already* durable. The kernel then never sends a flush at all: it completes
+  empty flushes itself and drops `REQ_PREFLUSH`. Claiming this when it isn't true
+  loses data on power failure, with no error anywhere.
+
+The default is the fail-safe one because the library cannot know which world your
+backend lives in, and the mistakes are not symmetric: a cache that doesn't exist
+costs one no-op round-trip, while hiding one that does costs data. Set it false
+only if a returned write is genuinely durable — `ublk-mem` does (RAM has nothing
+underneath it to flush to).
 
 `ublk-loop` shows both, honestly: buffered by default (volatile cache, flush →
 `fsync`), and `-sync` for `O_DSYNC` (write-through, no flushes needed).
