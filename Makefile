@@ -39,20 +39,21 @@ VM_USER ?= $(UBLK_VM_USER)
 VM_DIR  ?= ~/ublk-test
 VM_PASS ?= $(UBLK_VM_PASS)
 
-# SSH command construction
+# SSH command construction. Both are ?= so a Makefile.local can supply a whole
+# transport instead of a host — e.g. a Lima VM needs `ssh -F ~/.lima/NAME/ssh.config`.
 ifdef VM_PASS
-  VM_SSH = sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST)
-  VM_SCP = sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no
+  VM_SSH ?= sshpass -p "$(VM_PASS)" ssh -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST)
+  VM_SCP ?= sshpass -p "$(VM_PASS)" scp -o StrictHostKeyChecking=no
 else
-  VM_SSH = ssh $(VM_USER)@$(VM_HOST)
-  VM_SCP = scp
+  VM_SSH ?= ssh $(VM_USER)@$(VM_HOST)
+  VM_SCP ?= scp
 endif
 
 #==============================================================================
 # Core Targets
 #==============================================================================
 
-.PHONY: all build verify clean test test-unit test-integration deps tidy fmt lint vet help
+.PHONY: all build verify crash clean test test-unit test-integration deps tidy fmt lint vet help
 
 all: deps build test
 
@@ -75,6 +76,14 @@ ublk-loop: FORCE
 	@mkdir -p bin
 	@echo "Building ublk-loop$(if $(BUILD_FLAGS), (with race detector),)..."
 	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ublk-loop ./examples/ublk-loop
+
+# Crash / power-fail consistency oracle (test/crash) — self-describing blocks
+# plus a durability witness, so it can verify data after its own process (or the
+# whole machine) has died.
+crash: FORCE
+	@mkdir -p bin
+	@echo "Building crash$(if $(BUILD_FLAGS), (with race detector),)..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/crash ./test/crash
 
 clean:
 	$(GOCLEAN)
@@ -208,7 +217,7 @@ check-module:
 # VM Testing (requires VM_HOST, VM_USER configured)
 #==============================================================================
 
-.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e vm-crash vm-powerfail vm-test-unit
 
 # Check VM configuration before running VM targets
 vm-check:
@@ -310,6 +319,61 @@ vm-loop-e2e: ublk-mem ublk-loop verify
 	@$(VM_SCP) scripts/vm-loop-e2e.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
 	@echo "Running example e2e on VM..."
 	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-loop-e2e.sh && ./vm-loop-e2e.sh"
+
+# Crash consistency: SIGKILL the daemon mid-write, recover, verify no lost /
+# torn / aliased data (TODO Phase 2).
+CRASH_CYCLES ?= 6
+CRASH_SIZE ?= 256M
+vm-crash: ublk-loop crash
+	@echo "Copying ublk-loop + crash oracle + driver to VM..."
+	@$(VM_SSH) "mkdir -p $(VM_DIR); sudo pkill -9 -x ublk-loop 2>/dev/null || true"
+	@$(VM_SCP) bin/ublk-loop $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) bin/crash $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) scripts/vm-crash.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@echo "Running crash-consistency cycles on VM..."
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-crash.sh && ./vm-crash.sh kill $(CRASH_CYCLES) $(CRASH_SIZE)"
+
+# Real power-fail: arm the writer, hard-reset the machine out from under it with
+# sysrq, then verify on the surviving image. Only this loses the page cache, so
+# only this tests whether a flush actually reached the disk.
+vm-powerfail: ublk-loop crash
+	@echo "Copying ublk-loop + crash oracle + driver to VM..."
+	@$(VM_SSH) "mkdir -p $(VM_DIR); sudo pkill -9 -x ublk-loop 2>/dev/null || true"
+	@$(VM_SCP) bin/ublk-loop $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) bin/crash $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) scripts/vm-crash.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-crash.sh && ./vm-crash.sh arm $(CRASH_SIZE)"
+	@echo "Hard-resetting VM via sysrq (no cache flush)..."
+	@timeout 3 $(VM_SSH) 'sudo sh -c "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"' || true
+	@echo "Waiting for VM to come back..."
+	@for i in $$(seq 1 60); do \
+		sleep 5; \
+		if $(VM_SSH) 'echo ok' >/dev/null 2>&1; then echo "VM up"; break; fi; \
+	done
+	@$(VM_SSH) "cd $(VM_DIR) && ./vm-crash.sh verify $(CRASH_SIZE)"
+
+# The unit tests are Linux-only (io_uring syscalls), so `make test-unit` cannot
+# run on a macOS dev box at all. This cross-compiles the test binaries and runs
+# them on the VM, which is the only way to actually satisfy the pre-commit gate
+# from here.
+TEST_PKGS = . ./internal/ctrl ./internal/logging ./internal/queue ./test/unit
+vm-test-unit: vm-check
+	@# Both staging dirs are cleared first: a leftover .test from an older run,
+	@# here or on the VM, would be executed alongside the fresh ones and counted
+	@# as a pass for a package that no longer builds that way.
+	@mkdir -p bin/tests
+	@rm -f bin/tests/*.test
+	@for pkg in $(TEST_PKGS); do \
+		name=$$(echo $$pkg | sed 's|^\.$$|root|; s|^\./||; s|/|_|g'); \
+		echo "Building $$name.test..."; \
+		CGO_ENABLED=0 GOOS=linux $(GOTEST) -c -o bin/tests/$$name.test $$pkg || exit 1; \
+	done
+	@$(VM_SSH) "mkdir -p $(VM_DIR)/tests && rm -f $(VM_DIR)/tests/*.test"
+	@$(VM_SCP) bin/tests/*.test $(VM_USER)@$(VM_HOST):$(VM_DIR)/tests/
+	@echo "Running unit tests on VM..."
+	@$(VM_SSH) "cd $(VM_DIR)/tests && fail=0; for t in *.test; do \
+		echo \"--- \$$t ---\"; sudo ./\$$t -test.timeout=5m || fail=1; \
+	done; exit \$$fail"
 
 # Alias for backwards compatibility
 test-vm: vm-simple-e2e

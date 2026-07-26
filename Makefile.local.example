@@ -19,3 +19,14 @@ VM_DIR  ?= ~/ublk-test
 
 # Option 3: Environment variable
 # VM_PASS = $(VM_PASSWORD)
+
+# Option 4: supply the whole transport, for a VM that is not reachable as
+# user@host — e.g. a Lima VM, whose ssh settings (port, key) live in a config
+# file. VM_HOST/VM_USER are still used to build the scp destination.
+# VM_USER = myuser
+# VM_HOST = lima-ublk
+# VM_SSH  = ssh -F $(HOME)/.lima/ublk/ssh.config lima-ublk
+# VM_SCP  = scp -F $(HOME)/.lima/ublk/ssh.config
+
+# Everything in this repo is Linux-only; from a macOS box, cross-build for the VM.
+# export GOOS = linux
