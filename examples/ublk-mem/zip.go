@@ -223,6 +223,12 @@ func (z *zipBackend) Discard(offset, length int64) error {
 	return nil
 }
 
+// WriteZeroes is exactly Discard here: a zeroed chunk is stored as a hole, so
+// zeroing and deallocating are the same operation.
+func (z *zipBackend) WriteZeroes(offset, length int64) error {
+	return z.Discard(offset, length)
+}
+
 func (z *zipBackend) Size() int64 { return z.size }
 
 func (z *zipBackend) Flush() error { return nil }
@@ -246,6 +252,7 @@ func (z *zipBackend) compressedBytes() int64 {
 
 // Compile-time interface checks
 var (
-	_ ublk.Backend        = (*zipBackend)(nil)
-	_ ublk.DiscardBackend = (*zipBackend)(nil)
+	_ ublk.Backend            = (*zipBackend)(nil)
+	_ ublk.DiscardBackend     = (*zipBackend)(nil)
+	_ ublk.WriteZeroesBackend = (*zipBackend)(nil)
 )

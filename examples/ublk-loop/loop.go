@@ -162,8 +162,45 @@ func (l *loopBackend) Discard(offset, length int64) error {
 	}
 }
 
+// WriteZeroes must actually leave zeros behind, so unlike Discard it cannot be
+// dropped when the filesystem has no punch-hole: fall back to writing them.
+func (l *loopBackend) WriteZeroes(offset, length int64) error {
+	if offset >= l.size {
+		return nil
+	}
+	if length > l.size-offset {
+		length = l.size - offset
+	}
+
+	if !l.noPunch.Load() {
+		// A punched hole reads back as zeros, which is what was asked for, and
+		// costs no space.
+		err := unix.Fallocate(int(l.f.Fd()),
+			unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE, offset, length)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, unix.EOPNOTSUPP) && !errors.Is(err, unix.ENOSYS) {
+			return err
+		}
+		l.noPunch.Store(true)
+	}
+
+	zeros := make([]byte, 64*1024)
+	for pos := offset; pos < offset+length; {
+		n := min(int64(len(zeros)), offset+length-pos)
+		written, err := l.f.WriteAt(zeros[:n], pos)
+		if err != nil {
+			return err
+		}
+		pos += int64(written)
+	}
+	return nil
+}
+
 // Compile-time interface checks
 var (
-	_ ublk.Backend        = (*loopBackend)(nil)
-	_ ublk.DiscardBackend = (*loopBackend)(nil)
+	_ ublk.Backend            = (*loopBackend)(nil)
+	_ ublk.DiscardBackend     = (*loopBackend)(nil)
+	_ ublk.WriteZeroesBackend = (*loopBackend)(nil)
 )
