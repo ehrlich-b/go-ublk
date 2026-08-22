@@ -40,9 +40,38 @@ func Unmarshal(data []byte, v interface{}) error {
 	}
 }
 
+// MarshalInto marshals v into the caller-provided buffer buf without
+// allocating. It writes the same bytes as Marshal and returns the number of
+// bytes written. buf must be large enough (see the compile-time struct sizes);
+// otherwise ErrBufferTooSmall is returned and buf is left untouched.
+func MarshalInto(v interface{}, buf []byte) (int, error) {
+	switch val := v.(type) {
+	case *UblksrvCtrlCmd:
+		return marshalCtrlCmdInto(val, buf)
+	case *UblksrvIOCmd:
+		return marshalIOCmdInto(val, buf)
+	case *UblkParams:
+		return marshalParamsInto(val, buf)
+	case *UblksrvCtrlDevInfo:
+		return marshalCtrlDevInfoInto(val, buf)
+	default:
+		// Fallback: direct memory copy
+		return directMarshalInto(v, buf)
+	}
+}
+
 // marshalCtrlCmd manually marshals UblksrvCtrlCmd (32-byte C-compatible variant)
 func marshalCtrlCmd(cmd *UblksrvCtrlCmd) []byte {
 	buf := make([]byte, 32)
+	_, _ = marshalCtrlCmdInto(cmd, buf) // buffer is exactly 32 bytes, cannot fail
+	return buf
+}
+
+// marshalCtrlCmdInto marshals UblksrvCtrlCmd into buf without allocating.
+func marshalCtrlCmdInto(cmd *UblksrvCtrlCmd, buf []byte) (int, error) {
+	if len(buf) < 32 {
+		return 0, ErrBufferTooSmall
+	}
 
 	binary.LittleEndian.PutUint32(buf[0:4], cmd.DevID)
 	binary.LittleEndian.PutUint16(buf[4:6], cmd.QueueID)
@@ -53,7 +82,7 @@ func marshalCtrlCmd(cmd *UblksrvCtrlCmd) []byte {
 	binary.LittleEndian.PutUint16(buf[26:28], cmd.Pad)
 	binary.LittleEndian.PutUint32(buf[28:32], cmd.Reserved)
 
-	return buf
+	return 32, nil
 }
 
 // unmarshalCtrlCmd manually unmarshals UblksrvCtrlCmd (32-byte C-compatible variant)
@@ -77,13 +106,22 @@ func unmarshalCtrlCmd(data []byte, cmd *UblksrvCtrlCmd) error {
 // marshalIOCmd manually marshals UblksrvIOCmd
 func marshalIOCmd(cmd *UblksrvIOCmd) []byte {
 	buf := make([]byte, 16)
+	_, _ = marshalIOCmdInto(cmd, buf) // buffer is exactly 16 bytes, cannot fail
+	return buf
+}
+
+// marshalIOCmdInto marshals UblksrvIOCmd into buf without allocating.
+func marshalIOCmdInto(cmd *UblksrvIOCmd, buf []byte) (int, error) {
+	if len(buf) < 16 {
+		return 0, ErrBufferTooSmall
+	}
 
 	binary.LittleEndian.PutUint16(buf[0:2], cmd.QID)
 	binary.LittleEndian.PutUint16(buf[2:4], cmd.Tag)
 	binary.LittleEndian.PutUint32(buf[4:8], uint32(cmd.Result))
 	binary.LittleEndian.PutUint64(buf[8:16], cmd.Addr)
 
-	return buf
+	return 16, nil
 }
 
 // unmarshalIOCmd manually unmarshals UblksrvIOCmd
@@ -100,9 +138,8 @@ func unmarshalIOCmd(data []byte, cmd *UblksrvIOCmd) error {
 	return nil
 }
 
-// marshalParams handles the complex UblkParams structure
-func marshalParams(params *UblkParams) []byte {
-	// Calculate actual size based on types
+// paramsSize returns the on-wire byte length of the parameters actually present.
+func paramsSize(params *UblkParams) int {
 	size := 8 // len + types
 	if params.HasBasic() {
 		size += int(unsafe.Sizeof(params.Basic))
@@ -116,41 +153,49 @@ func marshalParams(params *UblkParams) []byte {
 	if params.HasZoned() {
 		size += int(unsafe.Sizeof(params.Zoned))
 	}
+	return size
+}
 
-	buf := make([]byte, size)
+// marshalParams handles the complex UblkParams structure
+func marshalParams(params *UblkParams) []byte {
+	buf := make([]byte, paramsSize(params))
+	_, _ = marshalParamsInto(params, buf) // buffer is exactly the wire size, cannot fail
+	return buf
+}
+
+// marshalParamsInto marshals UblkParams into buf without allocating.
+func marshalParamsInto(params *UblkParams, buf []byte) (int, error) {
+	size := paramsSize(params)
+	if len(buf) < size {
+		return 0, ErrBufferTooSmall
+	}
+
 	offset := 0
-
-	// Marshal len and types
+	// len + types
 	binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(size))
 	offset += 4
 	binary.LittleEndian.PutUint32(buf[offset:offset+4], params.Types)
 	offset += 4
 
-	// Marshal each parameter type that's present
+	// Each present parameter block is copied unshrunk (native byte order,
+	// matching kernel layout exactly; Go layouts have no internal padding).
 	if params.HasBasic() {
-		basicBytes := directMarshal(&params.Basic)
-		copy(buf[offset:], basicBytes)
-		offset += len(basicBytes)
+		rawCopy(buf[offset:], unsafe.Pointer(&params.Basic), int(unsafe.Sizeof(params.Basic)))
+		offset += int(unsafe.Sizeof(params.Basic))
 	}
-
 	if params.HasDiscard() {
-		discardBytes := directMarshal(&params.Discard)
-		copy(buf[offset:], discardBytes)
-		offset += len(discardBytes)
+		rawCopy(buf[offset:], unsafe.Pointer(&params.Discard), int(unsafe.Sizeof(params.Discard)))
+		offset += int(unsafe.Sizeof(params.Discard))
 	}
-
 	if params.HasDevt() {
-		devtBytes := directMarshal(&params.Devt)
-		copy(buf[offset:], devtBytes)
-		offset += len(devtBytes)
+		rawCopy(buf[offset:], unsafe.Pointer(&params.Devt), int(unsafe.Sizeof(params.Devt)))
+		offset += int(unsafe.Sizeof(params.Devt))
 	}
-
 	if params.HasZoned() {
-		zonedBytes := directMarshal(&params.Zoned)
-		copy(buf[offset:], zonedBytes)
+		rawCopy(buf[offset:], unsafe.Pointer(&params.Zoned), int(unsafe.Sizeof(params.Zoned)))
 	}
 
-	return buf
+	return size, nil
 }
 
 // unmarshalParams handles the complex UblkParams structure
@@ -214,6 +259,25 @@ func directMarshal(v interface{}) []byte {
 	return buf
 }
 
+// rawCopy copies size raw bytes from src into dst without allocating.
+func rawCopy(dst []byte, src unsafe.Pointer, size int) {
+	from := (*[1 << 20]byte)(src)
+	copy(dst, from[:size])
+}
+
+// directMarshalInto performs a direct memory copy of v into buf without allocating.
+func directMarshalInto(v interface{}, buf []byte) (int, error) {
+	ptr := reflect.ValueOf(v).UnsafePointer()
+	size := int(reflect.TypeOf(v).Elem().Size())
+
+	if len(buf) < size {
+		return 0, ErrBufferTooSmall
+	}
+	rawCopy(buf, ptr, size)
+
+	return size, nil
+}
+
 // directUnmarshal performs direct memory copy for unmarshaling
 func directUnmarshal(data []byte, v interface{}) error {
 	// Get the actual pointer and size from the interface (must be a pointer type)
@@ -240,7 +304,16 @@ func (e MarshalError) Error() string {
 
 // marshalCtrlDevInfo manually marshals UblksrvCtrlDevInfo
 func marshalCtrlDevInfo(info *UblksrvCtrlDevInfo) []byte {
-	buf := make([]byte, 64) // Now exactly 64 bytes to match kernel 6.6+
+	buf := make([]byte, 64)                  // Now exactly 64 bytes to match kernel 6.6+
+	_, _ = marshalCtrlDevInfoInto(info, buf) // buffer is exactly 64 bytes, cannot fail
+	return buf
+}
+
+// marshalCtrlDevInfoInto marshals UblksrvCtrlDevInfo into buf without allocating.
+func marshalCtrlDevInfoInto(info *UblksrvCtrlDevInfo, buf []byte) (int, error) {
+	if len(buf) < 64 {
+		return 0, ErrBufferTooSmall
+	}
 
 	binary.LittleEndian.PutUint16(buf[0:2], info.NrHwQueues)
 	binary.LittleEndian.PutUint16(buf[2:4], info.QueueDepth)
@@ -257,7 +330,7 @@ func marshalCtrlDevInfo(info *UblksrvCtrlDevInfo) []byte {
 	binary.LittleEndian.PutUint64(buf[48:56], info.Reserved1)
 	binary.LittleEndian.PutUint64(buf[56:64], info.Reserved2)
 
-	return buf
+	return 64, nil
 }
 
 // unmarshalCtrlDevInfo manually unmarshals UblksrvCtrlDevInfo
@@ -308,4 +381,5 @@ func UnmarshalCtrlDevInfo(data []byte) *UblksrvCtrlDevInfo {
 const (
 	ErrInsufficientData MarshalError = "insufficient data for unmarshaling"
 	ErrInvalidType      MarshalError = "invalid type for marshaling"
+	ErrBufferTooSmall   MarshalError = "buffer too small for marshaling into"
 )
