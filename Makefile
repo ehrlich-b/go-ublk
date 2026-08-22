@@ -356,7 +356,7 @@ vm-powerfail: ublk-loop crash
 # run on a macOS dev box at all. This cross-compiles the test binaries and runs
 # them on the VM, which is the only way to actually satisfy the pre-commit gate
 # from here.
-TEST_PKGS = . ./internal/ctrl ./internal/logging ./internal/queue ./test/unit
+TEST_PKGS = . ./internal/ctrl ./internal/logging ./internal/queue ./internal/uapi ./test/unit
 vm-test-unit: vm-check
 	@# Both staging dirs are cleared first: a leftover .test from an older run,
 	@# here or on the VM, would be executed alongside the fresh ones and counted
