@@ -217,7 +217,7 @@ check-module:
 # VM Testing (requires VM_HOST, VM_USER configured)
 #==============================================================================
 
-.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e vm-crash vm-powerfail vm-test-unit
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e vm-crash vm-powerfail vm-shutdown-storm storm-cycle vm-test-unit
 
 # Check VM configuration before running VM targets
 vm-check:
@@ -351,6 +351,97 @@ vm-powerfail: ublk-loop crash
 		if $(VM_SSH) 'echo ok' >/dev/null 2>&1; then echo "VM up"; break; fi; \
 	done
 	@$(VM_SSH) "cd $(VM_DIR) && ./vm-crash.sh verify $(CRASH_SIZE)"
+
+# Systemd shutdown storm: reboot the machine NORMALLY while a mounted ublk
+# device is under load, so systemd runs its full stop-everything/unmount
+# sequence against a daemon it is concurrently killing. Unlike vm-powerfail
+# (sysrq, no shutdown at all) this exercises the ordering, and it is the path
+# the one real x86 teardown oops came from.
+#
+# The scan of the host's serial log is the channel that survives a guest too
+# dead to write its own journal; VM_SERIAL_LOG points at it (Lima writes the
+# hvc0 console there). Override in Makefile.local for a different VM transport.
+# An empty value degrades the test to journal-only, so it says so loudly.
+STORM_CYCLES ?= 3
+STORM_SIZE   ?= 1G
+# STORM_ARM=arm       daemon as a bare background process in the ssh session scope
+# STORM_ARM=arm-unit  daemon as a systemd service, with the mount ordered
+#                     After=/Requires= it so the filesystem unmounts first. This is
+#                     the control that says whether a wedge is go-ublk's problem or
+#                     the deployment's; see vm-shutdown-storm.sh.
+STORM_ARM    ?= arm
+VM_SERIAL_LOG ?= $(HOME)/.lima/ublk/serialv.log
+STORM_OOPS_RE = Oops|BUG:|Call trace:|Unable to handle|Internal error|general protection|kernel NULL pointer|KASAN|refcount_t|soft lockup
+
+vm-shutdown-storm: ublk-loop
+	@echo "=============================================="
+	@echo "  systemd shutdown storm: $(STORM_CYCLES) cycle(s) + 1 selftest"
+	@echo "=============================================="
+	@$(VM_SSH) "mkdir -p $(VM_DIR); sudo umount /mnt/ublk-storm 2>/dev/null; sudo pkill -9 -x ublk-loop 2>/dev/null; sleep 1; true"
+	@$(VM_SCP) bin/ublk-loop $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) scripts/vm-shutdown-storm.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-shutdown-storm.sh"
+	@echo ""
+	@echo "----- SELFTEST: prove the detector can fail -----"
+	@$(VM_SSH) "cd $(VM_DIR) && ./vm-shutdown-storm.sh selftest-install"
+	@$(MAKE) --no-print-directory storm-cycle STORM_CHECK=check-expect-detect
+	@$(VM_SSH) "cd $(VM_DIR) && ./vm-shutdown-storm.sh selftest-remove"
+	@echo ""
+	@i=1; while [ $$i -le $(STORM_CYCLES) ]; do \
+		echo "----- STORM CYCLE $$i/$(STORM_CYCLES) -----"; \
+		$(MAKE) --no-print-directory storm-cycle STORM_CHECK=check || exit 1; \
+		i=$$((i + 1)); \
+	done
+	@echo "=============================================="
+	@echo "  SHUTDOWN STORM: all cycles passed"
+	@echo "=============================================="
+
+# One arm -> reboot -> check cycle. STORM_CHECK selects whether a detected
+# kernel trace is the expected result (selftest) or a failure (real run).
+storm-cycle:
+	@if [ -f "$(VM_SERIAL_LOG)" ]; then \
+		wc -c < "$(VM_SERIAL_LOG)" | tr -d ' ' > /tmp/ublk-storm-serial-mark; \
+	else \
+		echo "WARNING: VM_SERIAL_LOG=$(VM_SERIAL_LOG) not found — host-side console"; \
+		echo "         scan is DISABLED for this run (journal-only detection)."; \
+		echo 0 > /tmp/ublk-storm-serial-mark; \
+	fi
+	@$(VM_SSH) "cd $(VM_DIR) && ./vm-shutdown-storm.sh $(STORM_ARM) $(STORM_SIZE)"
+	@echo "Rebooting VM normally (systemd shutdown sequence) while under load..."
+	@timeout 15 $(VM_SSH) 'sudo systemctl reboot' >/dev/null 2>&1 || true
+	@echo "Waiting for VM to come back..."
+	@up=0; for i in $$(seq 1 60); do \
+		sleep 5; \
+		if $(VM_SSH) 'echo ok' >/dev/null 2>&1; then echo "VM up after $$((i * 5))s"; up=1; break; fi; \
+	done; \
+	if [ $$up = 0 ]; then \
+		echo "FAIL: VM never came back after 300s — the shutdown itself wedged."; \
+		echo "--- host serial log tail ---"; \
+		tail -c 4000 "$(VM_SERIAL_LOG)" 2>/dev/null; \
+		exit 1; \
+	fi
+	@echo "--- host serial-log scan (survives a guest that cannot log) ---"
+	@mark=$$(cat /tmp/ublk-storm-serial-mark); \
+	if [ "$$mark" != "0" ] && [ -f "$(VM_SERIAL_LOG)" ]; then \
+		hits=$$(tail -c +$$mark "$(VM_SERIAL_LOG)" 2>/dev/null | grep -aE '$(STORM_OOPS_RE)' | head -40); \
+		if [ -n "$$hits" ]; then \
+			echo "  DETECTED on the serial console:"; \
+			echo "$$hits" | sed 's/^/    /'; \
+			if [ "$(STORM_CHECK)" = "check-expect-detect" ]; then \
+				echo "  PASS (selftest): host console carried the injected backtrace"; \
+			else \
+				echo "  FAIL: kernel taint on the console across the shutdown storm"; \
+				exit 1; \
+			fi; \
+		else \
+			if [ "$(STORM_CHECK)" = "check-expect-detect" ]; then \
+				echo "  NOTE: nothing on the host console; relying on the in-guest journal check."; \
+			else \
+				echo "  PASS: host console clean"; \
+			fi; \
+		fi; \
+	fi
+	@$(VM_SSH) "cd $(VM_DIR) && ./vm-shutdown-storm.sh $(STORM_CHECK)"
 
 # The unit tests are Linux-only (io_uring syscalls), so `make test-unit` cannot
 # run on a macOS dev box at all. This cross-compiles the test binaries and runs
