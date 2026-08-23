@@ -30,9 +30,20 @@ See **`TODO.md` → Critical Bugs** for the full state before relying on this.
   SIGKILL-mid-write cycles and 4 hard resets mid-write, 0 lost / 0 torn / 0 aliased, clean
   host recovery each time. See TODO.md → Phase 2.
 
+**Verified on `linux-hwe-7.0` (2026-08-22):** full suite green on Ubuntu 24.04.4 arm64 kernel
+`7.0.0-30-generic` — unit 6/6, sweep 24/24, loop-e2e 14/14, crash 6/6, no oops. That is the new
+noble HWE track (`linux-image-generic-hwe-24.04` now resolves to it), so it is what the next box
+cut gets. x86 on 7.0 is still untested.
+
+**Deployment requirement (found 2026-08-22, TODO Critical Bugs #15):** the daemon MUST run as a
+systemd unit with the mount ordered `Requires=`/`After=` it. Run as a bare background process, a
+normal `systemctl reboot` under load loses the unmount's writeback every time and wedges the host's
+reboot roughly one time in five (needs a forced power cycle). Correctly ordered, both are zero.
+`make vm-shutdown-storm` covers this; `STORM_ARM=arm-unit` is the supervised control.
+
 **Still open before prod:**
 - Host power cut (not just a guest `sysrq-b`) — the host's cache of the VM disk is untested.
-- Host-reboot-under-load (systemd shutdown storm while a device serves I/O).
+- Ship + document the systemd unit above; root-cause the daemon coredump behind #15.
 - Per-IO FUA; `UBLK_F_USER_RECOVERY`; no CI.
 
 ## Build and Test Commands
@@ -115,10 +126,20 @@ go-ublk/
 
 ## VM Helper
 
+There is no `scripts/vm-ssh.sh`. The VM transport lives in `Makefile.local` (gitignored) as
+`VM_SSH` / `VM_SCP`; every `vm-*` target goes through it. To reach a VM by hand:
+
 ```bash
-# SSH to test VM
-scripts/vm-ssh.sh "command"     # Run command
-scripts/vm-ssh.sh               # Interactive shell
+# The arm64 Lima VM used by the vm-* targets
+ssh -F ~/.lima/ublk/ssh.config lima-ublk "command"
+limactl shell ublk                      # interactive
+
+# A second VM on a different kernel: override the transport on the make line.
+# This is how the linux-hwe-7.0 (noble) box is driven.
+make vm-verify \
+  VM_HOST=lima-ublk-noble VM_USER=ehrlich \
+  VM_SSH='ssh -F $HOME/.lima/ublk-noble/ssh.config lima-ublk-noble' \
+  VM_SCP='scp -F $HOME/.lima/ublk-noble/ssh.config'
 ```
 
 ## References

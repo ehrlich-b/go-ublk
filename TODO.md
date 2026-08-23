@@ -43,20 +43,57 @@ detects injected lost/torn/aliased blocks, and the post-reset image checked agai
 over-claiming witness correctly reports loss. See Phase 2 for the design and for what the
 guest-level reset does not cover (the host's own cache of the virtual disk).
 
+**Re-verified 2026-08-22** on arm64 `6.17.0-41-generic` (ublk_drv srcversion
+`8F3FCC0225E19BF890B533B`, the same module source as the x86 `-1020-aws` build): unit tests 6/6
+packages, `vm-simple-e2e` pass, integrity sweep **24/24** byte-exact, `vm-loop-e2e` **14/14**,
+`vm-crash` **6/6** cycles with 0 lost / 0 torn / 0 aliased, 40-cycle churn with 0 leaks / 0 hangs /
+0 create failures. No oops, no D-state, `boot_id` unchanged throughout. The only dmesg noise is
+`Buffer I/O error ... lost async page write` from the churn's deliberate SIGKILL cycles, which is
+the block layer correctly reporting writes it cannot complete.
+
+**`linux-hwe-7.0` CONFIRMED (2026-08-22) — go-ublk works on the kernel the fleet is moving to.**
+On a fresh Ubuntu 24.04.4 LTS arm64 VM running **`7.0.0-30-generic`** (the noble-updates HWE
+kernel published 2026-08-20; `ublk_drv` srcversion `3743E3FA998B95656BDA492`): unit tests 6/6
+packages, `vm-simple-e2e` pass, integrity sweep **24/24** byte-exact, `vm-loop-e2e` **14/14**,
+`vm-crash` **6/6** cycles with 0 lost / 0 torn / 0 aliased. No oops, no D-state, no leaked
+devices. Note `linux-image-generic-hwe-24.04` now resolves to 7.0.0-30, so this is what the next
+box cut gets by default. Caveats: arm64 only so far (x86 on 7.0 is untested), and the throughput
+in that run is meaningless because a second VM was loading the host concurrently.
+
+**Host-reboot-under-load TESTED (2026-08-22) — and it found the one real problem of the day.**
+`make vm-shutdown-storm` reboots the machine normally while an ext4 filesystem on a ublk device
+is under fio load. Run unsupervised, the daemon loses the unmount's writeback every time and
+wedges the host's reboot about one time in five; run as a correctly ordered systemd unit, both are
+zero. **This is a deployment requirement, not a code bug** — see Critical Bugs #15 for the numbers,
+the mechanism, and the one piece still unexplained (why the daemon coredumps during teardown).
+
 **Still unverified / open (see roadmap):**
 - Host power cut, as opposed to a guest reset: `sysrq-b` drops the guest page cache but not
   macOS's cache of the VM's disk, so the last link in the durability chain is untested.
-- Host-reboot-under-load: the one teardown scenario never exercised — a systemd shutdown storm
-  (SIGTERM to everything, filesystems unmounting) while a ublk device is serving I/O. This is the
-  path the single real x86 oops came from, and it is a genuine production event (host reboots
-  mid-backup), so it deserves its own test.
 
-**Host kernel caveats (checked 2026-07-24) — these are KERNEL bugs, not go-ublk bugs:**
+**Host kernel caveats (rechecked 2026-08-22) — these are KERNEL bugs, not go-ublk bugs:**
+- **UPSTREAM MOVED, 2026-08-22 — the fix is now GA and a new HWE track landed.**
+  - `linux-hwe-6.17` promoted past -41: **6.17.0-42 has been in noble-updates + security since
+    2026-08-05** (its changelog carries `ublk: reorder tag_set initialization before queue
+    allocation`, the missing prerequisite), and -44 is in noble-proposed. The window in which a
+    box cut baked in a broken -40 is closed.
+  - **`linux-hwe-7.0` is now the noble HWE track: 7.0.0-30.30~24.04.1 went into noble-updates +
+    security on 2026-08-20**, with 7.0.0-31 in proposed. This is the one to react to, because all
+    three ublk teardown fixes are 7.0/7.1-era mainline commits (`845db023a8ae` don't issue
+    uring_cmd from fallback task work; `0842186d2c4e` reset per-IO canceled flag on each fetch;
+    `f7700a4415af` fix use-after-free in `ublk_cancel_cmd()`), all touching only `ublk_drv.c`.
+    NOT CONFIRMED that 7.0.0-30 actually carries them — that is an inference from the version
+    numbers, and it stays an inference: the full suite is now green on 7.0.0-30 (see above) but
+    a clean suite does not prove the teardown fixes are present, because that bug has never
+    reproduced on demand on any kernel. Confirming it needs the module source or a disassembly,
+    the same way the -1019/-1020 A/B settled the NUMA one.
+  - `linux-aws-6.17` is still 6.17.0-1020 in noble updates/security, i.e. the build already
+    A/B-proven good on x86.
 - **ADD_DEV NULL-deref on Ubuntu 6.17.0-{~29..40}:** their NUMA backport `529d4d632788` landed
   without its prerequisite `011af85ccd87`, so `ublk_init_queues()` runs before the tag set exists
   and derefs a NULL `mq_map`. Unconditional — any ublk server oopses the host on first device add.
-  FIXED in `linux-aws-6.17` 6.17.0-1020 (already in noble-updates) and `linux-hwe-6.17` 6.17.0-41
-  (noble-proposed, ready-for-promote); -35/-38/-40 generic are still broken. Confirmed live on
+  FIXED in `linux-aws-6.17` 6.17.0-1020 and `linux-hwe-6.17` 6.17.0-41 (both now superseded by
+  the promoted versions above); -35/-38/-40 generic are still broken. Confirmed live on
   x86 2026-07-24: on `6.17.0-1019-aws` (ublk_drv srcversion 6A00163FD3030280266148D) a plain
   `ublk-mem --queues=1 --depth=1` gives `BUG: kernel NULL pointer dereference, address: 0` at
   `ublk_init_queues+0x4e` in an `iou-wrk` worker via `ublk_ctrl_add_dev`, and ADD_DEV never
@@ -238,6 +275,49 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
     ublk-mem timeout dd` on the I/O-hang path narrowed the same way.
     `vm-fuzz.sh`'s unanchored `pkill` patterns were tightened too.
 
+15. **[NOT A CODE BUG — DEPLOYMENT REQUIREMENT, found 2026-08-22] An unsupervised daemon
+    wedges the host's reboot about one time in five.** Found by the new
+    `make vm-shutdown-storm`. Running `ublk-loop` as a bare background process with an
+    ext4 filesystem mounted on its device and fio writing into it, then issuing a normal
+    `systemctl reboot`:
+
+    | Deployment | Storm reboots | Wedged | I/O errors on ublkb0 per shutdown |
+    |---|---|---|---|
+    | Bare background process (ssh session scope) | 14 | **3** | **10, every cycle** |
+    | systemd unit, mount ordered `After=`/`Requires=` it | 9 | **0** | **0, every cycle** |
+
+    **Mechanism.** A bare process lives in the login session's scope, which systemd tears
+    down at the *start* of shutdown — so the daemon dies while the filesystem above it
+    still owes writeback. The unmount then fails, ext4 aborts its journal, and roughly one
+    time in five the machine never finishes rebooting at all: `systemd-shutdown` reaches
+    `reboot.target`, then its final "Syncing filesystems and block devices" times out and
+    it waits forever on tasks that cannot be reaped. Every occurrence had the identical
+    signature — `INFO: task ublk-loop:<tid> blocked for more than 122 seconds. Blocked by
+    coredump.` plus `iou-wrk-<tid>`, the fio workers, and two `(sd-sync)` helpers. The host
+    needs a forced power cycle. That is strictly worse than the Phase 3 goal of "a wedged
+    daemon must not require a host reboot": here it *prevents* one.
+
+    **What fixes it.** Ordering, not code. Making the daemon a systemd service and giving
+    the mount unit `Requires=`/`After=` that service inverts the stop order, so the
+    filesystem unmounts *through* a still-live daemon. The I/O-error result is
+    deterministic (10 vs 0 on every single cycle) and settles the mechanism; the wedge
+    result is suggestive rather than conclusive on its own (9 clean cycles against a 21%
+    per-cycle rate is p≈0.12), but it is the same mechanism and it points the same way.
+
+    **Still unexplained, and worth chasing:** what makes the daemon coredump at all.
+    SIGTERM and SIGKILL do not dump core, so some thread took a fatal signal — plausibly
+    SIGBUS on a torn-down mmap during teardown. `core_pattern` pipes to apport, which
+    cannot run once the filesystem is going away, so the dump never completes and the whole
+    thread group is stuck in D forever. Three attempts to capture the daemon's own output
+    across the wedge all failed and the reasons are recorded in
+    `scripts/vm-shutdown-storm.sh`: a plain file gets rolled back by ext4 replay, and a
+    `tail -F` mirror is killed at the start of shutdown. The daemon now writes straight to
+    the console; the next wedge should be captured.
+
+    **Consequence for shipping:** go-ublk needs to document (and the examples should
+    demonstrate) a systemd unit with the correct ordering. Shipping without it means a host
+    reboot mid-backup can lose acknowledged writeback and, one time in five, hang the host.
+
 ---
 
 ## Production Roadmap (BCDR use)
@@ -276,8 +356,9 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
       run by `make vm-crash` and `make vm-powerfail`. Results on arm64 `6.17.0-41`:
       | Scenario | Runs | Lost | Torn | Aliased |
       |---|---|---|---|---|
-      | SIGKILL daemon mid-write (buffered + `-sync`) | 8 cycles, 16 checks | 0 | 0 | 0 |
-      | sysrq hard reset mid-write | 4 | 0 | 0 | 0 |
+      | SIGKILL daemon mid-write (buffered + `-sync`) | 8 + 6 cycles, 28 checks | 0 | 0 | 0 |
+      | sysrq hard reset mid-write | 4 + 3 = 7 | 0 | 0 | 0 |
+      (second figure in each row added 2026-08-22 on the same kernel)
       Every cycle also asserted clean recovery: the writer's in-flight I/O errors out
       instead of wedging, no leaked device after reap, the device comes back on the same
       image, a graceful stop still works afterwards, no oops, and an unchanged `boot_id`
@@ -307,9 +388,22 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
       host power cut is still untested.
 
 ### Phase 3 — Resilience & recovery
+- [x] **Host-reboot-under-load (the systemd shutdown storm) — TESTED 2026-08-22**, and it
+      found a real failure: run unsupervised, the daemon wedges the host's reboot roughly
+      one time in five, and loses the unmount's writeback every time. Run as a correctly
+      ordered systemd unit, both go to zero. Full numbers, mechanism and the one remaining
+      unexplained piece (why the daemon coredumps) are in Critical Bugs #15.
+      `make vm-shutdown-storm` (`STORM_ARM=arm-unit` for the supervised control).
+- [ ] **Ship a systemd unit + document the ordering** — the direct consequence of #15. The
+      mount must declare `Requires=`/`After=` the daemon's service so shutdown unmounts
+      before it stops the daemon. Belongs with the examples, since it is the difference
+      between "loses data and hangs the host on reboot" and "clean".
+- [ ] Root-cause the teardown coredump behind #15 (fatal signal in the daemon during
+      shutdown; the console-capture path is now in place to catch it)
 - [ ] `UBLK_F_USER_RECOVERY` — recover a device across a daemon restart (not implemented)
 - [ ] Daemon supervision + host fencing: a wedged daemon must not require a host reboot;
-      auto-detect and clean up stuck devices (D-state currently needs a reboot)
+      auto-detect and clean up stuck devices (D-state currently needs a reboot). #15 shows
+      the stronger form of this is real: a wedged daemon can prevent a reboot outright.
 - [x] Graceful degradation on daemon crash (no permanent D-state on a customer host) —
       asserted every `vm-crash` cycle: after the daemon is SIGKILLed mid-write, the writer
       blocked in `pwrite` on the dead device is reaped by the kernel within 20s, and no task
@@ -357,6 +451,11 @@ make vm-verify         # Shadow-oracle integrity sweep (queues x depth x direct)
 make vm-loop-e2e       # File-backend + compressed-backend behavior
 make vm-crash          # Crash consistency: SIGKILL the daemon mid-write, recover, verify
 make vm-powerfail      # Power-fail consistency: sysrq hard reset mid-write, then verify
+make vm-shutdown-storm # Systemd shutdown storm: reboot NORMALLY under load, hunt for an
+                       # oops / a wedged reboot. Runs its own selftest first.
+                       #   STORM_CYCLES=n  how many storm reboots (default 3)
+                       #   VM_SERIAL_LOG=  host file the guest console is captured to;
+                       #                   without it detection is journal-only
 make vm-benchmark      # Performance benchmark
 make vm-stress         # 10x alternating e2e + benchmark
 ```
