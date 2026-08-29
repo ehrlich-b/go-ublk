@@ -21,10 +21,10 @@ import (
 
 // ---------- Harness ----------
 
-// fakeRing implements uring.Ring without any kernel interaction; it records
+// ioReqFakeRing implements uring.Ring without any kernel interaction; it records
 // every PrepareIOCmd call so the test can inspect what submitCommitAndFetch
 // encoded.
-type fakeRing struct {
+type ioReqFakeRing struct {
 	mu          sync.Mutex
 	prepared    []preparedIOCmd
 	prepareErr  error
@@ -37,21 +37,21 @@ type preparedIOCmd struct {
 	userData uint64
 }
 
-func (f *fakeRing) Close() error { return nil }
+func (f *ioReqFakeRing) Close() error { return nil }
 
-func (f *fakeRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (uring.Result, error) {
+func (f *ioReqFakeRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (uring.Result, error) {
 	return nil, nil
 }
 
-func (f *fakeRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*uring.AsyncHandle, error) {
+func (f *ioReqFakeRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*uring.AsyncHandle, error) {
 	return nil, nil
 }
 
-func (f *fakeRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (uring.Result, error) {
+func (f *ioReqFakeRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) (uring.Result, error) {
 	return nil, nil
 }
 
-func (f *fakeRing) PrepareIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) error {
+func (f *ioReqFakeRing) PrepareIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.prepareErr != nil {
@@ -61,13 +61,13 @@ func (f *fakeRing) PrepareIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData u
 	return nil
 }
 
-func (f *fakeRing) FlushSubmissions() (uint32, error) { return f.flushResult, nil }
+func (f *ioReqFakeRing) FlushSubmissions() (uint32, error) { return f.flushResult, nil }
 
-func (f *fakeRing) WaitForCompletion(timeout int) ([]uring.Result, error) { return nil, nil }
+func (f *ioReqFakeRing) WaitForCompletion(timeout int) ([]uring.Result, error) { return nil, nil }
 
-func (f *fakeRing) NewBatch() uring.Batch { return nil }
+func (f *ioReqFakeRing) NewBatch() uring.Batch { return nil }
 
-func (f *fakeRing) prepareCount() int {
+func (f *ioReqFakeRing) prepareCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.prepared)
@@ -77,7 +77,7 @@ func (f *fakeRing) prepareCount() int {
 // buffer memory (no NewRunner, no mmap, no real ring/device, zero syscalls),
 // plus a fake ring recording PrepareIOCmd calls. descMem and bufMem are the
 // byte slices backing descPtr and bufPtr, so tests read/write them directly.
-func newIOHarness(t *testing.T, depth int, backend interfaces.Backend) (*Runner, *fakeRing, []byte, []byte) {
+func newIOHarness(t *testing.T, depth int, backend interfaces.Backend) (*Runner, *ioReqFakeRing, []byte, []byte) {
 	t.Helper()
 	if depth < 1 {
 		t.Fatal("newIOHarness: depth must be >= 1")
@@ -86,7 +86,7 @@ func newIOHarness(t *testing.T, depth int, backend interfaces.Backend) (*Runner,
 	descMem := make([]byte, depth*int(unsafe.Sizeof(uapi.UblksrvIODesc{})))
 	bufMem := make([]byte, depth*constants.IOBufferSizePerTag)
 
-	ring := &fakeRing{}
+	ring := &ioReqFakeRing{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

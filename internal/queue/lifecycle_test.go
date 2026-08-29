@@ -100,11 +100,11 @@ func mmapSyntheticMem(depth int) (unsafe.Pointer, unsafe.Pointer) {
 	return unsafe.Pointer(&desc[0]), unsafe.Pointer(&buf[0])
 }
 
-// newSyntheticRunner builds a Runner wired to f with non-stub prerequisites
+// newLifecycleRunner builds a Runner wired to f with non-stub prerequisites
 // (charDeviceFd >= 0, ring != nil) so Start()/ioLoop take the REAL path that
 // calls Prime() and runs processRequests. charDeviceFd 0 is never used as a
 // real fd by the fake ring; Close() closing fd 0 (stdin) is harmless.
-func newSyntheticRunner(f uring.Ring, depth int) *Runner {
+func newLifecycleRunner(f uring.Ring, depth int) *Runner {
 	ctx, cancel := context.WithCancel(context.Background())
 	descPtr, bufPtr := mmapSyntheticMem(depth)
 	return &Runner{
@@ -135,7 +135,7 @@ func (f *lifecycleFakeRing) submits() int {
 // cheaply (WaitForCompletion returns no work) until Stop() cancels the context.
 func TestRunnerLifecycleFastHappyPath(t *testing.T) {
 	fake := &lifecycleFakeRing{}
-	r := newSyntheticRunner(fake, 4)
+	r := newLifecycleRunner(fake, 4)
 
 	if err := r.Start(); err != nil {
 		t.Fatalf("Start() returned error: %v", err)
@@ -206,7 +206,7 @@ func TestWaitBeforeStartNeverBlocks(t *testing.T) {
 // gating channel does ioLoop observe ctx.Done() and exit, making Wait() true.
 func TestRunnerWaitTimeoutThenTrue(t *testing.T) {
 	fake := &lifecycleFakeRing{release: make(chan struct{})}
-	r := newSyntheticRunner(fake, 4)
+	r := newLifecycleRunner(fake, 4)
 
 	if err := r.Start(); err != nil {
 		t.Fatalf("Start() returned error: %v", err)
@@ -235,7 +235,7 @@ func TestRunnerWaitTimeoutThenTrue(t *testing.T) {
 // written to expect) does fire the "device not ready (START_DEV pending)" path.
 func TestPrimeEOPNOTSUPPRawErrno(t *testing.T) {
 	fake := &lifecycleFakeRing{submitErr: syscall.EOPNOTSUPP}
-	r := newSyntheticRunner(fake, 1)
+	r := newLifecycleRunner(fake, 1)
 
 	err := r.Prime()
 	if err == nil {
@@ -255,7 +255,7 @@ func TestPrimeEOPNOTSUPPRawErrno(t *testing.T) {
 // "submit initial FETCH_REQ" branch fires instead.
 func TestPrimeEOPNOTSUPPWrappedIsDeadCode(t *testing.T) {
 	fake := &lifecycleFakeRing{submitErr: fmt.Errorf("io_uring_enter failed: %v", syscall.EOPNOTSUPP)}
-	r := newSyntheticRunner(fake, 1)
+	r := newLifecycleRunner(fake, 1)
 
 	err := r.Prime()
 	if err == nil {
