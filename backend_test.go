@@ -2,6 +2,7 @@ package ublk
 
 import (
 	"context"
+	"runtime"
 	"testing"
 )
 
@@ -209,6 +210,18 @@ func TestDefaultParams(t *testing.T) {
 	}
 	if params.EnableZeroCopy {
 		t.Error("EnableZeroCopy should default to false")
+	}
+}
+
+func TestConvertToCtrlParamsQueues(t *testing.T) {
+	params := DefaultParams(NewMockBackend(1024))
+	if got := convertToCtrlParams(params).NumQueues; got != runtime.NumCPU() {
+		t.Errorf("auto queues sent to ADD_DEV = %d, want %d", got, runtime.NumCPU())
+	}
+
+	params.NumQueues = 2
+	if got := convertToCtrlParams(params).NumQueues; got != 2 {
+		t.Errorf("explicit queues sent to ADD_DEV = %d, want 2", got)
 	}
 }
 

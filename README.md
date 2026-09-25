@@ -68,15 +68,15 @@ sudo umount /mnt
 
 ## Performance
 
-Local benchmarks on Ubuntu 24.04 VM (2 vCPUs, 8GB RAM, i7-8700K host, 4 queues, depth=64):
+One run on an Ubuntu 24.04.5 VM with kernel 7.0.0-34-generic (4 vCPUs, 4 GiB RAM, 4 ublk queues, depth 64). fio used 4 KiB direct I/O, libaio, queue depth 64 per job, and 10 seconds per workload. Both devices were RAM-backed with 256 MiB capacity.
 
 | Workload | go-ublk | Loop (RAM) | % of Loop |
 |----------|---------|------------|-----------|
-| 4K Read (1 job) | 85k IOPS | 220k IOPS | 39% |
-| 4K Read (4 jobs) | 99k IOPS | 116k IOPS | 85% |
-| 4K Write (4 jobs) | 90k IOPS | 99k IOPS | 91% |
+| 4K Read (1 job) | 321k IOPS | 299k IOPS | 108% |
+| 4K Read (4 jobs) | 658k IOPS | 827k IOPS | 80% |
+| 4K Write (4 jobs) | 647k IOPS | 799k IOPS | 81% |
 
-Multi-queue workloads reach 85-91% of kernel loop device throughput.
+This was a single sequential run on a shared host, so the percentages are rough comparisons, not capacity estimates. The four-job workloads reached about 80% of the loop baseline.
 
 ## Requirements
 

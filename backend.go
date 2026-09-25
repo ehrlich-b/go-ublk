@@ -275,10 +275,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	// rather than what we requested: creating a runner for a queue the kernel
 	// never allocated makes that queue's descriptor mmap fail with EINVAL and
 	// wedges startup.
-	numQueues := params.NumQueues
-	if numQueues == 0 {
-		numQueues = runtime.NumCPU()
-	}
+	numQueues := ctrlParams.NumQueues
 	if info, gerr := ctrl.GetDeviceInfo(deviceID); gerr == nil && info.NrHwQueues > 0 {
 		if actual := int(info.NrHwQueues); actual != numQueues {
 			logging.Default().Info("kernel adjusted hardware queue count",
@@ -479,10 +476,10 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 		observer = NewMetricsObserver(metrics)
 	}
 
-	// Determine actual number of queues (default to number of CPUs)
-	numQueues := params.NumQueues
-	if numQueues == 0 {
-		numQueues = runtime.NumCPU()
+	// Use the count requested at ADD_DEV, then honor any kernel clamp.
+	numQueues := ctrlParams.NumQueues
+	if info, gerr := controller.GetDeviceInfo(deviceID); gerr == nil && info.NrHwQueues > 0 {
+		numQueues = int(info.NrHwQueues)
 	}
 
 	// Create Device struct
@@ -909,6 +906,9 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	ctrlParams.DeviceID = params.DeviceID
 	ctrlParams.QueueDepth = params.QueueDepth
 	ctrlParams.NumQueues = params.NumQueues
+	if ctrlParams.NumQueues == 0 {
+		ctrlParams.NumQueues = runtime.NumCPU()
+	}
 	ctrlParams.LogicalBlockSize = params.LogicalBlockSize
 	ctrlParams.MaxIOSize = params.MaxIOSize
 

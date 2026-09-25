@@ -22,6 +22,8 @@ echo "=== go-ublk Overhead Benchmark ==="
 echo "Testing on kernel: $(uname -r)"
 echo ""
 
+sudo modprobe ublk_drv
+
 # Check for fio and jq
 if ! command -v fio &> /dev/null; then
     echo "Installing fio..."
@@ -137,7 +139,7 @@ printf "%-30s %12s %12s\n" "Workload" "IOPS" "Throughput"
 printf "%-30s %12s %12s\n" "--------" "----" "----------"
 for result in "${RESULTS[@]}"; do
     IFS='|' read -r name iops bw <<< "$result"
-    printf "%-30s %10sk %10s MB/s\n" "$name" "$iops" "$bw"
+    printf "%-30s %10sk %10s MiB/s\n" "$name" "$iops" "$bw"
 done
 echo ""
 echo "Multi-job scaling shows how well go-ublk utilizes multiple queues."
