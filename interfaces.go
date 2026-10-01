@@ -3,6 +3,7 @@ package ublk
 // Backend defines the interface that all ublk backends must implement.
 // This interface is intentionally similar to standard Go interfaces like
 // io.ReaderAt and io.WriterAt for familiarity and composability.
+// Different hardware queues may call a backend concurrently.
 type Backend interface {
 	// ReadAt reads len(p) bytes into p starting at offset off.
 	// It returns the number of bytes read (0 <= n <= len(p)) and any error encountered.

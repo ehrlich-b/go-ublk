@@ -11,7 +11,7 @@
 
 ## Project Status: Prototype — approaching usable, not yet production-hardened
 
-go-ublk is a pure Go, dependency-free implementation of Linux ublk (userspace block device).
+go-ublk implements Linux ublk in Go without cgo or liburing. It uses `golang.org/x/sys` for Linux syscalls.
 See **`TODO.md` → Critical Bugs** for the full state before relying on this.
 
 **Works (single- AND multi-queue):**
@@ -44,7 +44,8 @@ reboot roughly one time in five (needs a forced power cycle). Correctly ordered,
 **Still open before prod:**
 - Host power cut (not just a guest `sysrq-b`) — the host's cache of the VM disk is untested.
 - Ship + document the systemd unit above; root-cause the daemon coredump behind #15.
-- Per-IO FUA; `UBLK_F_USER_RECOVERY`; no CI.
+- Per-IO FUA; `UBLK_F_USER_RECOVERY`; real-kernel coverage outside CI.
+  CI runs unit and race tests, formatting checks, and `go vet`.
 
 ## Build and Test Commands
 
@@ -92,7 +93,7 @@ go-ublk/
 ```
 
 **Key design decisions:**
-- **Pure Go** - no cgo, no external dependencies, builds with `CGO_ENABLED=0`
+- **Pure Go** - no cgo or liburing, uses `golang.org/x/sys`, builds with `CGO_ENABLED=0`
 - io_uring stays internal (tightly coupled to ublk's URING_CMD requirements)
 - Multi-queue with sharded memory backend for parallelism
 

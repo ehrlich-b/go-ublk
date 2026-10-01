@@ -62,7 +62,12 @@ type DeviceParams struct {
 	QueueDepth       int // Queue depth per queue (default: 128)
 	NumQueues        int // Number of queues (default: number of CPUs)
 	LogicalBlockSize int // Logical block size in bytes (default: 512)
-	MaxIOSize        int // Maximum I/O size in bytes (default: 1MB)
+
+	// MaxIOSize is the maximum request size in bytes (default: 1 MiB).
+	// It must be page-aligned, at least one page, a multiple of LogicalBlockSize,
+	// and no larger than math.MaxInt32. Each queue maps QueueDepth * MaxIOSize
+	// bytes, using the capacity returned by the kernel at device creation.
+	MaxIOSize int
 
 	// Feature flags
 	EnableZeroCopy     bool // Enable zero-copy if supported

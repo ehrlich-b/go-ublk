@@ -66,9 +66,9 @@ page-aligned, aligned to the logical block size, and no larger than
 `math.MaxInt32`. The runner uses the capacity returned by `ADD_DEV` and maps
 `QueueDepth * MaxIOSize` bytes for each queue.
 
-Measured at queue depth 128, a 64 KiB maximum maps 8 MiB per queue and the 1 MiB
-default maps 128 MiB per queue. The anonymous mappings added no resident memory
-before first touch; touching every page made the full 8 MiB or 128 MiB resident.
+Measured on WSL kernel `6.6.87.2-microsoft-standard-WSL2` at queue depth 128, a
+64 KiB maximum maps 8 MiB per queue and the 1 MiB default maps 128 MiB per queue.
+The anonymous mappings added no resident memory before first touch; touching every page made the full 8 MiB or 128 MiB resident.
 Those figures exclude backend storage, the Go heap, descriptors, and io_uring.
 
 ## Try It
@@ -89,6 +89,23 @@ sudo mount /dev/ublkb0 /mnt
 # ...
 sudo umount /mnt
 ```
+
+## Performance
+
+These measurements predate the large-I/O buffer fix.
+
+One run on an Ubuntu 24.04.5 VM with kernel 7.0.0-34-generic (4 vCPUs, 4 GiB RAM, 4 ublk queues, depth 64).
+fio used 4 KiB direct I/O, libaio, queue depth 64 per job, and 10 seconds per workload. Both devices were
+RAM-backed with 256 MiB capacity.
+
+| Workload | go-ublk | Loop (RAM) | % of Loop |
+|----------|---------|------------|-----------|
+| 4K Read (1 job) | 321k IOPS | 299k IOPS | 108% |
+| 4K Read (4 jobs) | 658k IOPS | 827k IOPS | 80% |
+| 4K Write (4 jobs) | 647k IOPS | 799k IOPS | 81% |
+
+This was a single sequential run on a shared host, so the percentages are rough comparisons, not capacity
+estimates. The four-job workloads reached about 80% of the loop baseline.
 
 ## Requirements
 
