@@ -59,7 +59,7 @@ func (c *Controller) Close() error {
 	return nil
 }
 
-func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
+func (c *Controller) AddDevice(params *DeviceParams) (*uapi.UblksrvCtrlDevInfo, error) {
 	// Auto-detect number of queues if not specified
 	numQueues := params.NumQueues
 	if numQueues <= 0 {
@@ -115,21 +115,22 @@ func (c *Controller) AddDevice(params *DeviceParams) (uint32, error) {
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
 	if err != nil {
-		return 0, fmt.Errorf("ADD_DEV submit failed: %v", err)
+		return nil, fmt.Errorf("ADD_DEV submit failed: %v", err)
 	}
 
 	c.logger.Info("ADD_DEV completed", "result", result.Value())
 
 	if result.Value() < 0 {
-		return 0, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
+		return nil, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
 	}
 
 	// Ensure device info buffer stays alive until after kernel copies it
 	runtime.KeepAlive(deviceInfoBytes)
 
 	info := uapi.UnmarshalCtrlDevInfo(deviceInfoBytes)
-	c.logger.Info("device created", "dev_id", info.DevID)
-	return info.DevID, nil
+	c.logger.Info("device created", "dev_id", info.DevID,
+		"queues", info.NrHwQueues, "max_io", info.MaxIOBufBytes)
+	return info, nil
 }
 
 // basicAttrs maps the caller-visible device attributes onto UBLK_ATTR_* bits.

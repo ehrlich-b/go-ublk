@@ -48,6 +48,7 @@ type Runner struct {
 	deviceID     uint32
 	queueID      uint16
 	depth        int
+	maxIOSize    int
 	backend      interfaces.Backend
 	charDeviceFd int
 	ring         uring.Ring
@@ -80,6 +81,7 @@ type Config struct {
 	DevID       uint32
 	QueueID     uint16
 	Depth       int
+	MaxIOSize   int
 	Backend     interfaces.Backend
 	Logger      interfaces.Logger
 	Observer    interfaces.Observer // Metrics observer (may be nil)
@@ -89,6 +91,9 @@ type Config struct {
 
 // NewRunner creates a new queue runner
 func NewRunner(ctx context.Context, config Config) (*Runner, error) {
+	if _, err := bufferAllocationSize(config.Depth, config.MaxIOSize); err != nil {
+		return nil, err
+	}
 	if config.Logger != nil {
 		config.Logger.Debugf("creating queue runner for device %d queue %d", config.DevID, config.QueueID)
 	}
@@ -158,7 +163,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 	if config.Logger != nil {
 		config.Logger.Debugf("mmapping queues for fd=%d", fd)
 	}
-	descPtr, bufPtr, err := mmapQueues(fd, config.QueueID, config.Depth)
+	descPtr, bufPtr, err := mmapQueues(fd, config.QueueID, config.Depth, config.MaxIOSize)
 	if err != nil {
 		if config.Logger != nil {
 			config.Logger.Debugf("mmapQueues failed: %v", err)
@@ -177,6 +182,7 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 		deviceID:     config.DevID,
 		queueID:      config.QueueID,
 		depth:        config.Depth,
+		maxIOSize:    config.MaxIOSize,
 		backend:      config.Backend,
 		charDeviceFd: fd,
 		ring:         ring,
@@ -285,7 +291,7 @@ func (r *Runner) Close() error {
 	}
 
 	if r.bufPtr != nil {
-		bufSize := r.depth * constants.IOBufferSizePerTag // 64KB per request buffer
+		bufSize, _ := bufferAllocationSize(r.depth, r.bufferSize())
 		_, _, _ = syscall.Syscall(syscall.SYS_MUNMAP, uintptr(r.bufPtr), uintptr(bufSize), 0)
 		r.bufPtr = nil
 	}
@@ -386,7 +392,7 @@ func (r *Runner) submitInitialFetchReq(tag uint16) error {
 	}
 
 	// Addr must point to the data buffer for this tag
-	bufferAddr := uintptr(r.bufPtr) + uintptr(int(tag)*constants.IOBufferSizePerTag)
+	bufferAddr := r.bufferAddress(tag)
 
 	// Use pre-allocated ioCmd to avoid heap allocation
 	ioCmd := &r.ioCmds[tag]
@@ -564,29 +570,18 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	// block size is — scaling by the block size instead put every I/O on a
 	// 4Kn device at eight times its intended offset.
 	offset := desc.StartSector * uapi.SectorSize
-	length := uint32(desc.NrSectors) * uapi.SectorSize
-
-	// Calculate buffer pointer for this tag
-	bufOffset := int(tag) * constants.IOBufferSizePerTag // 64KB per buffer
-	bufPtr := unsafe.Add(r.bufPtr, bufOffset)
-
-	// Check if length exceeds buffer size (64KB)
-	const maxBufferSize = constants.IOBufferSizePerTag
+	length := uint64(desc.NrSectors) * uapi.SectorSize
 
 	var buffer []byte
 
-	// Only data-transfer ops need a buffer. A FLUSH carries no data, and a
-	// DISCARD's length describes a range to deallocate rather than bytes to
-	// move — sizing a buffer from it meant any discard larger than the biggest
-	// pool (an fstrim, or blkdiscard over a few MB) panicked the whole daemon.
+	// Only data-transfer ops use tag storage. Range operations can legitimately
+	// be larger than the negotiated data-buffer capacity.
 	if op == uapi.UBLK_IO_OP_READ || op == uapi.UBLK_IO_OP_WRITE {
-		if length > maxBufferSize {
-			// Use buffer pool for large I/Os to avoid hot-path allocations
-			buffer = GetBuffer(length)
-			defer PutBuffer(buffer)
-		} else {
-			buffer = (*[constants.IOBufferSizePerTag]byte)(bufPtr)[:length:length]
+		if length > uint64(r.bufferSize()) {
+			return r.submitCommitAndFetch(tag, fmt.Errorf(
+				"request length %d exceeds tag buffer size %d", length, r.bufferSize()), desc)
 		}
+		buffer = unsafe.Slice((*byte)(r.bufferPointer(tag)), int(length))
 	}
 
 	var err error
@@ -601,12 +596,12 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	case uapi.UBLK_IO_OP_READ:
 		_, err = r.backend.ReadAt(buffer, int64(offset))
 		if r.observer != nil {
-			r.observer.ObserveRead(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
+			r.observer.ObserveRead(length, uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_WRITE:
 		_, err = r.backend.WriteAt(buffer, int64(offset))
 		if r.observer != nil {
-			r.observer.ObserveWrite(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
+			r.observer.ObserveWrite(length, uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_FLUSH:
 		err = r.backend.Flush()
@@ -619,7 +614,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 			err = discardBackend.Discard(int64(offset), int64(length))
 		}
 		if r.observer != nil {
-			r.observer.ObserveDiscard(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
+			r.observer.ObserveDiscard(length, uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_WRITE_ZEROES:
 		// Only reachable when the backend implements WriteZeroesBackend, since
@@ -630,7 +625,7 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 			err = fmt.Errorf("write zeroes requested but backend does not implement it")
 		}
 		if r.observer != nil {
-			r.observer.ObserveWrite(uint64(length), uint64(time.Since(startTime).Nanoseconds()), err == nil)
+			r.observer.ObserveWrite(length, uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	default:
 		err = fmt.Errorf("unsupported operation: %d", op)
@@ -656,7 +651,7 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 	}
 
 	// Addr must point to the data buffer for next I/O
-	bufferAddr := uintptr(r.bufPtr) + uintptr(int(tag)*constants.IOBufferSizePerTag)
+	bufferAddr := r.bufferAddress(tag)
 
 	// Use pre-allocated ioCmd to avoid heap allocation
 	ioCmd := &r.ioCmds[tag]
@@ -683,10 +678,13 @@ func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.Ublksrv
 }
 
 // mmapQueues maps the descriptor array and allocates I/O buffers
-func mmapQueues(fd int, queueID uint16, depth int) (unsafe.Pointer, unsafe.Pointer, error) {
+func mmapQueues(fd int, queueID uint16, depth, maxIOSize int) (unsafe.Pointer, unsafe.Pointer, error) {
 	// Calculate sizes
 	descSize := depth * int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
-	bufSize := depth * constants.IOBufferSizePerTag // 64KB per request buffer
+	bufSize, err := bufferAllocationSize(depth, maxIOSize)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Page-round the mmap length (we only read `depth` descriptors per queue).
 	pageSize := os.Getpagesize()
@@ -743,6 +741,35 @@ func mmapQueues(fd int, queueID uint16, depth int) (unsafe.Pointer, unsafe.Point
 	return pointerFromMmap(descPtr), pointerFromMmap(bufPtr), nil
 }
 
+func bufferAllocationSize(depth, maxIOSize int) (int, error) {
+	if depth < 1 || depth > uapi.UBLK_MAX_QUEUE_DEPTH {
+		return 0, fmt.Errorf("queue depth %d is outside 1..%d", depth, uapi.UBLK_MAX_QUEUE_DEPTH)
+	}
+	if maxIOSize < 1 {
+		return 0, fmt.Errorf("max I/O size must be positive, got %d", maxIOSize)
+	}
+	maxInt := int(^uint(0) >> 1)
+	if maxIOSize > maxInt/depth {
+		return 0, fmt.Errorf("queue buffer allocation overflows int: depth %d, max I/O size %d", depth, maxIOSize)
+	}
+	return depth * maxIOSize, nil
+}
+
+func (r *Runner) bufferSize() int {
+	if r.maxIOSize > 0 {
+		return r.maxIOSize
+	}
+	return constants.DefaultMaxIOSize
+}
+
+func (r *Runner) bufferAddress(tag uint16) uintptr {
+	return uintptr(r.bufferPointer(tag))
+}
+
+func (r *Runner) bufferPointer(tag uint16) unsafe.Pointer {
+	return unsafe.Add(r.bufPtr, int(tag)*r.bufferSize())
+}
+
 // NewStubRunner creates a stub runner for simulation/testing
 func NewStubRunner(ctx context.Context, config Config) *Runner {
 	ctx, cancel := context.WithCancel(ctx)
@@ -751,6 +778,7 @@ func NewStubRunner(ctx context.Context, config Config) *Runner {
 		deviceID:     config.DevID,
 		queueID:      config.QueueID,
 		depth:        config.Depth,
+		maxIOSize:    config.MaxIOSize,
 		backend:      config.Backend,
 		charDeviceFd: -1,  // No real device
 		ring:         nil, // No real ring

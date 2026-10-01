@@ -2,8 +2,11 @@ package ublk
 
 import (
 	"context"
+	"math"
 	"runtime"
 	"testing"
+
+	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
 // Tests now use the public MockBackend from testing.go
@@ -169,12 +172,66 @@ func TestValidateParamsRejectsUnusableSizes(t *testing.T) {
 		}
 	})
 
+	t.Run("MaxIOSize not page aligned", func(t *testing.T) {
+		params := DefaultParams(NewMockBackend(1 << 20))
+		params.MaxIOSize += uapi.SectorSize
+		if err := validateParams(&params); err == nil {
+			t.Error("accepted MaxIOSize that ADD_DEV would round down")
+		}
+	})
+
+	if uint64(^uint(0)>>1) > math.MaxInt32 {
+		t.Run("MaxIOSize over signed result limit", func(t *testing.T) {
+			params := DefaultParams(NewMockBackend(1 << 20))
+			overLimit := int64(math.MaxInt32) + 1
+			params.MaxIOSize = int(overLimit)
+			if err := validateParams(&params); err == nil {
+				t.Error("accepted MaxIOSize that cannot fit a completion result")
+			}
+		})
+	}
+
+	t.Run("invalid queue depth", func(t *testing.T) {
+		params := DefaultParams(NewMockBackend(1 << 20))
+		params.QueueDepth = uapi.UBLK_MAX_QUEUE_DEPTH + 1
+		if err := validateParams(&params); err == nil {
+			t.Error("accepted queue depth above the UAPI limit")
+		}
+	})
+
 	t.Run("backend size not a whole number of blocks", func(t *testing.T) {
 		params := DefaultParams(NewMockBackend(1<<20 + 100))
 		if err := validateParams(&params); err == nil {
 			t.Error("accepted a backend size that is not a multiple of the block size")
 		}
 	})
+}
+
+func TestApplyNegotiatedDeviceInfo(t *testing.T) {
+	params := DefaultParams(NewMockBackend(1 << 20))
+	ctrlParams := convertToCtrlParams(params)
+	info := &uapi.UblksrvCtrlDevInfo{
+		NrHwQueues:    2,
+		QueueDepth:    64,
+		MaxIOBufBytes: 128 << 10,
+	}
+
+	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, info); err != nil {
+		t.Fatalf("apply negotiated info: %v", err)
+	}
+	if params.NumQueues != 2 || params.QueueDepth != 64 || params.MaxIOSize != 128<<10 {
+		t.Errorf("public params = queues %d, depth %d, max I/O %d",
+			params.NumQueues, params.QueueDepth, params.MaxIOSize)
+	}
+	if ctrlParams.NumQueues != 2 || ctrlParams.QueueDepth != 64 || ctrlParams.MaxIOSize != 128<<10 {
+		t.Errorf("control params = queues %d, depth %d, max I/O %d",
+			ctrlParams.NumQueues, ctrlParams.QueueDepth, ctrlParams.MaxIOSize)
+	}
+
+	info.MaxIOBufBytes = uint32(128<<10 - uapi.SectorSize)
+	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, info); err == nil {
+		t.Error("accepted a negotiated capacity that is not page aligned")
+	}
 }
 
 func TestDefaultParams(t *testing.T) {

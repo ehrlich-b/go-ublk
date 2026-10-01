@@ -2,12 +2,7 @@ package queue
 
 import "sync"
 
-// BufferPool provides pooled byte slices to avoid hot-path allocations.
-// Uses size-bucketed pools with power-of-2 sizes (128KB, 256KB, 512KB, 1MB)
-// to balance memory efficiency with allocation reduction.
-//
-// The 64KB case is not pooled because runner.go uses mmap'd per-tag buffers
-// for I/O <= 64KB. This pool handles the overflow case (64KB < size <= 1MB).
+// BufferPool provides pooled scratch slices in power-of-two size buckets.
 //
 // Uses *[]byte pattern to avoid sync.Pool interface allocation overhead.
 

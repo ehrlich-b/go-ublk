@@ -6,7 +6,7 @@ import "time"
 const (
 	// DefaultQueueDepth is the default I/O queue depth per queue.
 	// 128 provides good throughput for most workloads while keeping memory
-	// overhead reasonable (128 tags * 64KB buffers = 8MB per queue).
+	// bounded (128 tags * the default 1MB maximum = 128MB per queue).
 	DefaultQueueDepth = 128
 
 	// DefaultLogicalBlockSize is the default logical block size in bytes.
@@ -84,6 +84,6 @@ const (
 
 // Memory allocation constants
 const (
-	// IOBufferSizePerTag is the I/O buffer size allocated per queue tag (64KB)
+	// IOBufferSizePerTag is a compact 64KB maximum used by the examples.
 	IOBufferSizePerTag = 64 * 1024
 )

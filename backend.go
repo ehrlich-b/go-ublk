@@ -4,6 +4,7 @@ package ublk
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"strings"
@@ -105,13 +106,34 @@ func validateParams(params *DeviceParams) error {
 			bs, uapi.SectorSize, page)
 	}
 
-	// max_sectors is derived from MaxIOSize, and the kernel rejects a value
-	// below one page (PAGE_SECTORS) or not addressable in whole blocks.
+	if params.QueueDepth < 1 || params.QueueDepth > uapi.UBLK_MAX_QUEUE_DEPTH {
+		return fmt.Errorf("QueueDepth is %d; must be from 1 to %d",
+			params.QueueDepth, uapi.UBLK_MAX_QUEUE_DEPTH)
+	}
+	if params.NumQueues < 0 || params.NumQueues > uapi.UBLK_MAX_NR_QUEUES {
+		return fmt.Errorf("NumQueues is %d; must be from 0 to %d",
+			params.NumQueues, uapi.UBLK_MAX_NR_QUEUES)
+	}
+
+	// max_sectors is derived from MaxIOSize. ADD_DEV rounds the advertised
+	// buffer size down to a page, while completions return a signed byte count.
 	if params.MaxIOSize < page {
 		return fmt.Errorf("MaxIOSize is %d; must be at least the page size (%d)", params.MaxIOSize, page)
 	}
+	if params.MaxIOSize%page != 0 {
+		return fmt.Errorf("MaxIOSize %d is not a multiple of the page size %d", params.MaxIOSize, page)
+	}
+	if params.MaxIOSize > math.MaxInt32 {
+		return fmt.Errorf("MaxIOSize %d exceeds the signed completion result limit %d",
+			params.MaxIOSize, math.MaxInt32)
+	}
 	if params.MaxIOSize%bs != 0 {
 		return fmt.Errorf("MaxIOSize %d is not a multiple of LogicalBlockSize %d", params.MaxIOSize, bs)
+	}
+	maxInt := int(^uint(0) >> 1)
+	if params.MaxIOSize > maxInt/params.QueueDepth {
+		return fmt.Errorf("queue buffer allocation overflows int: depth %d, MaxIOSize %d",
+			params.QueueDepth, params.MaxIOSize)
 	}
 
 	// Capacity is reported in whole sectors, so a tail shorter than a block
@@ -121,6 +143,29 @@ func validateParams(params *DeviceParams) error {
 			size, bs)
 	}
 
+	return nil
+}
+
+func applyNegotiatedDeviceInfo(
+	params *DeviceParams, ctrlParams *ctrl.DeviceParams, info *uapi.UblksrvCtrlDevInfo,
+) error {
+	if info.NrHwQueues == 0 || info.QueueDepth == 0 {
+		return fmt.Errorf("ADD_DEV returned unusable queue configuration: %d queues, depth %d",
+			info.NrHwQueues, info.QueueDepth)
+	}
+	if info.MaxIOBufBytes > math.MaxInt32 {
+		return fmt.Errorf("ADD_DEV returned MaxIOBufBytes %d above signed completion limit %d",
+			info.MaxIOBufBytes, math.MaxInt32)
+	}
+	params.NumQueues = int(info.NrHwQueues)
+	params.QueueDepth = int(info.QueueDepth)
+	params.MaxIOSize = int(info.MaxIOBufBytes)
+	if err := validateParams(params); err != nil {
+		return fmt.Errorf("ADD_DEV returned unusable parameters: %w", err)
+	}
+	ctrlParams.NumQueues = params.NumQueues
+	ctrlParams.QueueDepth = params.QueueDepth
+	ctrlParams.MaxIOSize = params.MaxIOSize
 	return nil
 }
 
@@ -248,9 +293,14 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	ctrlParams := convertToCtrlParams(params)
 
 	// Create device using control plane
-	deviceID, err := ctrl.AddDevice(&ctrlParams)
+	deviceInfo, err := ctrl.AddDevice(&ctrlParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add device: %v", err)
+	}
+	deviceID := deviceInfo.DevID
+	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, deviceInfo); err != nil {
+		_ = ctrl.DeleteDevice(deviceID)
+		return nil, err
 	}
 
 	// Set parameters
@@ -270,19 +320,9 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		observer = NewMetricsObserver(metrics)
 	}
 
-	// Determine the number of queues. The kernel clamps nr_hw_queues at ADD_DEV
-	// (notably to the online CPU count), so honor the count it actually assigned
-	// rather than what we requested: creating a runner for a queue the kernel
-	// never allocated makes that queue's descriptor mmap fail with EINVAL and
-	// wedges startup.
-	numQueues := ctrlParams.NumQueues
-	if info, gerr := ctrl.GetDeviceInfo(deviceID); gerr == nil && info.NrHwQueues > 0 {
-		if actual := int(info.NrHwQueues); actual != numQueues {
-			logging.Default().Info("kernel adjusted hardware queue count",
-				"requested", numQueues, "actual", actual)
-			numQueues = actual
-		}
-	}
+	// ADD_DEV returns the negotiated queue count and buffer capacity in the
+	// same structure. Use that result rather than the requested values.
+	numQueues := int(deviceInfo.NrHwQueues)
 
 	// Create Device struct
 	device := &Device{
@@ -371,6 +411,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			DevID:       deviceID,
 			QueueID:     uint16(i),
 			Depth:       params.QueueDepth,
+			MaxIOSize:   params.MaxIOSize,
 			Backend:     params.Backend,
 			Logger:      options.Logger,
 			Observer:    observer,
@@ -455,9 +496,14 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	ctrlParams := convertToCtrlParams(params)
 
 	// Create device using control plane
-	deviceID, err := controller.AddDevice(&ctrlParams)
+	deviceInfo, err := controller.AddDevice(&ctrlParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add device: %v", err)
+	}
+	deviceID := deviceInfo.DevID
+	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, deviceInfo); err != nil {
+		_ = controller.DeleteDevice(deviceID)
+		return nil, err
 	}
 
 	// Set parameters
@@ -476,11 +522,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 		observer = NewMetricsObserver(metrics)
 	}
 
-	// Use the count requested at ADD_DEV, then honor any kernel clamp.
-	numQueues := ctrlParams.NumQueues
-	if info, gerr := controller.GetDeviceInfo(deviceID); gerr == nil && info.NrHwQueues > 0 {
-		numQueues = int(info.NrHwQueues)
-	}
+	numQueues := int(deviceInfo.NrHwQueues)
 
 	// Create Device struct
 	device := &Device{
@@ -560,6 +602,7 @@ func (d *Device) Start(ctx context.Context) error {
 			DevID:       d.ID,
 			QueueID:     uint16(i),
 			Depth:       d.depth,
+			MaxIOSize:   d.params.MaxIOSize,
 			Backend:     d.Backend,
 			Logger:      d.options.Logger,
 			Observer:    d.observer,
