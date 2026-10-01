@@ -1,10 +1,13 @@
 # go-ublk
 
-A Go library for building Linux block devices in userspace. Pure Go, dependency-free, no cgo.
+A Go library for building Linux block devices in userspace. Its ublk and
+io_uring bindings are written in Go, with no C, liburing, or cgo dependency.
+The module uses `golang.org/x/sys` for Linux system calls.
 
-ublk is like FUSE, but for block devices instead of filesystems. The kernel forwards block I/O to your userspace program via io_uring - you just implement read/write handlers. go-ublk handles the io_uring setup, kernel communication, and device lifecycle.
-
-As far as I can tell, this is the only pure-Go ublk implementation available.
+ublk is like FUSE, but for block devices instead of filesystems. The kernel
+forwards block I/O to your userspace program via io_uring; you implement the
+read/write handlers, and go-ublk handles io_uring, kernel communication, and the
+device lifecycle.
 
 ## Usage
 
@@ -15,6 +18,7 @@ package main
 
 import (
     "context"
+    "log"
     "os/signal"
     "syscall"
 
@@ -34,18 +38,38 @@ func (b *NullBackend) Flush() error                             { return nil }
 func (b *NullBackend) Close() error                             { return nil }
 
 func main() {
-    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
+    signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
     defer stop()
 
     backend := &NullBackend{size: 1 << 30} // 1GB
     params := ublk.DefaultParams(backend)
 
-    device, _ := ublk.CreateAndServe(ctx, params, nil)
-    defer device.Close()
+    device, err := ublk.CreateAndServe(context.Background(), params, nil)
+    if err != nil {
+        log.Fatal(err)
+    }
 
-    <-ctx.Done()
+    <-signalCtx.Done()
+    if err := device.Close(); err != nil {
+        log.Printf("close device: %v", err)
+    }
 }
 ```
+
+`ReadAt` and `WriteAt` receive a borrowed per-request buffer. A backend may use
+it only until the method returns and must not retain it. The return values follow
+`io.ReaderAt` and `io.WriterAt`: short transfers are failures, while a full read
+may return `io.EOF`.
+
+`DeviceParams.MaxIOSize` defaults to 1 MiB. It must be at least one OS page,
+page-aligned, aligned to the logical block size, and no larger than
+`math.MaxInt32`. The runner uses the capacity returned by `ADD_DEV` and maps
+`QueueDepth * MaxIOSize` bytes for each queue.
+
+Measured at queue depth 128, a 64 KiB maximum maps 8 MiB per queue and the 1 MiB
+default maps 128 MiB per queue. The anonymous mappings added no resident memory
+before first touch; touching every page made the full 8 MiB or 128 MiB resident.
+Those figures exclude backend storage, the Go heap, descriptors, and io_uring.
 
 ## Try It
 
@@ -65,18 +89,6 @@ sudo mount /dev/ublkb0 /mnt
 # ...
 sudo umount /mnt
 ```
-
-## Performance
-
-One run on an Ubuntu 24.04.5 VM with kernel 7.0.0-34-generic (4 vCPUs, 4 GiB RAM, 4 ublk queues, depth 64). fio used 4 KiB direct I/O, libaio, queue depth 64 per job, and 10 seconds per workload. Both devices were RAM-backed with 256 MiB capacity.
-
-| Workload | go-ublk | Loop (RAM) | % of Loop |
-|----------|---------|------------|-----------|
-| 4K Read (1 job) | 321k IOPS | 299k IOPS | 108% |
-| 4K Read (4 jobs) | 658k IOPS | 827k IOPS | 80% |
-| 4K Write (4 jobs) | 647k IOPS | 799k IOPS | 81% |
-
-This was a single sequential run on a shared host, so the percentages are rough comparisons, not capacity estimates. The four-job workloads reached about 80% of the loop baseline.
 
 ## Requirements
 

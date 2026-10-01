@@ -70,7 +70,6 @@ func main() {
 	params.QueueDepth = *queueDepth
 	params.NumQueues = *numQueues // 0 = auto-detect based on CPU count
 	params.LogicalBlockSize = loopBlockSize
-	params.MaxIOSize = ublk.IOBufferSizePerTag
 	// Required on kernel 6.11+: sets UBLK_F_CMD_IOCTL_ENCODE at ADD_DEV.
 	params.EnableIoctlEncode = true
 	params.ReadOnly = *readOnly

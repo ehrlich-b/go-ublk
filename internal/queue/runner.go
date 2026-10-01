@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -13,7 +14,6 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
@@ -291,7 +291,7 @@ func (r *Runner) Close() error {
 	}
 
 	if r.bufPtr != nil {
-		bufSize, _ := bufferAllocationSize(r.depth, r.bufferSize())
+		bufSize, _ := bufferAllocationSize(r.depth, r.maxIOSize)
 		_, _, _ = syscall.Syscall(syscall.SYS_MUNMAP, uintptr(r.bufPtr), uintptr(bufSize), 0)
 		r.bufPtr = nil
 	}
@@ -577,9 +577,9 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 	// Only data-transfer ops use tag storage. Range operations can legitimately
 	// be larger than the negotiated data-buffer capacity.
 	if op == uapi.UBLK_IO_OP_READ || op == uapi.UBLK_IO_OP_WRITE {
-		if length > uint64(r.bufferSize()) {
+		if r.maxIOSize < 1 || length > uint64(r.maxIOSize) {
 			return r.submitCommitAndFetch(tag, fmt.Errorf(
-				"request length %d exceeds tag buffer size %d", length, r.bufferSize()), desc)
+				"request length %d exceeds tag buffer size %d", length, r.maxIOSize), desc)
 		}
 		buffer = unsafe.Slice((*byte)(r.bufferPointer(tag)), int(length))
 	}
@@ -594,12 +594,14 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 	switch op {
 	case uapi.UBLK_IO_OP_READ:
-		_, err = r.backend.ReadAt(buffer, int64(offset))
+		n, readErr := r.backend.ReadAt(buffer, int64(offset))
+		err = readResultError(n, len(buffer), readErr)
 		if r.observer != nil {
 			r.observer.ObserveRead(length, uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
 	case uapi.UBLK_IO_OP_WRITE:
-		_, err = r.backend.WriteAt(buffer, int64(offset))
+		n, writeErr := r.backend.WriteAt(buffer, int64(offset))
+		err = writeResultError(n, len(buffer), writeErr)
 		if r.observer != nil {
 			r.observer.ObserveWrite(length, uint64(time.Since(startTime).Nanoseconds()), err == nil)
 		}
@@ -633,6 +635,35 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 	// Submit COMMIT_AND_FETCH_REQ with result
 	return r.submitCommitAndFetch(tag, err, desc)
+}
+
+func readResultError(n, length int, err error) error {
+	if n < 0 || n > length {
+		return fmt.Errorf("backend ReadAt returned invalid count %d for %d-byte buffer", n, length)
+	}
+	if n == length && err == io.EOF {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if n != length {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+
+func writeResultError(n, length int, err error) error {
+	if n < 0 || n > length {
+		return fmt.Errorf("backend WriteAt returned invalid count %d for %d-byte buffer", n, length)
+	}
+	if err != nil {
+		return err
+	}
+	if n != length {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // submitCommitAndFetch prepares COMMIT_AND_FETCH_REQ with proper state tracking.
@@ -755,19 +786,12 @@ func bufferAllocationSize(depth, maxIOSize int) (int, error) {
 	return depth * maxIOSize, nil
 }
 
-func (r *Runner) bufferSize() int {
-	if r.maxIOSize > 0 {
-		return r.maxIOSize
-	}
-	return constants.DefaultMaxIOSize
-}
-
 func (r *Runner) bufferAddress(tag uint16) uintptr {
 	return uintptr(r.bufferPointer(tag))
 }
 
 func (r *Runner) bufferPointer(tag uint16) unsafe.Pointer {
-	return unsafe.Add(r.bufPtr, int(tag)*r.bufferSize())
+	return unsafe.Add(r.bufPtr, int(tag)*r.maxIOSize)
 }
 
 // NewStubRunner creates a stub runner for simulation/testing

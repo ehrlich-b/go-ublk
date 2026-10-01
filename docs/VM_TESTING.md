@@ -30,6 +30,25 @@ make vm-reset         # Hard reset VM
 
 Race detector: `RACE=1 make vm-e2e`
 
+## Disposable Large-I/O Regression
+
+The focused real-kernel regression is intentionally opt-in and must run only in
+a disposable guest that already has `/dev/ublk-control` and sufficient
+privilege:
+
+```bash
+GO_UBLK_DISPOSABLE_TEST=1 make test-large-io-kernel
+```
+
+It does not load modules, change kernel policy, enumerate devices, or delete
+unrelated devices. It creates two auto-assigned memory-backed devices in
+sequence, tests both public startup paths, and cleans up only those device IDs
+through `Device.Close`. Compile it without running it with:
+
+```bash
+make test-large-io-kernel-compile
+```
+
 ## Troubleshooting
 
 | Problem | Solution |

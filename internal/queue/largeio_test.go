@@ -3,7 +3,9 @@ package queue
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
 	"unsafe"
@@ -93,13 +95,37 @@ type largeIOCall struct {
 }
 
 type largeIOBackend struct {
-	data       []byte
-	reads      []largeIOCall
-	writes     []largeIOCall
-	discards   []rangeCall
-	zeroes     []rangeCall
-	flushCount int
+	data        []byte
+	reads       []largeIOCall
+	writes      []largeIOCall
+	readResult  *backendResult
+	writeResult *backendResult
+	discards    []rangeCall
+	zeroes      []rangeCall
+	flushCount  int
 }
+
+type backendResult struct {
+	n   int
+	err error
+}
+
+type largeIOObserver struct {
+	readSuccess  []bool
+	writeSuccess []bool
+}
+
+func (o *largeIOObserver) ObserveRead(_ uint64, _ uint64, success bool) {
+	o.readSuccess = append(o.readSuccess, success)
+}
+
+func (o *largeIOObserver) ObserveWrite(_ uint64, _ uint64, success bool) {
+	o.writeSuccess = append(o.writeSuccess, success)
+}
+
+func (*largeIOObserver) ObserveDiscard(uint64, uint64, bool) {}
+func (*largeIOObserver) ObserveFlush(uint64, bool)           {}
+func (*largeIOObserver) ObserveQueueDepth(uint32)            {}
 
 type rangeCall struct {
 	offset int64
@@ -116,7 +142,14 @@ func (b *largeIOBackend) ReadAt(p []byte, offset int64) (int, error) {
 		offset:  offset,
 		length:  len(p),
 	})
-	return copy(p, b.data[offset:int(offset)+len(p)]), nil
+	result := backendResult{n: len(p)}
+	if b.readResult != nil {
+		result = *b.readResult
+	}
+	if result.n > 0 && result.n <= len(p) {
+		copy(p[:result.n], b.data[offset:int(offset)+result.n])
+	}
+	return result.n, result.err
 }
 
 func (b *largeIOBackend) WriteAt(p []byte, offset int64) (int, error) {
@@ -125,7 +158,14 @@ func (b *largeIOBackend) WriteAt(p []byte, offset int64) (int, error) {
 		offset:  offset,
 		length:  len(p),
 	})
-	return copy(b.data[offset:int(offset)+len(p)], p), nil
+	result := backendResult{n: len(p)}
+	if b.writeResult != nil {
+		result = *b.writeResult
+	}
+	if result.n > 0 && result.n <= len(p) {
+		copy(b.data[offset:int(offset)+result.n], p[:result.n])
+	}
+	return result.n, result.err
 }
 
 func (b *largeIOBackend) Size() int64  { return int64(len(b.data)) }
@@ -143,13 +183,14 @@ func (b *largeIOBackend) WriteZeroes(offset, length int64) error {
 }
 
 func newLargeIOTestRunner(
-	depth int, backend interfaces.Backend,
+	depth, maxIOSize int, backend interfaces.Backend,
 ) (*Runner, *largeIOFakeRing, []byte) {
-	storage := make([]byte, depth*largeIOTestMaxSize)
+	storage := make([]byte, depth*maxIOSize)
 	ring := &largeIOFakeRing{}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Runner{
 		depth:        depth,
+		maxIOSize:    maxIOSize,
 		backend:      backend,
 		charDeviceFd: -1,
 		ring:         ring,
@@ -209,7 +250,7 @@ func TestRunnerLargeIOUsesKernelVisibleTagStorage(t *testing.T) {
 				const tag = uint16(depth - 1)
 				const offset = 17 * uapi.SectorSize
 				backend := newLargeIOBackend(2 * largeIOTestMaxSize)
-				runner, ring, storage := newLargeIOTestRunner(depth, backend)
+				runner, ring, storage := newLargeIOTestRunner(depth, largeIOTestMaxSize, backend)
 				t.Cleanup(runner.cancel)
 				pattern := largeIOPattern(byte(size>>9), size)
 				tagStart := int(tag) * largeIOTestMaxSize
@@ -274,7 +315,7 @@ func TestRunnerLargeIOTagIsolation(t *testing.T) {
 	const depth = 4
 	const size = 128 << 10
 	backend := newLargeIOBackend(4 * largeIOTestMaxSize)
-	runner, ring, storage := newLargeIOTestRunner(depth, backend)
+	runner, ring, storage := newLargeIOTestRunner(depth, largeIOTestMaxSize, backend)
 	t.Cleanup(runner.cancel)
 	tags := []uint16{1, depth - 1}
 	offsets := []int{19 * uapi.SectorSize, 601 * uapi.SectorSize}
@@ -312,7 +353,7 @@ func TestRunnerLargeIOStorageSurvivesPrepareUntilFlushAndReuse(t *testing.T) {
 	const writeOffset = 733 * uapi.SectorSize
 	const secondReadOffset = 2049 * uapi.SectorSize
 	backend := newLargeIOBackend(2 * largeIOTestMaxSize)
-	runner, ring, storage := newLargeIOTestRunner(depth, backend)
+	runner, ring, storage := newLargeIOTestRunner(depth, largeIOTestMaxSize, backend)
 	t.Cleanup(runner.cancel)
 	ring.consumeSize = size
 	tagStart := int(tag) * largeIOTestMaxSize
@@ -372,6 +413,94 @@ func TestRunnerLargeIOStorageSurvivesPrepareUntilFlushAndReuse(t *testing.T) {
 	}
 }
 
+func TestRunnerBackendTransferResults(t *testing.T) {
+	const size = 64 << 10
+	backendError := errors.New("backend failed")
+	tests := []struct {
+		name        string
+		op          uint8
+		result      backendResult
+		wantSuccess bool
+	}{
+		{name: "full read with EOF", op: uapi.UBLK_IO_OP_READ,
+			result: backendResult{n: size, err: io.EOF}, wantSuccess: true},
+		{name: "short read without error", op: uapi.UBLK_IO_OP_READ,
+			result: backendResult{n: size - uapi.SectorSize}, wantSuccess: false},
+		{name: "read error", op: uapi.UBLK_IO_OP_READ,
+			result: backendResult{err: backendError}, wantSuccess: false},
+		{name: "short write without error", op: uapi.UBLK_IO_OP_WRITE,
+			result: backendResult{n: size - uapi.SectorSize}, wantSuccess: false},
+		{name: "write error", op: uapi.UBLK_IO_OP_WRITE,
+			result: backendResult{err: backendError}, wantSuccess: false},
+		{name: "full write with error", op: uapi.UBLK_IO_OP_WRITE,
+			result: backendResult{n: size, err: backendError}, wantSuccess: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			backend := newLargeIOBackend(largeIOTestMaxSize)
+			if test.op == uapi.UBLK_IO_OP_READ {
+				backend.readResult = &test.result
+			} else {
+				backend.writeResult = &test.result
+			}
+			runner, ring, storage := newLargeIOTestRunner(1, largeIOTestMaxSize, backend)
+			t.Cleanup(runner.cancel)
+			observer := &largeIOObserver{}
+			runner.observer = observer
+			copy(storage[:size], largeIOPattern(0x44, size))
+			ownLargeIOTag(runner, 0)
+
+			if err := runner.handleIORequest(0, largeIODescriptor(test.op, 0, size)); err != nil {
+				t.Fatalf("handle request: %v", err)
+			}
+			if len(ring.prepared) != 1 {
+				t.Fatalf("prepared commands = %d, want 1", len(ring.prepared))
+			}
+			wantResult := int32(-5)
+			if test.wantSuccess {
+				wantResult = size
+			}
+			if got := ring.prepared[0].ioCmd.Result; got != wantResult {
+				t.Errorf("completion result = %d, want %d", got, wantResult)
+			}
+			observations := observer.writeSuccess
+			if test.op == uapi.UBLK_IO_OP_READ {
+				observations = observer.readSuccess
+			}
+			if len(observations) != 1 || observations[0] != test.wantSuccess {
+				t.Errorf("observer successes = %v, want [%t]", observations, test.wantSuccess)
+			}
+		})
+	}
+}
+
+func TestRunnerOversizeDataRequestFailsBeforeBackendAccess(t *testing.T) {
+	const maxIOSize = 64 << 10
+	const requestSize = maxIOSize + uapi.SectorSize
+	for _, operation := range []uint8{uapi.UBLK_IO_OP_READ, uapi.UBLK_IO_OP_WRITE} {
+		t.Run(fmt.Sprintf("operation-%d", operation), func(t *testing.T) {
+			backend := newLargeIOBackend(2 * requestSize)
+			runner, ring, storage := newLargeIOTestRunner(1, maxIOSize, backend)
+			t.Cleanup(runner.cancel)
+			ownLargeIOTag(runner, 0)
+
+			if err := runner.handleIORequest(0, largeIODescriptor(operation, 0, requestSize)); err != nil {
+				t.Fatalf("handle request: %v", err)
+			}
+			if len(storage) != maxIOSize {
+				t.Fatalf("storage length = %d, want %d", len(storage), maxIOSize)
+			}
+			if len(backend.reads) != 0 || len(backend.writes) != 0 {
+				t.Fatal("oversize request reached backend")
+			}
+			if len(ring.prepared) != 1 || ring.prepared[0].ioCmd.Result != -5 {
+				t.Fatalf("oversize completion = %+v, want one EIO", ring.prepared)
+			}
+		})
+	}
+}
+
 func TestRunnerRangeOperationsDoNotUseDataBuffer(t *testing.T) {
 	const startSector = uint64(23)
 	const sectors = uint32(4097)
@@ -391,8 +520,7 @@ func TestRunnerRangeOperationsDoNotUseDataBuffer(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			backend := newLargeIOBackend(1)
-			runner, _, storage := newLargeIOTestRunner(1, backend)
-			runner.bufPtr = unsafe.Pointer(&storage[0])
+			runner, _, _ := newLargeIOTestRunner(1, largeIOTestMaxSize, backend)
 			t.Cleanup(runner.cancel)
 			ownLargeIOTag(runner, 0)
 			desc := uapi.UblksrvIODesc{OpFlags: uint32(test.op)}

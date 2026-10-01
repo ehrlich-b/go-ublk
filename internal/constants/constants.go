@@ -84,6 +84,7 @@ const (
 
 // Memory allocation constants
 const (
-	// IOBufferSizePerTag is a compact 64KB maximum used by the examples.
+	// IOBufferSizePerTag is the legacy 64KiB value kept for API compatibility.
+	// Runner capacity is configured by DeviceParams.MaxIOSize instead.
 	IOBufferSizePerTag = 64 * 1024
 )

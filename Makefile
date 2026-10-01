@@ -53,7 +53,8 @@ endif
 # Core Targets
 #==============================================================================
 
-.PHONY: all build verify crash clean test test-unit test-integration deps tidy fmt lint vet help
+.PHONY: all build verify crash clean test test-unit test-integration test-large-io-kernel \
+	test-large-io-kernel-compile deps tidy fmt lint vet help
 
 all: deps build test
 
@@ -108,6 +109,18 @@ test-integration:
 		exit 1; \
 	fi
 	$(GOTEST) -v -tags=integration ./test/integration/...
+
+test-large-io-kernel:
+	@if [ "$$GO_UBLK_DISPOSABLE_TEST" != "1" ]; then \
+		echo "Set GO_UBLK_DISPOSABLE_TEST=1 only in a disposable ublk test guest"; \
+		exit 2; \
+	fi
+	$(GOTEST) -count=1 -timeout=2m -v -tags=integration \
+		-run '^TestDisposableLargeIOPublicRunnerPaths$$' ./test/integration
+
+test-large-io-kernel-compile:
+	@mkdir -p build
+	$(GOTEST) -c -tags=integration -o build/large-io-kernel.test ./test/integration
 
 test-race:
 	@echo "Running tests with race detector..."
