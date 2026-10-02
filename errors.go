@@ -123,7 +123,8 @@ func WrapError(op string, inner error) *Error {
 	}
 
 	// If it's already a structured error, just update the operation
-	if ue, ok := inner.(*Error); ok {
+	var ue *Error
+	if errors.As(inner, &ue) {
 		return &Error{
 			Op:    op,
 			DevID: ue.DevID,
@@ -131,13 +132,14 @@ func WrapError(op string, inner error) *Error {
 			Code:  ue.Code,
 			Errno: ue.Errno,
 			Msg:   ue.Msg,
-			Inner: ue.Inner,
+			Inner: inner,
 		}
 	}
 
 	// Map common syscall errors to ublk error codes
 	code := ErrCodeIOError
-	if errno, ok := inner.(syscall.Errno); ok {
+	var errno syscall.Errno
+	if errors.As(inner, &errno) {
 		code = mapErrnoToCode(errno)
 		return &Error{
 			Op:    op,

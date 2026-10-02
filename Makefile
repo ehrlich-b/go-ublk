@@ -53,7 +53,7 @@ endif
 # Core Targets
 #==============================================================================
 
-.PHONY: all build verify crash clean test test-unit test-integration test-large-io-kernel \
+.PHONY: all build verify crash clean test test-unit test-uapi-fuzz test-integration test-large-io-kernel \
 	test-large-io-kernel-compile deps tidy fmt lint vet help
 
 all: deps build test
@@ -100,6 +100,16 @@ test-unit:
 	@echo "Running unit tests..."
 	$(GOTEST) -v ./...
 	$(GOTEST) -v -tags=!integration ./test/unit/...
+
+# Synthetic userspace fuzzing only. Each target has an explicit time budget;
+# cap process/package concurrency as well as input sizes in the fuzz functions.
+FUZZ_TIME ?= 30s
+FUZZ_PARALLEL ?= 2
+test-uapi-fuzz:
+	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
+		-run='^$$' -fuzz='^FuzzFixedUAPI$$' -fuzztime=$(FUZZ_TIME) ./internal/uapi
+	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
+		-run='^$$' -fuzz='^FuzzParamsUAPI$$' -fuzztime=$(FUZZ_TIME) ./internal/uapi
 
 test-integration:
 	@echo "Running integration tests (requires root and ublk kernel support)..."
