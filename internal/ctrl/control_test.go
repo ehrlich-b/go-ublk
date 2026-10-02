@@ -38,12 +38,14 @@ func (r controlTestResult) Error() error {
 }
 
 // This stands in for the driver's copy_to/from_user against a Go-owned buffer.
-// checkptr cannot track a kernel address carried as uint64, so suppress it only
-// in this synthetic boundary helper. Payload addresses are never dereferenced.
+// Reinterpret the command's address bits as a pointer only at this synthetic
+// kernel boundary. checkptr cannot track addresses carried as uint64; suppress
+// it only here. Payload addresses are never dereferenced.
 //
 //go:nocheckptr
 func controlTestBuffer(cmd *uapi.UblksrvCtrlCmd) []byte {
-	return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(cmd.Addr))), int(cmd.Len))
+	addr := *(*unsafe.Pointer)(unsafe.Pointer(&cmd.Addr))
+	return unsafe.Slice((*byte)(addr), int(cmd.Len))
 }
 
 func TestGetParamsRequestAndFixedOffsetResponse(t *testing.T) {
