@@ -138,6 +138,27 @@ func TestParamsFutureTailAndDestinationReuse(t *testing.T) {
 	}
 }
 
+func TestParamsKernelResponseUsesCapacity(t *testing.T) {
+	for _, reportedLen := range []uint32{0, 40, 60, 4096} {
+		data := make([]byte, 112)
+		binary.LittleEndian.PutUint32(data, reportedLen)
+		binary.LittleEndian.PutUint32(data[4:8], UBLK_PARAM_TYPE_BASIC|UBLK_PARAM_TYPE_DEVT)
+		binary.LittleEndian.PutUint32(data[60:64], 241)
+		binary.LittleEndian.PutUint32(data[68:72], 259)
+		var got UblkParams
+		if err := UnmarshalParamsResponse(data, &got); err != nil || got.Len != reportedLen || got.Devt.CharMajor != 241 || got.Devt.DiskMajor != 259 {
+			t.Fatalf("kernel retained Len=%d: %+v err=%v", reportedLen, got, err)
+		}
+		for size := 0; size < 76; size++ {
+			before := fixtureParams(15)
+			got := before
+			if err := UnmarshalParamsResponse(data[:size], &got); err != ErrInsufficientData || got != before {
+				t.Fatalf("response truncated at %d: %+v err=%v", size, got, err)
+			}
+		}
+	}
+}
+
 func TestFixedUnmarshalAtomicTruncation(t *testing.T) {
 	values := []interface{}{
 		&UblksrvCtrlCmd{DevID: 42, Reserved: 123}, &UblksrvIOCmd{QID: 3, Result: -5},

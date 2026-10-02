@@ -109,7 +109,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (*uapi.UblksrvCtrlDevInfo, 
 	// Marshal device info (64-byte format matches kernel 6.6+)
 	deviceInfoBytes := uapi.Marshal(devInfo)
 
-	// Build control header (48-byte variant)
+	// Build the 32-byte control header.
 	cmd := &uapi.UblksrvCtrlCmd{
 		DevID:      devInfo.DevID,
 		QueueID:    0xFFFF,
@@ -403,7 +403,7 @@ func (c *Controller) GetParams(deviceID uint32) (*uapi.UblkParams, error) {
 		return nil, err
 	}
 	params := &uapi.UblkParams{}
-	if err := uapi.Unmarshal(buf, params); err != nil {
+	if err := uapi.UnmarshalParamsResponse(buf, params); err != nil {
 		return nil, fmt.Errorf("GET_PARAMS decode failed: %w", err)
 	}
 	return params, nil

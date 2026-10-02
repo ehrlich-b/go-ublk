@@ -95,6 +95,36 @@ func FuzzParamsUAPI(f *testing.F) {
 			t.Fatal("Unmarshal modified input")
 		}
 		assertFuzzMarshalBounds(t, &got, int(capacity)%513)
+
+		// Kernel responses use capacity, rather than the retained SET length.
+		got = before
+		err = UnmarshalParamsResponse(data, &got)
+		responseValid := len(data) >= 8
+		if responseValid {
+			responseValid = len(data) >= paramPrefix(binary.LittleEndian.Uint32(data[4:8]))
+		}
+		if !responseValid {
+			if err != ErrInsufficientData || got != before {
+				t.Fatalf("invalid response: err=%v mutated=%v", err, got != before)
+			}
+		} else {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Len != binary.LittleEndian.Uint32(data[:4]) {
+				t.Fatal("lost reported length")
+			}
+			canonical := Marshal(&got)
+			for _, b := range paramBlocks {
+				if got.Types&b.bit != 0 && !bytes.Equal(canonical[b.start:b.end], data[b.start:b.end]) {
+					t.Fatal("kernel response block moved or changed")
+				}
+			}
+			assertFuzzMarshalBounds(t, &got, int(capacity)%513)
+		}
+		if !bytes.Equal(data, input) {
+			t.Fatal("response decoder modified input")
+		}
 	})
 }
 

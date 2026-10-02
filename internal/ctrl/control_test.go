@@ -78,18 +78,27 @@ func TestGetParamsRequestAndFixedOffsetResponse(t *testing.T) {
 	}
 }
 
-func TestGetParamsRejectsMalformedResponse(t *testing.T) {
-	for _, length := range []uint32{0, 7, 8, 75, 257, 0xffffffff} {
+func TestGetParamsRetainedSetLengthWithKernelAddedDevt(t *testing.T) {
+	// Linux copies params.Len from SET_PARAMS verbatim but adds DEVT to GET,
+	// including before SET_PARAMS. A large retained Len may also exceed the
+	// GET buffer capacity while all known blocks fit the returned prefix.
+	for _, length := range []uint32{0, 40, 60, 112, 4096} {
 		t.Run(fmt.Sprint(length), func(t *testing.T) {
 			ring := &controlTestRing{submit: func(_ uint32, cmd *uapi.UblksrvCtrlCmd) (uring.Result, error) {
 				buf := controlTestBuffer(cmd)
 				clear(buf)
 				binary.LittleEndian.PutUint32(buf, length)
-				binary.LittleEndian.PutUint32(buf[4:8], uapi.UBLK_PARAM_TYPE_DEVT)
+				types := uint32(uapi.UBLK_PARAM_TYPE_BASIC | uapi.UBLK_PARAM_TYPE_DEVT)
+				if length == 0 {
+					types = uapi.UBLK_PARAM_TYPE_DEVT
+				}
+				binary.LittleEndian.PutUint32(buf[4:8], types)
+				binary.LittleEndian.PutUint32(buf[60:64], 241)
+				binary.LittleEndian.PutUint32(buf[68:72], 259)
 				return controlTestResult(0), nil
 			}}
 			p, err := (&Controller{controlFd: -1, ring: ring}).GetParams(1)
-			if p != nil || !errors.Is(err, uapi.ErrInsufficientData) {
+			if err != nil || p.Len != length || p.Devt.CharMajor != 241 || p.Devt.DiskMajor != 259 {
 				t.Fatalf("p=%+v err=%v", p, err)
 			}
 		})

@@ -6,7 +6,9 @@ import (
 	"unsafe"
 )
 
-// Marshal converts a struct to bytes using the system's native byte order
+// Marshal converts a UAPI struct to bytes on the supported little-endian hosts.
+// Explicit command fields use little-endian order; parameter blocks and the
+// direct-copy fallback use native order. Big-endian hosts are not supported.
 func Marshal(v interface{}) []byte {
 	switch val := v.(type) {
 	case *UblksrvCtrlCmd:
@@ -188,8 +190,8 @@ func marshalParamsInto(params *UblkParams, buf []byte) (int, error) {
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(size))
 	binary.LittleEndian.PutUint32(buf[4:8], params.Types)
 
-	// Each present parameter block is copied unshrunk (native byte order,
-	// matching kernel layout exactly; Go layouts have no internal padding).
+	// Copy each selected block to its fixed kernel offset. These individual
+	// Go block layouts have no internal padding on supported architectures.
 	if params.HasBasic() {
 		rawCopy(buf[paramsBasicOffset:paramsBasicEnd], unsafe.Pointer(&params.Basic), 32)
 	}
@@ -208,6 +210,19 @@ func marshalParamsInto(params *UblkParams, buf []byte) (int, error) {
 
 // unmarshalParams handles the complex UblkParams structure
 func unmarshalParams(data []byte, params *UblkParams) error {
+	return decodeParams(data, params, false)
+}
+
+// UnmarshalParamsResponse decodes a GET_PARAMS buffer. Linux retains the length
+// supplied to SET_PARAMS (or zero before SET_PARAMS), even when it adds DEVT to
+// GET_PARAMS. Thus response Len is metadata, not a bound on populated fields.
+// The caller must pass the buffer capacity supplied to GET_PARAMS; known blocks
+// are bounded by that slice. Unmarshal remains strict for serialized records.
+func UnmarshalParamsResponse(data []byte, params *UblkParams) error {
+	return decodeParams(data, params, true)
+}
+
+func decodeParams(data []byte, params *UblkParams, kernelResponse bool) error {
 	if len(data) < paramsHeaderSize {
 		return ErrInsufficientData
 	}
@@ -219,7 +234,11 @@ func unmarshalParams(data []byte, params *UblkParams) error {
 		Len:   binary.LittleEndian.Uint32(data[0:4]),
 		Types: binary.LittleEndian.Uint32(data[4:8]),
 	}
-	if uint64(decoded.Len) > uint64(len(data)) || decoded.Len < uint32(paramsSize(&decoded)) {
+	required := paramsSize(&decoded)
+	if len(data) < required {
+		return ErrInsufficientData
+	}
+	if !kernelResponse && (uint64(decoded.Len) > uint64(len(data)) || decoded.Len < uint32(required)) {
 		return ErrInsufficientData
 	}
 	if decoded.HasBasic() {
