@@ -2,20 +2,22 @@ package uapi
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/hex"
-	"os"
 	"strings"
 	"testing"
 )
+
+// Embedded so the test does not depend on running from the package directory,
+// which the cross-compiled binaries vm-test-unit copies to the VM do not.
+//
+//go:embed testdata/linux-le-fixtures.txt
+var kernelFixtures string
 
 // Generated independently by scripts/uapi-fixtures.c against Linux headers.
 // The same LE prefixes are expected from v6.0 (common records), v6.6, v6.8,
 // and v7.0. C struct sizeof includes tail padding; these prefixes do not.
 func TestKernelCByteFixtures(t *testing.T) {
-	data, err := os.ReadFile("testdata/linux-le-fixtures.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
 	basic := fixtureParams(UBLK_PARAM_TYPE_BASIC)
 	devt := fixtureParams(UBLK_PARAM_TYPE_BASIC | UBLK_PARAM_TYPE_DEVT)
 	values := map[string]interface{}{
@@ -23,7 +25,7 @@ func TestKernelCByteFixtures(t *testing.T) {
 		"io":    &UblksrvIOCmd{QID: 0x0123, Tag: 0xfedc, Result: -5, Addr: 0x8877665544332211},
 		"basic": &basic, "basic_devt": &devt,
 	}
-	for _, line := range strings.Fields(string(data)) {
+	for _, line := range strings.Fields(kernelFixtures) {
 		name, encoded, ok := strings.Cut(line, "=")
 		if !ok {
 			t.Fatalf("bad fixture: %s", line)

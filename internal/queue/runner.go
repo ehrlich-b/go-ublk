@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -230,7 +231,7 @@ func (r *Runner) Prime() error {
 	for tag := 0; tag < r.depth; tag++ {
 		if err := r.submitInitialFetchReq(uint16(tag)); err != nil {
 			// If we get EOPNOTSUPP, START_DEV might not be ready yet
-			if errno, ok := err.(syscall.Errno); ok && errno == syscall.EOPNOTSUPP {
+			if errors.Is(err, syscall.EOPNOTSUPP) {
 				// This is expected if START_DEV hasn't been processed yet
 				// The queue runner loop will retry
 				return fmt.Errorf("device not ready (START_DEV pending): %w", err)
