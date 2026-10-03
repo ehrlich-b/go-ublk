@@ -552,6 +552,32 @@ func TestRunnerRangeOperationsDoNotUseDataBuffer(t *testing.T) {
 	}
 }
 
+func TestRunnerRangeOperationResultIsNonNegative(t *testing.T) {
+	// A range op's length is not a transfer count. NrSectors<<9 goes negative
+	// as an int32 from 2GiB up, and the kernel fails any negative result.
+	for _, op := range []uint8{uapi.UBLK_IO_OP_DISCARD, uapi.UBLK_IO_OP_WRITE_ZEROES} {
+		for _, sectors := range []uint32{1 << 22, 1<<23 - 8} {
+			t.Run(fmt.Sprintf("op-%d-sectors-%d", op, sectors), func(t *testing.T) {
+				backend := newLargeIOBackend(1)
+				runner, ring, _ := newLargeIOTestRunner(1, largeIOTestMaxSize, backend)
+				t.Cleanup(runner.cancel)
+				ownLargeIOTag(runner, 0)
+
+				desc := uapi.UblksrvIODesc{OpFlags: uint32(op), NrSectors: sectors}
+				if err := runner.handleIORequest(0, desc); err != nil {
+					t.Fatalf("handle request: %v", err)
+				}
+				if len(ring.prepared) != 1 {
+					t.Fatalf("prepared commands = %d, want 1", len(ring.prepared))
+				}
+				if got := ring.prepared[0].ioCmd.Result; got != 0 {
+					t.Errorf("completion result = %d, want 0", got)
+				}
+			})
+		}
+	}
+}
+
 func TestBufferAllocationSize(t *testing.T) {
 	const configuredMaxIOSize = 64 << 10
 	const depth = 4
