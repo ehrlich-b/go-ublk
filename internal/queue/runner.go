@@ -670,9 +670,15 @@ func writeResultError(n, length int, err error) error {
 // submitCommitAndFetch prepares COMMIT_AND_FETCH_REQ with proper state tracking.
 // Note: This only prepares the SQE - caller must call FlushSubmissions() to submit.
 func (r *Runner) submitCommitAndFetch(tag uint16, ioErr error, desc uapi.UblksrvIODesc) error {
-	// Calculate result: bytes processed for success, negative errno for error
-	// Always set result = nr_sectors << 9 (nr_sectors * 512) as per expert guidance
-	result := int32(desc.NrSectors) << 9 // Success: return bytes processed
+	// Calculate result: bytes processed for success, negative errno for error.
+	// The kernel reads a byte count only for READ and WRITE, whose length is
+	// bounded by MaxIOSize; any other op succeeds on any non-negative result.
+	// Reporting a range op's length overflowed int32 for a discard or
+	// write-zeroes of 2GiB or more, and the kernel failed it with EIO.
+	var result int32
+	if op := desc.GetOp(); op == uapi.UBLK_IO_OP_READ || op == uapi.UBLK_IO_OP_WRITE {
+		result = int32(desc.NrSectors) << 9
+	}
 	if ioErr != nil {
 		result = -5 // -EIO
 	}
