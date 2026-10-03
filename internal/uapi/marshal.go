@@ -228,8 +228,9 @@ func decodeParams(data []byte, params *UblkParams, kernelResponse bool) error {
 	}
 
 	// Validate before mutating the destination. Use a widening comparison so a
-	// malicious length cannot wrap int on 32-bit builds. Trailing data outside
-	// Len is not part of this response and cannot satisfy a selected block.
+	// malicious length cannot wrap int on 32-bit builds. In strict serialized
+	// records, trailing data outside Len cannot satisfy a selected block;
+	// kernel response Len instead retains SET metadata as described above.
 	decoded := UblkParams{
 		Len:   binary.LittleEndian.Uint32(data[0:4]),
 		Types: binary.LittleEndian.Uint32(data[4:8]),
