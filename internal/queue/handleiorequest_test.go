@@ -418,7 +418,7 @@ func TestDiscardWriteZeroesAsymmetry(t *testing.T) {
 	const nrSectors = uint32(4)
 	const wantOffset = int64(startSector * uapi.SectorSize) // 32*512 = 16384
 	const wantLength = int64(nrSectors * uapi.SectorSize)   // 4*512 = 2048
-	const wantResult = int32(nrSectors << 9)                // 4<<9 = 2048
+	const wantResult = int32(0)                             // range ops report no byte count
 
 	// (a) DISCARD against plain mockBackend (no DiscardBackend): NO error,
 	// COMMIT reports SUCCESS.
