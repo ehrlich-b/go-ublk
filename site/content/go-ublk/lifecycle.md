@@ -1,11 +1,11 @@
 ---
 title: "Device lifecycle"
 linkTitle: "Device lifecycle"
-description: "Create, Start, Stop and Close; CreateAndServe; ListDevices and DeleteDevice; teardown order; errors; metrics."
+description: "Create, Start, Stop and Close; CreateAndServe; Done and Err; Detach and Recover; Resize; ListDevices and DeleteDevice; errors; metrics."
 weight: 40
 ---
 
-A `*ublk.Device` wraps one kernel ublk device from creation to deletion. This page maps each call to what it does in the kernel, and covers the one rule that matters most: how to shut down.
+A `*ublk.Device` wraps one kernel ublk device from creation to deletion. This page maps each call to what it does in the kernel. Every method is safe to call from any goroutine.
 
 ## Creating and starting
 
@@ -13,71 +13,121 @@ There are two entry points.
 
 **`CreateAndServe(ctx, params, options)`** does everything and returns a running device:
 
-1. Validates `params` and configures logging from `options`.
-2. `ADD_DEV`, which creates `/dev/ublkcN`. The queue count, depth and maximum request size the kernel returns replace the requested ones.
-3. `SET_PARAMS`: capacity, block size, attributes, discard limits.
-4. Opens `/dev/ublkcN` once, retrying for up to 5 seconds while udev creates it.
-5. For each queue: duplicates the descriptor, creates an io_uring, maps the queue's descriptor array, maps `QueueDepth × MaxIOSize` bytes of request buffers, and starts a goroutine locked to an OS thread that submits `FETCH_REQ` for every tag.
-6. Waits 100 ms, then sends `START_DEV`, which creates `/dev/ublkbN`.
+1. Validates `params` and, if `options.Logger` is set, routes the library's diagnostics to it. Without a logger the library writes nothing; every failure comes back as an error.
+2. Asks the kernel which features it has (`GET_FEATURES`, 6.5+) and fails with an error matching `syscall.EOPNOTSUPP` if a requested feature is missing — it never silently creates a weaker device. Features that cost nothing to have (`UPDATE_SIZE` for [Resize](#resizing), and `QUIESCE` when recovery is on) are requested automatically when available.
+3. `ADD_DEV`, which creates `/dev/ublkcN`. The queue count, depth and maximum request size the kernel returns replace the requested ones (the kernel caps the queue count at the number of CPUs).
+4. `SET_PARAMS`: capacity, block size, attributes, discard limits and any optional geometry. Parameter blocks an older kernel silently drops are reported as an error.
+5. Opens `/dev/ublkcN` and, for each queue, starts an I/O thread with its own io_uring that maps the queue's descriptors and `QueueDepth × MaxIOSize` bytes of request buffers and submits `FETCH_REQ` for every tag.
+6. `START_DEV`, which waits until every tag has been fetched and then creates `/dev/ublkbN`.
 
-If any step fails, everything done so far is undone (queues cancelled and joined, descriptors closed, device deleted) and the error is returned. No device is left behind.
+If any step fails, everything done so far is undone and the error is returned. No device is left behind.
 
-**`Create(params, options)`** stops after step 3 and returns a device in state `created`: `/dev/ublkcN` exists, `/dev/ublkbN` does not, nothing is serving. **`device.Start(ctx)`** then performs steps 4 to 6. Use the split when you want to create the device, record its ID or prepare something, and start serving later.
+**`Create(params, options)`** stops after step 4 and returns a device in state `created`: `/dev/ublkcN` exists, `/dev/ublkbN` does not, nothing is serving. **`device.Start(ctx)`** then performs steps 5 and 6.
 
 When `CreateAndServe` or `Start` returns, `/dev/ublkbN` exists. udev's work (permissions, `/dev/disk/by-*` links) follows asynchronously; wait for it with `udevadm settle` if you depend on it.
 
 ```text
-              Create                       Start(ctx)
-  (none) ───────────────► created ─────────────────────────► running
-          ADD_DEV                  open /dev/ublkcN, queues,      │
-          SET_PARAMS               FETCH every tag, START_DEV     │
-                                                                  │
-            ┌───────────────────── Close ─────────────────────────┤
-            ▼                STOP_DEV, join queues, DEL_DEV       │ Stop
-         closed ◄─────────────── Close ──────────── stopped ◄─────┘
-                                DEL_DEV                  STOP_DEV, join queues
+              Create                    Start(ctx)
+  (none) ───────────────► created ───────────────────────► running ──── Detach ───► detached
+          ADD_DEV                 open /dev/ublkcN, queues,   │  │        (QUIESCE, let go;
+          SET_PARAMS              FETCH every tag, START_DEV  │  │         kernel keeps device)
+                                                              │  │
+            ┌──────────────────────── Close ──────────────────┘  │ Stop, or ctx cancelled
+            ▼            STOP_DEV, drain, join queues, DEL_DEV   ▼
+         closed ◄──────────────── Close ───────────────────── stopped
+                                 DEL_DEV
 ```
+
+## The serving context
+
+The context given to `CreateAndServe` or `Start` (or `Options.Context`) bounds how long the device serves. **Cancelling it stops the device gracefully**, exactly as `Stop` does: the kernel drains in-flight I/O through the still-running queues, then the queues exit. Afterwards call `Close` to delete the device. Wiring a signal context straight into `CreateAndServe` is therefore safe:
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+defer stop()
+dev, err := ublk.CreateAndServe(ctx, params, nil)
+if err != nil {
+	log.Fatal(err)
+}
+<-dev.Done()       // the signal arrived and the device has stopped
+_ = dev.Close()    // delete it
+```
+
+(Before go-ublk v0.2.0 cancelling the context killed the queues under in-flight I/O, which could wedge the kernel's control plane. That is fixed; see Critical Bug #22 in `TODO.md`.)
+
+## Knowing when serving ends
+
+**`device.Done()`** is a channel closed when the device stops serving for any reason: `Stop`, `Close`, `Detach`, the context being cancelled, or a queue failing. **`device.Err()`** says why: `nil` after an orderly stop, or the queue's error. A queue fails only on something unexpected from the kernel; it then commits what its backend calls still hold, closes its ring (so the kernel fails or requeues that queue's outstanding requests), and the device enters state `failed`. **`device.Wait(ctx)`** blocks for either.
+
+A long-running server should watch `Done` and treat a non-nil `Err` as fatal for that device: `Close` it and, with recovery enabled, let a fresh process [take over](#detach-and-recover).
 
 ## Shutting down
 
 **`device.Close()`** is the normal way out. On a running device it:
 
-1. Sends `STOP_DEV` **while the queue goroutines are still serving**. The kernel removes `/dev/ublkbN`, which drains in-flight I/O (and syncs a mounted filesystem through the device); only the running queues can complete that I/O.
-2. Cancels the queue goroutines' context and joins them, waiting up to 2 seconds each.
-3. Closes each queue's io_uring, unmaps its descriptor array and buffers, and closes its descriptor.
-4. Sends `DEL_DEV`, which deletes `/dev/ublkcN` and frees the ID. The kernel only completes it once every reference to the device is gone, which step 3 guarantees.
+1. Sends `STOP_DEV` while the queues are still serving. The kernel removes `/dev/ublkbN`, which drains in-flight I/O (and syncs a mounted filesystem through the device); only the running queues can complete that I/O. The wait is bounded by `Options.StopTimeout` (default one minute).
+2. Waits for every queue to finish what its backend calls hold and exit, then frees their rings, mappings and `/dev/ublkcN`.
+3. Sends `DEL_DEV`, which deletes `/dev/ublkcN` and frees the ID.
 
-`Close` is idempotent. It does not close the backend; do that after `Close` returns. Idle teardown takes about a tenth of a second, and teardown under load is not much slower: the drain in step 1 completes requests that are already in flight.
+If `STOP_DEV` fails (a timeout, or `SafeStop` with the device open), `Close` returns the error **with nothing torn down**: the device keeps serving and you can retry. If a queue does not exit, its memory is deliberately leaked rather than freed under a running backend call, `/dev/ublkcN` stays held, and `Close` returns an error instead of deleting a device it cannot safely release.
 
-**`device.Stop()`** performs steps 1 to 3 and keeps the device registered. `Close` afterwards deletes it. Restarting a stopped device with `Start` is not covered by go-ublk's tests; prefer `Close` and a new device.
+`Close` is idempotent. It does not close the backend; do that after `Close` returns.
 
-### Do not cancel the context first
+**`device.Stop()`** performs steps 1 and 2 and keeps the device registered; `Close` afterwards deletes it. **A stopped device cannot be started again**: `Start` returns `ErrStopped` without touching the kernel. The kernel cannot reliably restart a stopped ublk device — go-ublk's kernel matrix saw it fail with `EBUSY`, wedge the control plane on 6.10–6.12, and oops Arch's 7.2.8 — so close it and create a new one.
 
-> [!CAUTION]
-> The context passed to `CreateAndServe` or `Start` (or `Options.Context`) controls the queue goroutines. Cancelling it stops them **without telling the kernel**: the device stays live, requests routed to its queues are never answered, and the processes issuing them hang. A later `Close` sends `STOP_DEV`, whose drain now waits for I/O that nothing will complete; the control command gives up after 10 seconds and teardown continues in a degraded state.
->
-> Shut down with `Close`, and treat the context as a backstop for abnormal exits only. In a signal handler, call `Close`; do not cancel first.
-
-This ordering is the single most important thing in the lifecycle, and it is why the examples' signal handlers call `Close` directly. It was the cause of go-ublk's worst teardown hang before it was fixed.
+**Safe stop.** With `DeviceParams.SafeStop` (kernel 7.0+), `Stop` and `Close` send `TRY_STOP_DEV`, which refuses while anything has `/dev/ublkbN` open; the call returns an error matching `ublk.ErrDeviceBusy` and the device keeps serving. Use it when stopping a device that is still mounted would be a mistake.
 
 ### When the process dies instead
 
-If the server exits without `Close` (SIGKILL, a crash, `os.Exit`, an unrecovered panic), the kernel releases the device's char device and, because go-ublk does not enable user recovery, stops the device: in-flight requests fail with I/O errors and `/dev/ublkbN` disappears. go-ublk's crash tests check that a writer blocked on the dead device gets its error within seconds instead of hanging. A filesystem mounted on the device sees those errors too (ext4 aborts its journal). The device itself stays registered in state `DEAD` until someone deletes it, which is what `DeleteDevice` is for.
+If the server exits without `Close` (SIGKILL, a crash, `os.Exit`), the kernel notices when the last reference to `/dev/ublkcN` goes away. What happens next depends on [`DeviceParams.Recovery`](#detach-and-recover):
+
+- **`RecoveryNone`** (the default): the kernel fails the outstanding requests with I/O errors and removes `/dev/ublkbN`. The device stays registered in state `dead` until someone deletes it with `DeleteDevice`. A filesystem mounted on it sees the errors (ext4 aborts its journal).
+- **Any recovery mode**: the block device stays, and a new process can take over with `Recover`.
 
 A daemon that a mounted filesystem depends on must also be stopped in the right order relative to the unmount. See [Deployment](/go-ublk/deployment/).
 
+## Detach and recover
+
+Recovery lets a block device outlive the process serving it: for crash recovery, and for zero-downtime upgrades. Enable it at creation with `DeviceParams.Recovery`:
+
+| Mode | Outstanding I/O when the server goes | New I/O until `Recover` | Kernel |
+|---|---|---|---|
+| `RecoveryReissue` | requeued and reissued to the new server | held | 6.1+ |
+| `RecoveryQueue` | failed with an I/O error | held | 6.1+ |
+| `RecoveryFailIO` | failed | failed | 6.13+ |
+
+`RecoveryReissue` is the right choice for nearly everything: no I/O error ever reaches the application. A reissued write may reach the backend twice, which block-device semantics allow.
+
+**`device.Detach()`** lets go of a running device without deleting it. On kernels with `QUIESCE` (6.16+) it first drains in-flight I/O with `QUIESCE_DEV`; on older kernels the kernel requeues it. The process can then exit; applications keep `/dev/ublkbN` open and their I/O waits.
+
+**`ublk.Recover(ctx, id, params, options)`** takes such a device over — after a `Detach`, or after the previous server crashed. Geometry and features come from the kernel; `params` supplies the backend and the data-plane options (`Inline`, `ThreadsPerQueue`, `CPUAffinity`), and the backend's size must match the device's. It waits (up to 30 seconds) for the kernel to finish releasing the previous server, sends `START_USER_RECOVERY`, starts the queues, and sends `END_USER_RECOVERY`, which makes the device live again and releases the held I/O.
+
+```go
+// New server process, upgraded binary:
+ids, _ := ublk.FindDevices(myTag)        // devices created with DeviceParams.Tag = myTag
+dev, err := ublk.Recover(ctx, ids[0], ublk.DefaultParams(backend), nil)
+```
+
+`DeviceParams.Tag` is a 64-bit value the kernel stores with the device and returns from `GetDeviceInfo`, so a restarted process can find its devices without a state file. go-ublk's conformance suite tests both paths on real kernels: a server SIGKILLed mid-write and recovered by another process, and a `Detach`/`Recover` handoff under a running writer. In both, the writer sees no error and every acknowledged block reads back intact. The protocol itself is described in the guide's [User recovery and quiesce](/guide/recovery/) chapter.
+
+## Resizing
+
+**`device.Resize(newSize)`** changes the size of a running device (`UPDATE_SIZE`, kernel 6.16+). Grow or shrink the backend first, so it already serves the new size; the kernel then updates `/dev/ublkbN`'s capacity and notifies listeners (a filesystem must still be grown separately). On older kernels `Resize` returns an error matching `ErrNotImplemented`.
+
 ## States
 
-`device.State()` returns one of four values, derived from what the `Device` has done rather than from the kernel:
+`device.State()` reports the `Device`'s own state:
 
 | State | Means |
 |---|---|
-| `created` | after `Create`, and also after `Stop` |
-| `running` | started and not stopped, and the context is not cancelled |
-| `stopped` | started, and the context was cancelled (the dangerous case above) |
+| `created` | after `Create`, before `Start` |
+| `running` | serving I/O |
+| `failed` | was running, and a queue failed; see `Err` |
+| `stopped` | after `Stop` or a cancelled context; `Close` it |
+| `detached` | after `Detach`; the kernel keeps the device for `Recover` |
 | `closed` | after `Close`, or a nil `*Device` |
 
-`IsRunning()` is `State() == running`. To see the kernel's view (for example after a crash), query the kernel; go-ublk does not expose `GET_DEV_INFO` publicly yet.
+For the kernel's view of any device — including ones another process created — use **`ublk.GetDeviceInfo(id)`** (or `device.KernelInfo()`): kernel state (`dead`, `live`, `quiesced`, `fail-io`), negotiated features, queue geometry, server PID, owner and tag.
 
 ## Inspecting a device
 
@@ -88,8 +138,11 @@ A daemon that a mounted filesystem depends on must also be stopped in the right 
 | `CharPath`, `CharDevicePath()` | `/dev/ublkcN` |
 | `NumQueues()`, `QueueDepth()` | the negotiated values |
 | `BlockSize()` | logical block size |
-| `Size()` | `Backend.Size()` |
-| `Info()` | all of the above as a `DeviceInfo`, with JSON tags |
+| `Size()` | the device size |
+| `Features()` | the features negotiated with the kernel |
+| `Info()` | the above as a `DeviceInfo`, with JSON tags |
+
+**`ublk.Probe()`** reports what the running kernel supports before you create anything; it explains the usual failures (module not loaded, io_uring disabled by sysctl).
 
 ## Metrics
 
@@ -99,17 +152,19 @@ Unless you supply `Options.Observer`, every device records metrics, read with `d
 - Average latency, and P50, P99 and P99.9 from a histogram with buckets at 1 µs, 10 µs, 100 µs, 1 ms, 10 ms, 100 ms, 1 s and 10 s. Percentiles are bucket upper bounds, so they are coarse.
 - IOPS and bandwidth over the device's uptime, and the error rate.
 
-Latency is measured around the backend call only. The queue-depth fields are always zero: nothing reports queue depth yet.
+Latency is measured around the backend call only. The queue-depth fields are always zero: nothing reports queue depth yet. With a `Handler` instead of a `Backend`, the library cannot see operations, so no metrics are recorded.
 
-An `Observer` receives the same events (`ObserveRead`, `ObserveWrite`, `ObserveDiscard`, `ObserveFlush`) synchronously on the queue goroutine, so it must be fast and safe for concurrent use. Supplying one replaces the built-in metrics.
+An `Observer` receives the same events (`ObserveRead`, `ObserveWrite`, `ObserveDiscard`, `ObserveFlush`) on whichever goroutine ran the request, so it must be fast and safe for concurrent use. Supplying one replaces the built-in metrics.
 
 ## Devices you do not own
 
 **`ublk.ListDevices()`** returns the IDs of every registered ublk device, including orphans left by dead servers. The kernel has no list command, so it asks for the info of IDs 0 through 63 in turn and collects the ones that exist. Devices with higher IDs are not found. A query that fails for any reason other than "no such device" fails the whole call, so an error never masquerades as an empty list.
 
-**`ublk.DeleteDevice(id)`** stops (best effort) and deletes one device by ID. It is the recovery path for devices whose server died. On a device that another process is still serving, `STOP_DEV` drains through that server and `DEL_DEV` then waits until that process releases the device, typically by exiting; it is not a way to forcibly take a device away from a live server. A device your own process owns should be closed with `Device.Close`.
+**`ublk.FindDevices(tag)`** narrows that to the devices created with a given `Tag`.
 
-Both need `CAP_SYS_ADMIN`, and each opens and closes its own control channel.
+**`ublk.DeleteDevice(id)`** stops (best effort) and deletes one device by ID. It is the cleanup path for devices whose server died without recovery. On a device that another process is still serving, `STOP_DEV` drains through that server and `DEL_DEV` then waits until that process releases the device; it is not a way to take a device away from a live server. A device your own process owns should be closed with `Device.Close`.
+
+All of these need `CAP_SYS_ADMIN` (or, for unprivileged devices, ownership of the device).
 
 ## Errors
 
@@ -118,23 +173,13 @@ Errors from the lifecycle functions wrap the underlying cause with `%w`, and a k
 | Check | Typical cause |
 |---|---|
 | `errors.Is(err, syscall.ENOENT)` | `/dev/ublk-control` does not exist: `ublk_drv` is not loaded |
-| `errors.Is(err, syscall.EACCES)`, `syscall.EPERM` | not root and no `CAP_SYS_ADMIN` |
+| `errors.Is(err, syscall.EACCES)`, `syscall.EPERM` | not root and no `CAP_SYS_ADMIN`; or io_uring disabled (`kernel.io_uring_disabled`, the default on RHEL 10 family) |
 | `errors.Is(err, syscall.EEXIST)` | `DeviceID` is already taken |
-| `errors.Is(err, syscall.EINVAL)` | the kernel rejected the parameters |
-| `errors.Is(err, syscall.EOPNOTSUPP)` | the kernel does not understand ioctl-encoded commands (older than 6.4) |
-| `errors.Is(err, syscall.ENODEV)` | `DeleteDevice` on an ID that does not exist |
-| `errors.Is(err, ublk.ErrNotImplemented)` | a feature switch go-ublk does not implement, such as `EnableUserCopy` |
+| `errors.Is(err, syscall.EINVAL)` | the kernel rejected the parameters, or a feature combination it does not allow |
+| `errors.Is(err, syscall.EOPNOTSUPP)` | the kernel lacks a requested feature; the error lists which |
+| `errors.Is(err, syscall.ENODEV)` | `DeleteDevice` or `GetDeviceInfo` on an ID that does not exist; or a kernel older than 6.4, which does not understand ioctl-encoded commands |
+| `errors.Is(err, ublk.ErrDeviceBusy)` | `SafeStop` refused because the device is open |
+| `errors.Is(err, ublk.ErrStopped)` | `Start` on a stopped device |
+| `errors.Is(err, ublk.ErrNotImplemented)` | a feature go-ublk does not implement yet (zero copy, zoned) |
 
-Parameter validation errors are plain errors naming the field. The package also defines a structured `*ublk.Error` (operation, device, queue, category, errno) with sentinel values such as `ErrDeviceNotFound` and helpers `IsCode` and `IsErrno`; today the lifecycle functions return it only for `ErrNotImplemented` and for methods called on a nil `*Device`, so prefer `errors.Is` with an errno.
-
-## Known defects
-
-These lifecycle defects were found by a code audit on 2026-10-03 and are open. They matter for long-running daemons more than for one-shot tools:
-
-- Every io_uring the library creates stays mapped until the process exits: about four per device create/close cycle and three per `ListDevices` call. A daemon that creates devices on demand grows without bound.
-- `Close` ignores a failed `STOP_DEV` and tears the queues down anyway. `STOP_DEV` on a busy, dirty, mounted device can take longer than the 10-second control timeout.
-- If a queue goroutine does not exit within 2 seconds (a backend call slower than that), its memory is released while it may still be using it.
-- A queue goroutine can exit on an unexpected completion while the device stays live, and nothing notices; I/O on that queue then hangs until `STOP_DEV`.
-- Buffers passed to some control commands are not pinned against the Go runtime for the full duration the kernel may use them.
-
-Their status is tracked on the [roadmap](/go-ublk/roadmap/).
+Parameter validation errors are plain errors naming the field.

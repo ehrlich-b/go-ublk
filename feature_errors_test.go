@@ -20,37 +20,57 @@ func replaceControllerFactory(t *testing.T, factory func() (*ctrl.Controller, er
 	t.Cleanup(func() { createController = original })
 }
 
-func TestRejectUserCopyBeforeControllerCreation(t *testing.T) {
-	params := DefaultParams(NewMockBackend(1 << 20))
-	if err := validateParams(&params); err != nil {
+func TestRejectInvalidModesBeforeControllerCreation(t *testing.T) {
+	base := DefaultParams(NewMockBackend(1 << 20))
+	if err := validateParams(&base); err != nil {
 		t.Fatalf("default address-buffer mode rejected: %v", err)
 	}
-	params.EnableUserCopy = true
-	if err := validateParams(&params); !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("user-copy validation error = %v, want ErrNotImplemented", err)
+	userCopy := base
+	userCopy.EnableUserCopy = true
+	if err := validateParams(&userCopy); err != nil {
+		t.Fatalf("user copy is implemented but was rejected: %v", err)
 	}
 
 	createCalls := 0
 	replaceControllerFactory(t, func() (*ctrl.Controller, error) {
 		createCalls++
-		return nil, errors.New("controller must not be opened for unsupported user-copy mode")
+		return nil, errors.New("controller must not be opened for an invalid mode")
 	})
-	for _, test := range []struct {
-		name string
-		call func() (*Device, error)
+	handler := HandlerFunc(func(r *Request) { r.Complete(nil) })
+	for _, c := range []struct {
+		name, want string
+		set        func(*DeviceParams)
 	}{
-		{"Create", func() (*Device, error) { return Create(params, nil) }},
-		{"CreateAndServe", func() (*Device, error) { return CreateAndServe(context.Background(), params, nil) }},
+		{"zero copy without a ZeroCopyBackend", "ZeroCopyBackend", func(p *DeviceParams) { p.EnableZeroCopy = true }},
+		{"zoned with a Backend", "Handler", func(p *DeviceParams) { p.EnableZoned = true; p.Zoned.ZoneSize = 1 << 16 }},
+		{"zoned with a bad zone size", "ZoneSize", func(p *DeviceParams) {
+			p.Backend, p.Handler, p.Size = nil, handler, 1<<20
+			p.EnableZoned, p.Zoned.ZoneSize = true, 3000
+		}},
+		{"zoned size not a multiple of the zone size", "multiple of Zoned.ZoneSize", func(p *DeviceParams) {
+			p.Backend, p.Handler, p.Size = nil, handler, 1<<20+1<<16
+			p.EnableZoned, p.Zoned.ZoneSize = true, 1<<17
+		}},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			device, err := test.call()
-			if device != nil || !errors.Is(err, ErrNotImplemented) || !strings.Contains(err.Error(), "EnableUserCopy") {
-				t.Fatalf("device=%v error=%v, want nil device and explicit unsupported mode", device, err)
-			}
-		})
+		params := base
+		c.set(&params)
+		for _, test := range []struct {
+			name string
+			call func() (*Device, error)
+		}{
+			{"Create", func() (*Device, error) { return Create(params, nil) }},
+			{"CreateAndServe", func() (*Device, error) { return CreateAndServe(context.Background(), params, nil) }},
+		} {
+			t.Run(c.name+"/"+test.name, func(t *testing.T) {
+				device, err := test.call()
+				if device != nil || err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("device=%v error=%v, want an error mentioning %q", device, err, c.want)
+				}
+			})
+		}
 	}
 	if createCalls != 0 {
-		t.Fatalf("opened controller %d times for unsupported mode", createCalls)
+		t.Fatalf("opened controller %d times for invalid modes", createCalls)
 	}
 }
 
@@ -66,8 +86,8 @@ func TestPublicOperationsPreserveControllerOpenErrors(t *testing.T) {
 			}{
 				{"Create", func() error { _, err := Create(params, nil); return err }},
 				{"CreateAndServe", func() error { _, err := CreateAndServe(context.Background(), params, nil); return err }},
-				{"Stop", func() error { return (&Device{started: true}).Stop() }},
-				{"Close", func() error { return (&Device{}).Close() }},
+				{"Stop", func() error { return (&Device{state: DeviceStateRunning, done: make(chan struct{})}).Stop() }},
+				{"Close", func() error { return (&Device{state: DeviceStateCreated, done: make(chan struct{})}).Close() }},
 				{"ListDevices", func() error { _, err := ListDevices(); return err }},
 				{"DeleteDevice", func() error { return DeleteDevice(42) }},
 			} {

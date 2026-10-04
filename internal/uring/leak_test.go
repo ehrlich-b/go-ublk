@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"golang.org/x/sys/unix"
@@ -18,7 +19,11 @@ import (
 // be dropped onto the old implementation as the control that proves the test
 // fails there (each ring leaked its SQ, CQ and SQE mappings).
 
-const leakCycles = 5000
+// leakCycles is enough to expose a per-ring leak (the old code left three
+// mappings per ring) while staying inside small RLIMIT_MEMLOCK budgets: the
+// kernel frees a closed ring's memory asynchronously, so a tight loop of
+// thousands can transiently exhaust the budget (seen on GitHub's runners).
+const leakCycles = 500
 
 func countMapsAndFds(t *testing.T) (int, int) {
 	t.Helper()
@@ -53,11 +58,22 @@ func assertNoLeak(t *testing.T, cycle func() error) {
 	runtime.GC()
 	baseMaps, baseFds := countMapsAndFds(t)
 	for i := 0; i < leakCycles; i++ {
-		if err := cycle(); err != nil {
+		err := cycle()
+		// ENOMEM here is the locked-memory budget of rings closed moments
+		// ago that the kernel has not finished freeing; wait it out.
+		for tries := 0; errors.Is(err, unix.ENOMEM) && tries < 100; tries++ {
+			time.Sleep(20 * time.Millisecond)
+			err = cycle()
+		}
+		if err != nil {
 			t.Fatalf("cycle %d: %v", i, err)
 		}
 	}
 	runtime.GC()
+	// Leave the locked-memory budget usable for the tests that follow.
+	for tries := 0; tries < 250 && errors.Is(cycle(), unix.ENOMEM); tries++ {
+		time.Sleep(20 * time.Millisecond)
+	}
 	maps, fds := countMapsAndFds(t)
 	t.Logf("%d cycles: /proc/self/maps %d -> %d lines, /proc/self/fd %d -> %d", leakCycles, baseMaps, maps, baseFds, fds)
 	if fds != baseFds {

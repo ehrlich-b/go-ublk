@@ -52,14 +52,14 @@ func TestBasicAttrs(t *testing.T) {
 			DeviceParams{ReadOnly: true, Rotational: true, VolatileCache: true},
 			uapi.UBLK_ATTR_READ_ONLY | uapi.UBLK_ATTR_ROTATIONAL | uapi.UBLK_ATTR_VOLATILE_CACHE,
 		},
-		// FUA is accepted by the API but must never be advertised until the
-		// per-IO UBLK_IO_F_FUA flag is honored: claiming it without honoring it
-		// is a silent durability lie on power loss.
-		{"fua alone is not advertised", DeviceParams{EnableFUA: true}, 0},
+		// FUA only means something with a volatile cache. Whether the server
+		// honors per-I/O FUA is the public layer's call (convertToCtrlParams
+		// sets EnableFUA only for a FUABackend or a Handler).
+		{"fua without a cache is not advertised", DeviceParams{EnableFUA: true}, 0},
 		{
-			"fua does not leak in alongside cache",
+			"fua with cache",
 			DeviceParams{VolatileCache: true, EnableFUA: true},
-			uapi.UBLK_ATTR_VOLATILE_CACHE,
+			uapi.UBLK_ATTR_VOLATILE_CACHE | uapi.UBLK_ATTR_FUA,
 		},
 	}
 

@@ -370,22 +370,25 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     defers teardown until any goroutine still inside a `Ring` method returns (a parked
     `WaitForCompletion` does within 100ms), and later calls fail with `ErrRingClosed`.
 
-18. **[OPEN] `Device.Close` ignores a failed STOP_DEV and tears the queues down anyway.**
-    `backend.go` discards the STOP_DEV error, then cancels and joins the ioLoops. The control
-    wait gives up at 10s, and STOP_DEV on a mounted, dirty device syncs the filesystem through the
-    daemon, which can take longer — at which point this strands in-flight I/O exactly as #8 did.
+18. **[FIXED — 2026-10-04] `Device.Close` ignored a failed STOP_DEV and tore the queues down
+    anyway.** `Stop` (and `Close`, through it) now returns the STOP_DEV error with nothing torn
+    down, so the device keeps serving; the wait is bounded by `Options.StopTimeout` (default one
+    minute) instead of a fixed 10s. `SafeStop` uses TRY_STOP_DEV and returns `ErrDeviceBusy`
+    while the block device is open; `features/safe-stop` checks the device still serves after a
+    refused stop.
 
-19. **[OPEN] `Runner.Close` frees the ring and buffers after a join that timed out.** If the
-    ioLoop does not exit within 2s (a backend call slower than that, e.g. an fsync behind a
-    FLUSH), Close unmaps the descriptor and data buffers the goroutine is still using: a fault,
-    EFAULT, or silent corruption if the range is remapped. Leaking is the safe failure here.
-    The ring itself is safe since 2026-10-04 (teardown deferred, see #17); the descriptor and
-    data buffer unmaps are not.
+19. **[FIXED — 2026-10-04] `Runner.Close` freed the ring and buffers after a join that timed
+    out.** The Runner is gone. A `queue.Queue` frees its descriptor and data mappings only once
+    every engine has exited and no handler still holds a request; otherwise `Close` returns
+    `ErrStillInUse` and leaks them, and the device keeps `/dev/ublkcN` open and refuses DEL_DEV
+    rather than free memory a handler or the kernel may still touch.
 
-20. **[OPEN] A queue's ioLoop can die silently while the device stays LIVE.** Any unexpected
-    completion makes `processRequests` return before `FlushSubmissions`, dropping COMMITs already
-    prepared for I/O the backend completed. Nothing supervises the loop or tells `Device`, so I/O
-    on that queue hangs until STOP_DEV.
+20. **[FIXED — 2026-10-04] A queue's ioLoop could die silently while the device stayed LIVE.**
+    An engine that hits an unexpected completion now stops dispatching, still commits what its
+    handlers hold, closes its ring (so the kernel aborts or requeues its outstanding commands)
+    and reports the error; a per-queue supervisor turns that into `Device.Err()`, closes
+    `Device.Done()`, and `State()` reports `failed`. `TestEngineUnexpectedCompletionIsFatal`
+    covers the engine side.
 
 21. **[FIXED — 2026-10-04, both sides] Buffers handed to asynchronous control commands were not
     pinned for the kernel's use.** SET_PARAMS' buffer was only reachable via a uintptr (fixed in
@@ -404,6 +407,26 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     waiting for the last reference, QUIESCE_DEV) gets EINTR (its CQE is reaped within a 1s grace and `ErrCtrlCanceled` returned) and releases its device instead of
     lingering until process exit (measured on 7.0.0-38). ctrl's rings therefore run with
     `CtrlTimeout: -1` and rely on the caller's context for bounds.
+
+22. **[FIXED — 2026-10-04] Cancelling the serving context wedged the device, and on Ubuntu
+    7.0.0-38 the whole ublk control plane.** The old `CreateAndServe` context cancelled the queue
+    loops directly. If that happened while the kernel's asynchronous partition scan had a read
+    outstanding (right after START_DEV), the read never completed: `ublk_partition_scan_work`
+    sat in `folio_wait_bit_common` holding `disk->open_mutex`, STOP_DEV's `del_gendisk` blocked
+    on that mutex in an io-wq worker, and DEL_DEV then blocked on the mutex STOP_DEV held — every
+    later ADD_DEV timed out. Reproduced deterministically by the kernel matrix on 7.0.0-38
+    (hung-task and sysrq-w stacks matched); mainline 7.0.14 and Fedora 7.2.8 passed by timing.
+    Cancelling the context now performs a graceful `Stop` (STOP_DEV through the running queues).
+    `lifecycle/ctx-cancel-under-load` passes 15/15 on 7.0.0-38.
+
+23. **[FIXED — 2026-10-04, by refusing it] Start after Stop crashed or wedged kernels.** The old
+    docs promised `Start` could resume a stopped device. The kernel matrix showed START_DEV on a
+    stopped device fails with EBUSY (Fedora 6.19/7.2.8, 7.0.14), wedges the control plane
+    (6.10-6.12), or oopses — Arch 7.2.8-arch1-2: NULL dereference in `ublk_queue_rq+0x4d` from
+    `ublk_partition_scan_work` reading into a queue whose per-I/O state is gone. `Start` on a
+    stopped device now returns `ErrStopped` without touching the kernel; close it and create a
+    new device. (The Arch oops is a kernel bug worth reporting upstream.)
+
 
 ---
 

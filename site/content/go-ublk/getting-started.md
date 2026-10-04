@@ -38,7 +38,7 @@ The package is Linux-only: it talks to io_uring and the ublk driver directly. It
 
 ## Your first device
 
-A RAM disk in about forty lines. The backend is a byte slice behind a lock; go-ublk calls it from one goroutine per hardware queue, so it must be safe for concurrent use.
+A RAM disk in about forty lines. The backend is a byte slice behind a lock; go-ublk calls it from many goroutines at once (one per in-flight request), so it must be safe for concurrent use.
 
 ```go
 package main
@@ -46,7 +46,6 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -80,19 +79,23 @@ func main() {
 	params := ublk.DefaultParams(backend)
 	params.VolatileCache = false // a completed write to RAM is as durable as it gets
 
-	device, err := ublk.CreateAndServe(context.Background(), params, nil)
+	// The device serves until this context is cancelled; cancelling it
+	// stops the device gracefully, draining in-flight I/O first.
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
+	device, err := ublk.CreateAndServe(ctx, params, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("serving %s", device.Path)
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	<-sig
-
-	// Close stops the device while the queues are still serving, drains
-	// in-flight I/O, then deletes it. Do not cancel the context first.
-	if err := device.Close(); err != nil {
+	<-device.Done() // a signal arrived, or a queue failed
+	if err := device.Err(); err != nil {
+		log.Printf("device failed: %v", err)
+	}
+	if err := device.Close(); err != nil { // delete it
 		log.Printf("close: %v", err)
 	}
 }
@@ -113,8 +116,8 @@ sudo umount /mnt
 
 Press Ctrl-C in the first terminal to tear the device down. Two things in that program are load-bearing:
 
-- **`device.Close()` before exit.** A process that exits without it leaves the device registered in the kernel with nothing serving it. It cannot do I/O, it pins the module, and it has to be deleted by hand (below).
-- **Not cancelling the context before `Close`.** `Close` sends `STOP_DEV` while the queue goroutines are still running, because the kernel drains in-flight I/O through them before the stop completes. Cancelling the context first stops those goroutines and strands the drain. See [Device lifecycle](/go-ublk/lifecycle/).
+- **`device.Close()` before exit.** A process that exits without it leaves the device registered in the kernel with nothing serving it. It cannot do I/O, it pins the module, and it has to be deleted by hand (below) — unless the device was created with a [recovery mode](/go-ublk/lifecycle/#detach-and-recover), in which case a new process can take it over.
+- **Handling SIGHUP as well as SIGINT and SIGTERM.** When a login session ends, systemd-logind sends SIGTERM and then SIGHUP; an unhandled SIGHUP kills the server while it is still draining I/O. For anything long-lived, run the server as a systemd service instead; see [Deployment](/go-ublk/deployment/).
 
 `DefaultParams` gives 128-deep queues, one queue per CPU (the kernel caps it there anyway), 512-byte blocks, 1 MiB maximum requests and a volatile write cache. [Configuration](/go-ublk/configuration/) lists every field.
 

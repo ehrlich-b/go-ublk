@@ -1,118 +1,127 @@
 ---
 title: "Configuration reference"
 linkTitle: "Configuration"
-description: "Every field of DeviceParams and Options: defaults, valid ranges, what each one sends to the kernel, and which ones are not implemented yet."
+description: "Every field of DeviceParams and Options: defaults, valid ranges, what each one sends to the kernel, and which kernel each feature needs."
 weight: 30
 ---
 
-A device is configured by a `DeviceParams` value, normally obtained from `DefaultParams(backend)` and then adjusted, and an optional `*Options`. Both are read once, at `Create` or `CreateAndServe`.
+A device is configured by a `DeviceParams` value, normally obtained from `DefaultParams(backend)` and then adjusted, and an optional `*Options`. Both are read once, at `Create` or `CreateAndServe` (or `Recover`).
 
 ```go
 params := ublk.DefaultParams(backend)
 params.NumQueues = 4
 params.QueueDepth = 64
 params.LogicalBlockSize = 4096
-params.VolatileCache = false
+params.Recovery = ublk.RecoveryReissue
 
 device, err := ublk.CreateAndServe(ctx, params, &ublk.Options{Logger: myLogger})
 ```
 
-Invalid values are rejected before anything is sent to the kernel, with a plain error describing the field (these are not `*ublk.Error` values and do not match `ErrInvalidParameters`).
+Invalid values are rejected before anything is sent to the kernel, with a plain error describing the field. Features the running kernel lacks are rejected before the device is created, with an error matching `syscall.EOPNOTSUPP` that names them; go-ublk never quietly creates a device without a feature you asked for. `ublk.Probe()` tells you up front what the kernel has.
 
 ## DeviceParams
+
+### What serves the device
+
+| Field | Default | Effect |
+|---|---|---|
+| `Backend` | required (or `Handler`) | The storage, as `ReadAt`/`WriteAt`/`Size`/`Flush`. Its optional interfaces decide whether discard, write-zeroes and FUA are advertised. See [Writing a backend](/go-ublk/backends/) |
+| `Handler` | nil | Instead of a `Backend`: receives each raw `*Request` (operation, flags, offset, buffer) and completes it, possibly asynchronously. Exposes every operation and flag the kernel sends |
+| `Size` | 0 | Device size in bytes. Required with `Handler`; with a `Backend`, 0 means `Backend.Size()` |
+| `HandlerDiscard`, `HandlerWriteZeroes` | false | With a `Handler`, advertise discard and write-zeroes |
+| `Inline` | false | Run the backend on each queue's own I/O thread instead of a goroutine per request. Lowest latency, but one request at a time per queue: only for backends that never block (RAM) |
 
 ### Geometry and limits
 
 | Field | Default | Valid | Effect |
 |---|---|---|---|
-| `Backend` | required | non-nil | The storage. Its optional interfaces decide whether discard and write-zeroes are advertised |
-| `NumQueues` | 0 | 0 to 4096 | Hardware queues; 0 means `runtime.NumCPU()`. The kernel caps the count at the number of CPUs, and go-ublk uses whatever `ADD_DEV` returns: read it back with `Device.NumQueues()` |
-| `QueueDepth` | 128 | 1 to 4096 | Requests the kernel can have outstanding per queue. Not backend concurrency: each queue calls the backend one request at a time |
-| `LogicalBlockSize` | 512 | power of two, 512 to the page size | Sent as both the logical and physical block size and as the minimum I/O size |
-| `MaxIOSize` | 1 MiB | page-aligned, at least one page, a multiple of `LogicalBlockSize`, at most 2<sup>31</sup>-1 | Largest request; the kernel splits bigger ones. Each queue maps `QueueDepth × MaxIOSize` bytes of buffers. The kernel's negotiated value is used if it differs |
-| `Backend.Size()` | | positive multiple of `LogicalBlockSize` | The capacity, fixed for the device's life |
+| `NumQueues` | 0 | 0 to 4096 | Hardware queues, each with its own I/O thread; 0 means `runtime.NumCPU()`. The kernel caps the count at the number of CPUs; read the result with `Device.NumQueues()` |
+| `QueueDepth` | 128 | 1 to 4096 | Requests the kernel can have outstanding per queue. Unless `Inline`, up to this many backend calls run concurrently per queue |
+| `ThreadsPerQueue` | 0 | ≥ 0 | Split each queue's tags across this many I/O threads, each with its own io_uring (`UBLK_F_PER_IO_DAEMON`, 6.16+) |
+| `LogicalBlockSize` | 512 | power of two, 512 to the page size | Logical block size |
+| `PhysicalBlockSize`, `IOMinSize`, `IOOptSize` | 0 | 0, or a power of two ≥ `LogicalBlockSize` | Geometry hints; 0 derives physical and minimum from the logical size and leaves optimal unset |
+| `DMAAlignment` | 0 | alignment mask, e.g. 511 | Buffer alignment the device needs (`UBLK_PARAM_TYPE_DMA_ALIGN`, 6.15+) |
+| `MaxIOSize` | 1 MiB | page-aligned, ≥ one page, a multiple of `LogicalBlockSize`, ≤ 2<sup>31</sup>-1 | Largest request; the kernel splits bigger ones. Each queue maps `QueueDepth × MaxIOSize` bytes of buffers |
 
 ### Attributes
 
 | Field | Default | Effect |
 |---|---|---|
 | `VolatileCache` | **true** | Advertises a write-back cache, so the kernel sends `FLUSH` and your `Flush` runs. Set false only if every completed write is already durable. See [durability](/go-ublk/backends/#flush-and-durability) |
-| `ReadOnly` | false | Creates a read-only disk; the block layer rejects writes, so they never reach the backend |
-| `Rotational` | false | Marks the device rotational, which changes I/O scheduler and filesystem heuristics |
-| `EnableFUA` | false | **Not implemented.** Logs a warning and is otherwise ignored; FUA is never advertised. The block layer emulates FUA with a flush, so durability does not depend on it |
+| `EnableFUA` | false | Advertises Force Unit Access (with `VolatileCache`), so writes needing durability arrive flagged instead of as write + flush. Honored only with a `Handler` or a backend implementing `FUABackend`; otherwise ignored, and the block layer emulates FUA with a flush |
+| `ReadOnly` | false | Creates a read-only disk; the block layer rejects writes before they reach the backend |
+| `Rotational` | false | Marks the device rotational, which changes scheduler and filesystem heuristics |
+| `NoPartitionScan` | false | Don't scan for a partition table at start (`UBLK_F_NO_AUTO_PART_SCAN`, 7.0+) |
 
 ### Discard and write-zeroes
 
-Used only if the backend implements `DiscardBackend` or `WriteZeroesBackend`.
+Used only if the backend implements `DiscardBackend` or `WriteZeroesBackend` (or, with a `Handler`, `HandlerDiscard`/`HandlerWriteZeroes`).
 
 | Field | Default | Effect |
 |---|---|---|
-| `MaxDiscardSectors` | `0xffffffff` | Largest discard, and also the largest write-zeroes, in 512-byte sectors. The default lets the block layer send requests as large as it likes. 0 disables both operations |
+| `MaxDiscardSectors` | `0xffffffff` | Largest discard, and also the largest write-zeroes, in 512-byte sectors. 0 disables both |
 | `DiscardGranularity` | 4096 | The backend's allocation unit in bytes. 0 is replaced by `LogicalBlockSize`, since the kernel requires a non-zero value |
 | `DiscardAlignment` | 4096 | Offset of the first aligned allocation unit, in bytes |
-| `MaxDiscardSegments` | 1 | Always sent as 1, the only value the kernel accepts; anything else logs a warning |
+| `MaxDiscardSegments` | 1 | Always sent as 1, the only value the kernel accepts |
 
-### Device identity and placement
+### Lifecycle and recovery
 
 | Field | Default | Effect |
 |---|---|---|
-| `DeviceID` | -1 | Requested device ID, or -1 (`AutoAssignDeviceID`) for the lowest free one. A fixed ID gives stable `/dev/ublkbN` and `/dev/ublkcN` names, which a [systemd mount unit](/go-ublk/deployment/) needs; creation fails if the ID is taken |
-| `CPUAffinity` | nil | CPUs to pin queue goroutines' OS threads to: queue *i* runs on `CPUAffinity[i % len(CPUAffinity)]`. A failed pin is logged and ignored |
-| `DeviceName` | "" | **No effect.** Not sent to the kernel; ublk devices have no name |
+| `Recovery` | `RecoveryNone` | Whether the block device survives its server: `RecoveryReissue` (requeue outstanding I/O to the next server; recommended), `RecoveryQueue` (fail it, hold new I/O), `RecoveryFailIO` (fail everything until recovered; 6.13+). Required for `Detach` and `Recover`. See [Detach and recover](/go-ublk/lifecycle/#detach-and-recover) |
+| `SafeStop` | false | `Stop`/`Close` use `TRY_STOP_DEV`, refusing with `ErrDeviceBusy` while the device is open (7.0+) |
+| `Tag` | 0 | 64 bits stored by the kernel with the device and returned by `GetDeviceInfo`; find your devices after a restart with `FindDevices(tag)` |
+| `DeviceID` | -1 | Requested device ID, or -1 (`AutoAssignDeviceID`) for the lowest free one. A fixed ID gives stable `/dev/ublkbN` and `/dev/ublkcN` names, which a [systemd mount unit](/go-ublk/deployment/) needs |
+| `CPUAffinity` | nil | CPUs to pin queue threads to: queue *i* runs on `CPUAffinity[i % len(CPUAffinity)]` |
 
-### Kernel feature switches
+### Data copy modes
 
-These map to `UBLK_F_*` flags at `ADD_DEV`. Most are placeholders for work that is not done; setting them does not give you the feature.
+How request data moves between the kernel and the server. The default copies it into a per-tag buffer and needs nothing beyond kernel 6.0.
 
-| Field | Status | What actually happens |
+| Field | Kernel | Effect |
 |---|---|---|
-| `EnableIoctlEncode` | harmless | Requests `UBLK_F_CMD_IOCTL_ENCODE`. go-ublk sends ioctl-encoded commands regardless, and modern kernels report the flag on every device |
-| `EnableZeroCopy` | **not implemented; do not set** | Requests `UBLK_F_SUPPORT_ZERO_COPY`, but the data plane still passes a buffer address with every fetch. A zero-copy device requires that address to be 0, so the kernel rejects the fetches, `START_DEV` never sees a ready queue, and creation fails after the control timeout (inferred from the driver source, not tested) |
-| `EnableUserCopy` | **not implemented** | `Create` and `CreateAndServe` fail with an error matching `ErrNotImplemented` |
-| `EnableUnprivileged` | **not implemented** | Requests `UBLK_F_UNPRIVILEGED_DEV`. As root the kernel clears the flag. A non-root user who has been given access to `/dev/ublk-control` can get through `ADD_DEV`, but every later command fails, because go-ublk does not send the char-device path that [unprivileged devices](/guide/unprivileged/) require |
-| `EnableZoned` | **no effect** | Not sent to the kernel |
+| `EnableUserCopy` | 6.5+ | `UBLK_F_USER_COPY`: data moves with `pread`/`pwrite` on `/dev/ublkcN` instead of the kernel copying into a buffer address. Required by zoned and integrity devices; otherwise slower |
+| `NeedGetData` | 6.0+ | `UBLK_F_NEED_GET_DATA`: the kernel asks for a write's buffer before copying its data. Supported for completeness; with go-ublk's fixed buffers it only adds a round trip |
+| `EnableUnprivileged` | 6.3+ | `UBLK_F_UNPRIVILEGED_DEV`: a non-root user creates and owns the device. Needs udev rules granting access to `/dev/ublk-control` and the device nodes; see [Unprivileged devices](/guide/unprivileged/). Excludes recovery and user copy. The control commands are verified on 7.0.0-38; serving I/O as a non-root user is not yet covered by the conformance suite |
+| `EnableZeroCopy` | 6.15+ | Serve every request in the kernel against a `ZeroCopyBackend`'s file: data moves between the request's pages and the file with io_uring fixed-buffer reads and writes, flush is `fdatasync`, discard punches holes, write-zeroes zeroes the range, FUA writes use `RWF_DSYNC`. Uses automatic buffer registration (`UBLK_F_AUTO_BUF_REG`, 6.16+) when available, manual `REGISTER_IO_BUF` otherwise. The backend's `ReadAt`/`WriteAt` are never called. See [zero copy](/go-ublk/backends/#zero-copy) |
+| `EnableZoned` + `Zoned` | 6.6+ | A host-managed zoned device served by a `Handler`: `Zoned.ZoneSize` (power of two; the device size must be a multiple), `MaxOpenZones`, `MaxActiveZones`, `MaxZoneAppendSize`. The handler serves `OpZoneOpen/Close/Finish/Reset/ResetAll`, `OpZoneAppend` (complete with `CompleteZoneAppend(sector, err)`) and `OpReportZones` (fill with `Request.ReportZones`). User copy is turned on automatically, as the kernel requires. Needs `CONFIG_BLK_DEV_ZONED` |
+| `EnableIoctlEncode` | | Deprecated, no effect: ioctl-encoded commands are always used |
+| `DeviceName` | | Deprecated, no effect: ublk devices have no name |
 
-go-ublk always requests `UBLK_F_URING_CMD_COMP_IN_TASK`. It does not request user recovery, quiesce, batch I/O, automatic buffer registration or any other feature; see the [roadmap](/go-ublk/roadmap/).
+Features requested automatically when the kernel has them, because they cost nothing: `UPDATE_SIZE` (6.16+, for `Device.Resize`), with a recovery mode `QUIESCE` (6.16+, so `Detach` drains in-flight I/O first), and with zero copy `AUTO_BUF_REG` (6.16+).
 
 ## What reaches the kernel
-
-For reference when reading kernel logs or the guide:
 
 | Kernel field | Value go-ublk sends |
 |---|---|
 | `ADD_DEV` `nr_hw_queues`, `queue_depth`, `max_io_buf_bytes` | `NumQueues` (or the CPU count), `QueueDepth`, `MaxIOSize` |
-| `ADD_DEV` `flags` | `UBLK_F_URING_CMD_COMP_IN_TASK`, plus the switches above |
-| `basic.logical_bs_shift`, `physical_bs_shift`, `io_min_shift` | log2(`LogicalBlockSize`) |
-| `basic.io_opt_shift`, `chunk_sectors`, `virt_boundary_mask` | 0 |
-| `basic.max_sectors` | `MaxIOSize / 512` (negotiated) |
-| `basic.dev_sectors` | `Backend.Size() / 512` |
-| `basic.attrs` | `UBLK_ATTR_READ_ONLY`, `UBLK_ATTR_ROTATIONAL`, `UBLK_ATTR_VOLATILE_CACHE` as configured |
-| discard block | sent only if the backend implements an optional interface and `MaxDiscardSectors` > 0 |
-
-No other parameter blocks (zoned, DMA alignment, segments, integrity) are sent.
+| `ADD_DEV` `flags` | `UBLK_F_CMD_IOCTL_ENCODE`, the features above, and the automatic ones |
+| `ADD_DEV` `ublksrv_flags` | `Tag` |
+| `basic.logical_bs_shift` / `physical_bs_shift` / `io_min_shift` / `io_opt_shift` | log2 of the configured sizes |
+| `basic.max_sectors`, `basic.dev_sectors` | `MaxIOSize / 512`, size / 512 |
+| `basic.attrs` | `READ_ONLY`, `ROTATIONAL`, `VOLATILE_CACHE`, `FUA` as configured |
+| discard block | sent only if discard or write-zeroes is served and `MaxDiscardSectors` > 0 |
+| DMA alignment block | sent when `DMAAlignment` is set |
 
 ## Options
 
 ```go
 type Options struct {
-	Context  context.Context // overrides the ctx argument of CreateAndServe
-	Logger   Logger          // receives all library logging (nil: stderr)
-	Debug    bool            // debug-level logging
-	Observer Observer        // per-operation callbacks (nil: built-in metrics)
-}
-
-type Logger interface {
-	Printf(format string, args ...interface{})
-	Debugf(format string, args ...interface{})
+	Context     context.Context // overrides the ctx argument of CreateAndServe
+	Logger      Logger          // receives library logging (nil: silent)
+	Debug       bool            // debug-level logging
+	Observer    Observer        // per-operation callbacks (nil: built-in metrics)
+	StopTimeout time.Duration   // bound on STOP_DEV and DEL_DEV (0: one minute)
 }
 ```
 
 | Field | Effect |
 |---|---|
-| `Context` | If non-nil, replaces the `ctx` passed to `CreateAndServe`. The context bounds the queue goroutines; see the warning in [Device lifecycle](/go-ublk/lifecycle/) about cancelling it |
-| `Logger` | Receives the library's own messages and the internal control-plane and queue diagnostics. Logging configuration is process-wide: the most recent `Create` or `CreateAndServe` call decides it for every device in the process |
-| `Debug` | Enables debug logging. The I/O hot path never logs, but debug output elsewhere is heavy enough to change timing, and the internal logger serializes writes, so leave it off under load |
-| `Observer` | Called for every read, write, discard and flush with size, latency and success. If you supply one, `Device.Metrics()` stays empty, because the built-in metrics are themselves the default observer |
+| `Context` | If non-nil, replaces the `ctx` passed to `CreateAndServe`/`Recover`. Cancelling it stops the device gracefully |
+| `Logger` | Receives the library's messages and its internal control-plane and queue diagnostics. Without it the library logs nothing. Control-plane logging is process-wide: the most recent call with a `Logger` sets it |
+| `Debug` | Enables debug logging. The I/O hot path never logs, but debug output elsewhere can change timing |
+| `Observer` | Called for every read, write, discard and flush with size, latency and success. If you supply one, `Device.Metrics()` stays empty |
+| `StopTimeout` | How long `Stop`/`Close` wait for the kernel's `STOP_DEV` (which first drains in-flight I/O through the backend) and `DEL_DEV`. On timeout the call fails and the device keeps serving |
 
 ## Exported constants
 

@@ -204,3 +204,8 @@ var (
 	_ ublk.DiscardBackend     = (*loopBackend)(nil)
 	_ ublk.WriteZeroesBackend = (*loopBackend)(nil)
 )
+
+// ZeroCopyFile lets go-ublk serve the device zero-copy (with -zero-copy): the
+// kernel moves data between requests and this file directly, and ReadAt and
+// WriteAt are not called.
+func (b *loopBackend) ZeroCopyFile() (int, int64) { return int(b.f.Fd()), 0 }

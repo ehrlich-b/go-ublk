@@ -34,6 +34,8 @@ func main() {
 		verbose    = flag.Bool("v", false, "Verbose output")
 		delSpec    = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all'")
 		devID      = flag.Int("id", -1, "Device ID to request, giving a stable /dev/ublkbN (-1 = first free)")
+		zeroCopy   = flag.Bool("zero-copy", false, "Serve requests zero-copy: the kernel moves data between requests and the file with io_uring (kernel 6.15+)")
+		recovery   = flag.Bool("recovery", false, "Keep the block device across server restarts: requeue in-flight I/O if the server dies, take an existing device -id over on start, and Detach on SIGUSR2 for upgrades")
 	)
 	flag.Parse()
 
@@ -76,6 +78,7 @@ func main() {
 	params.EnableIoctlEncode = true
 	params.ReadOnly = *readOnly
 	params.DeviceID = int32(*devID)
+	params.EnableZeroCopy = *zeroCopy
 
 	// The durability contract, stated once, in the one place that knows the
 	// answer. Buffered writes to a file are in the page cache when WriteAt
@@ -91,7 +94,13 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	device, err := ublk.CreateAndServe(ctx, params, options)
+	var device *ublk.Device
+	if *recovery {
+		params.Recovery = ublk.RecoveryReissue
+		device, err = recoverOrCreate(ctx, *devID, params, options)
+	} else {
+		device, err = ublk.CreateAndServe(ctx, params, options)
+	}
 	if err != nil {
 		log.Fatalf("create device: %v", err)
 	}
@@ -119,17 +128,28 @@ func main() {
 	// A write to a vanished terminal or log pipe must not kill it either.
 	signal.Ignore(syscall.SIGPIPE)
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	<-sigCh
-	fmt.Println("\nreceived shutdown signal")
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR2)
+	var sig os.Signal
+	select {
+	case sig = <-sigCh:
+	case <-device.Done():
+		log.Printf("device stopped serving: %v", device.Err())
+	}
 	sdNotify("STOPPING=1")
 
-	// Do NOT cancel the context before Close(). Close() has to run STOP_DEV
-	// while the I/O goroutines are still running, because the kernel drains
-	// in-flight I/O before STOP_DEV returns and only those goroutines can
-	// complete it. Close() then stops them itself, in the right order.
-	// Cancelling here first strands the in-flight requests and hangs STOP_DEV
-	// on a busy device.
+	// SIGUSR2 with -recovery hands the device to the next server instead of
+	// deleting it: the block device, and anything mounted on it, stays.
+	if sig == syscall.SIGUSR2 && *recovery {
+		if err := device.Detach(); err != nil {
+			log.Fatalf("detach: %v", err)
+		}
+		fmt.Printf("detached %s; start the new server to take it over\n", device.Path)
+		return
+	}
+	fmt.Println("\nreceived shutdown signal")
+
+	// Close runs STOP_DEV while the queues are still serving, so the kernel
+	// can drain in-flight I/O through them, then deletes the device.
 	done := make(chan struct{})
 	go func() {
 		if err := device.Close(); err != nil {
@@ -257,4 +277,27 @@ func sdNotify(state string) {
 	if _, err := conn.Write([]byte(state)); err != nil {
 		log.Printf("sd_notify %s: %v", state, err)
 	}
+}
+
+// recoverOrCreate takes over device id if a previous server left it behind
+// with recovery enabled (crashed, or detached for an upgrade), and otherwise
+// creates it. A leftover device without recovery cannot be taken over, so it
+// is deleted first.
+func recoverOrCreate(ctx context.Context, id int, params ublk.DeviceParams, options *ublk.Options) (*ublk.Device, error) {
+	if id < 0 {
+		return ublk.CreateAndServe(ctx, params, options)
+	}
+	info, err := ublk.GetDeviceInfo(uint32(id))
+	if err != nil {
+		return ublk.CreateAndServe(ctx, params, options) // no such device
+	}
+	if info.Features.Has(ublk.FeatureUserRecovery) {
+		log.Printf("taking over device %d (kernel state %s)", id, info.State)
+		return ublk.Recover(ctx, uint32(id), params, options)
+	}
+	log.Printf("deleting leftover device %d, which has no recovery", id)
+	if err := ublk.DeleteDevice(uint32(id)); err != nil {
+		return nil, err
+	}
+	return ublk.CreateAndServe(ctx, params, options)
 }

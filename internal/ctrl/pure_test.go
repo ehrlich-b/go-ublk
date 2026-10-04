@@ -116,17 +116,11 @@ func TestBuildFeatureFlagsEachFlagAlone(t *testing.T) {
 			base | uint64(uapi.UBLK_F_CMD_IOCTL_ENCODE),
 		},
 		{
-			// SUSPECTED DEFECT — PINNED, NOT FIXED. DeviceParams carries an
-			// EnableZoned bool (types.go) and uapi declares UBLK_F_ZONED = 1<<8
-			// (uapi/constants.go), but buildFeatureFlags has no branch for it,
-			// so a caller asking for zoned-storage support at ADD_DEV gets
-			// silently ignored: no feature bit is ORed in and no error is
-			// raised anywhere. The expected value here is just the base flag.
-			// Do not "fix" this by adding the missing if params.EnableZoned
-			// branch; report it.
-			"zoned (PINNED: unwired)",
+			// Was a pinned defect (EnableZoned silently ignored); zoned devices
+			// are implemented now and request UBLK_F_ZONED.
+			"zoned",
 			DeviceParams{EnableZoned: true},
-			base,
+			base | uint64(uapi.UBLK_F_ZONED),
 		},
 	}
 
@@ -147,12 +141,11 @@ func TestBuildFeatureFlagsAllTrue(t *testing.T) {
 		EnableZoned:        true,
 		EnableIoctlEncode:  true,
 	})
-	// The full OR of every bit buildFeatureFlags actually sets. EnableZoned is
-	// included in the input but contributes nothing — see the pinned finding in
-	// TestBuildFeatureFlagsEachFlagAlone.
+	// The full OR of every bit buildFeatureFlags sets.
 	want := uint64(uapi.UBLK_F_SUPPORT_ZERO_COPY |
 		uapi.UBLK_F_UNPRIVILEGED_DEV |
 		uapi.UBLK_F_USER_COPY |
+		uapi.UBLK_F_ZONED |
 		uapi.UBLK_F_CMD_IOCTL_ENCODE)
 	if got != want {
 		t.Errorf("buildFeatureFlags() = %#x, want %#x", got, want)

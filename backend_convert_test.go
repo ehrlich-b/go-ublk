@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ehrlich-b/go-ublk/internal/ctrl"
+	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
 // fieldsOf returns the set of exported field names of the given struct type.
@@ -44,9 +45,25 @@ func TestConvertFieldSetCompleteness(t *testing.T) {
 		}
 	}
 
+	// Public fields that reach the kernel by another route, each covered by
+	// TestConvertFeatureFlags or used by the data plane rather than ctrl.
+	elsewhere := map[string]string{
+		"Backend":            "typed Backend vs interfaces.Backend; forwarded via DefaultDeviceParams",
+		"Handler":            "data plane only",
+		"Inline":             "data plane only",
+		"ThreadsPerQueue":    "data plane, plus UBLK_F_PER_IO_DAEMON in Flags",
+		"SafeStop":           "selects TRY_STOP_DEV in Stop",
+		"Recovery":           "UBLK_F_USER_RECOVERY* in Flags",
+		"NeedGetData":        "UBLK_F_NEED_GET_DATA in Flags",
+		"NoPartitionScan":    "UBLK_F_NO_AUTO_PART_SCAN in Flags",
+		"Tag":                "UblksrvFlags",
+		"HandlerDiscard":     "CanDiscard",
+		"HandlerWriteZeroes": "CanWriteZeroes",
+		"Zoned":              "ZoneSectors and the zoned limits",
+	}
 	for f := range pubFields {
-		if f == "Backend" {
-			continue // typed Backend vs interfaces.Backend; forwarded via DefaultDeviceParams
+		if _, ok := elsewhere[f]; ok {
+			continue
 		}
 		if !ctrlFields[f] {
 			t.Errorf("DeviceParams.%s has no counterpart on ctrl.DeviceParams: convertToCtrlParams silently drops it", f)
@@ -104,7 +121,8 @@ func TestConvertAllFieldsForwarded(t *testing.T) {
 	checkField(t, "ReadOnly", got.ReadOnly, params.ReadOnly)
 	checkField(t, "Rotational", got.Rotational, params.Rotational)
 	checkField(t, "VolatileCache", got.VolatileCache, params.VolatileCache)
-	checkField(t, "EnableFUA", got.EnableFUA, params.EnableFUA)
+	// MockBackend does not implement FUABackend, so FUA must not be advertised.
+	checkField(t, "EnableFUA", got.EnableFUA, false)
 	checkField(t, "DiscardAlignment", got.DiscardAlignment, params.DiscardAlignment)
 	checkField(t, "DiscardGranularity", got.DiscardGranularity, params.DiscardGranularity)
 	checkField(t, "MaxDiscardSectors", got.MaxDiscardSectors, params.MaxDiscardSectors)
@@ -181,3 +199,52 @@ func checkField[T comparable](t *testing.T, name string, got, want T) {
 		t.Errorf("%s: got %v, want %v", name, got, want)
 	}
 }
+
+// TestConvertFeatureFlags checks every public switch that becomes a UBLK_F_*
+// request or a ctrl field under another name.
+func TestConvertFeatureFlags(t *testing.T) {
+	base := DefaultParams(NewMockBackend(1 << 20))
+	for _, c := range []struct {
+		name string
+		set  func(*DeviceParams)
+		want uint64
+	}{
+		{"none", func(*DeviceParams) {}, 0},
+		{"reissue", func(p *DeviceParams) { p.Recovery = RecoveryReissue },
+			uapi.UBLK_F_USER_RECOVERY | uapi.UBLK_F_USER_RECOVERY_REISSUE},
+		{"queue", func(p *DeviceParams) { p.Recovery = RecoveryQueue }, uapi.UBLK_F_USER_RECOVERY},
+		{"fail-io", func(p *DeviceParams) { p.Recovery = RecoveryFailIO },
+			uapi.UBLK_F_USER_RECOVERY | uapi.UBLK_F_USER_RECOVERY_FAIL_IO},
+		{"need-get-data", func(p *DeviceParams) { p.NeedGetData = true }, uapi.UBLK_F_NEED_GET_DATA},
+		{"no-part-scan", func(p *DeviceParams) { p.NoPartitionScan = true }, uapi.UBLK_F_NO_AUTO_PART_SCAN},
+		{"per-io-daemon", func(p *DeviceParams) { p.ThreadsPerQueue = 2 }, uapi.UBLK_F_PER_IO_DAEMON},
+	} {
+		p := base
+		c.set(&p)
+		if got := convertToCtrlParams(p).Flags; got != c.want {
+			t.Errorf("%s: Flags = %#x, want %#x", c.name, got, c.want)
+		}
+	}
+
+	p := base
+	p.Tag = 0x60b1c0ffee
+	if got := convertToCtrlParams(p).UblksrvFlags; got != p.Tag {
+		t.Errorf("Tag not forwarded: %#x", got)
+	}
+
+	fua := DefaultParams(fuaMock{NewMockBackend(1 << 20)})
+	fua.EnableFUA = true
+	if !convertToCtrlParams(fua).EnableFUA {
+		t.Error("EnableFUA with a FUABackend was not forwarded")
+	}
+	h := DeviceParams{Handler: HandlerFunc(func(r *Request) { r.Complete(nil) }), Size: 1 << 20,
+		HandlerDiscard: true, HandlerWriteZeroes: true, EnableFUA: true}
+	got := convertToCtrlParams(h)
+	if !got.CanDiscard || !got.CanWriteZeroes || !got.EnableFUA || got.Size != 1<<20 {
+		t.Errorf("handler capabilities not forwarded: %+v", got)
+	}
+}
+
+type fuaMock struct{ *MockBackend }
+
+func (f fuaMock) WriteAtFUA(p []byte, off int64) (int, error) { return f.WriteAt(p, off) }
