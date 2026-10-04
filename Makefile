@@ -86,6 +86,13 @@ crash: FORCE
 	@echo "Building crash$(if $(BUILD_FLAGS), (with race detector),)..."
 	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/crash ./test/crash
 
+# Control-plane checker (test/ctrl) — every control command against the running
+# kernel, as root and as an unprivileged user. Creates devices: test guests only.
+ctrltest: FORCE
+	@mkdir -p bin
+	@echo "Building ctrltest..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ctrltest ./test/ctrl
+
 clean:
 	$(GOCLEAN)
 	rm -rf bin/ build/
