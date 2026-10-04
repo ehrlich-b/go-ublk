@@ -1,6 +1,6 @@
 # go-ublk kernel matrix
 
-Generated 2026-10-04T18:06:13+00:00 against go-ublk `0aa26d9`. 29 kernels: 14 fail, 15 pass.
+Generated 2026-10-04T18:19:05+00:00 against go-ublk `0aa26d9`. 29 kernels: 14 fail, 15 pass.
 
 Rows by the commit they ran: `0aa26d9` 8, `11f8769` 21.
 

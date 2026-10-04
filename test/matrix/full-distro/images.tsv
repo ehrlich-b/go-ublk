@@ -1,8 +1,11 @@
 # Cloud images for full-distro mode. URL may contain one * in the file name,
-# resolved against the directory listing (newest match).
-# id	family	distro	url
+# resolved against the directory listing (newest match). The optional prep
+# column is a shell command cloud-init runs before the payload (needs the
+# guest's network), e.g. to install the package that carries ublk_drv.
+# id	family	distro	url	prep
 full-ubuntu-22.04	ubuntu	Ubuntu 22.04 cloud image	https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
 full-ubuntu-24.04	ubuntu	Ubuntu 24.04 cloud image	https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+full-ubuntu-24.04-extra	ubuntu	Ubuntu 24.04 cloud image + linux-modules-extra	https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq linux-modules-extra-$(uname -r) xfsprogs
 full-ubuntu-26.04	ubuntu	Ubuntu 26.04 cloud image	https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img
 full-debian-12	debian	Debian 12 genericcloud	https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
 full-debian-13	debian	Debian 13 genericcloud	https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2

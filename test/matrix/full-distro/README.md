@@ -20,10 +20,18 @@ How it works (`run-full.sh ID`):
 - `report.py parse --boot full-vm` writes the same `run.json` as a matrix run,
   so `report.py aggregate` can merge both kinds.
 
-The image's own kernel is what gets tested. To test another kernel in a full
-distro, add a cloud-init `packages:` entry and a reboot, as the original
+The image's own kernel is what gets tested. Stock cloud images often leave
+ublk_drv out: Ubuntu's ships it in `linux-modules-extra`. The optional
+`prep` column of `images.tsv` is a command cloud-init runs before the payload
+(the guest has user-mode networking). `full-ubuntu-24.04-extra` uses it to
+install `linux-modules-extra-$(uname -r)` and xfsprogs. To test another
+kernel in a full distro, install it the same way and reboot, as the original
 `~/goublk-vm` recipe does for HWE 7.0. Under TCG that costs about 20 minutes
 per guest, which is why the kernel sweep uses initramfs mode.
+
+Measured on the rig (TCG): the stock Ubuntu 24.04 image boots, runs cloud-init
+and powers off in about 90 s. It reports `no-ublk` (kernel 6.8.0-142-generic
+without linux-modules-extra), and all unit tests pass.
 
 ```bash
 # on the rig, in the toolbox image

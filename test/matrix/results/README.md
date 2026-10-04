@@ -8,7 +8,10 @@ possible_cpus=8, initramfs boot. Raw console logs are not committed.
 full payload (probe, unit tests, large-io, integrity sweep, loop e2e, the
 whole ublk-suite), and so did the RHEL 10 `+io_uring` variant rows. The 13
 kernels without ublk_drv keep their rows from the 0aa26d9 sweep, since their
-result cannot change. `runs-detail.json` records the commit of every row.
+result cannot change. Two full-distro rows (boot `full-vm`) come from the
+stock Ubuntu 24.04 cloud image under its own systemd: as shipped it has no
+ublk_drv (`no-ublk`), and with linux-modules-extra it passes.
+`runs-detail.json` records the commit of every row.
 
 Reading the statuses:
 

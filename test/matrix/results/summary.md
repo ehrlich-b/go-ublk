@@ -1,8 +1,8 @@
 # go-ublk kernel matrix
 
-Generated 2026-10-04T18:06:12+00:00 against go-ublk `4d9712f0f26e`. 65 kernels: 4 fail, 2 fetch-failed, 13 no-ublk, 46 pass.
+Generated 2026-10-04T18:19:05+00:00 against go-ublk `4d9712f0f26e`. 67 kernels: 4 fail, 2 fetch-failed, 14 no-ublk, 47 pass.
 
-Rows by the commit they ran: `0aa26d9` 13, `4d9712f0f26e` 50, `?` 2.
+Rows by the commit they ran: `0aa26d9` 13, `4d9712f0f26e` 52, `?` 2.
 
 | Kernel id | Distro | uname -r | Base | ublk_drv | Features | Status | P/F/S/E | Oops | Wall | Failing tests |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -57,6 +57,8 @@ Rows by the commit they ran: `0aa26d9` 13, `4d9712f0f26e` 50, `?` 2.
 | opensuse-leap-16.0 | openSUSE Leap 16.0 | 6.12.0-160000.38-default | 6.12 | no | - | **no-ublk** | 9/0/5/0 |  | 17s |  |
 | opensuse-tumbleweed | openSUSE Tumbleweed | 7.2.8-1-default | 7.2 | yes | 0xfffff | **pass** | 74/0/1/0 |  | 251s |  |
 | ubuntu-22.04-ga | Ubuntu 22.04 GA | 5.15.0-198-generic | 5.15 | no | - | **no-ublk** | 7/2/5/0 |  | 18s | unit/internal_uring, unit/test_unit |
+| full-ubuntu-24.04 | Ubuntu 24.04 cloud image | 6.8.0-142-generic | 6.8 | no | - | **no-ublk** | 9/0/5/0 |  | 94s |  |
+| full-ubuntu-24.04-extra | Ubuntu 24.04 cloud image + linux-modules-extra | 6.8.0-142-generic | 6.8 | yes | 0x1fe | **pass** | 57/0/18/0 |  | 565s |  |
 | ubuntu-22.04-hwe | Ubuntu 22.04 HWE | 6.8.0-138-generic | 6.8 | yes | 0x1fe | **pass** | 57/0/18/0 |  | 234s |  |
 | ubuntu-24.04-ga | Ubuntu 24.04 GA | 6.8.0-146-generic | 6.8 | yes | 0x1fe | **pass** | 57/0/18/0 |  | 237s |  |
 | ubuntu-24.04-hwe-6.11 | Ubuntu 24.04 HWE 6.11 | 6.11.0-29-generic | 6.11 | yes | 0x1fe | **pass** | 58/0/17/0 |  | 239s |  |
@@ -326,6 +328,8 @@ Rows by the commit they ran: `0aa26d9` 13, `4d9712f0f26e` 50, `?` 2.
 ### ubuntu-22.04-ga (5.15.0-198-generic): no-ublk
 - `unit/internal_uring` fail: 30 pass, 23 fail, 4 skip; failed: TestHotPathDoesNotAllocate TestSetupDropsRejectedOptionalFlags TestProbe TestNopRoundTrips TestMsgRingWakesAnotherRing TestDeferTaskrunSingleIssuer TestRingCloseReleasesMappingsAndFds TestRealRingNewCloseWithPipe TestRealRingSubmitCtrlCmdPipeUnsupported TestRealRingSecondRoundTripSameRing TestSubmitCtrlCmdStagesCallerBuffer TestCtrlTimeoutAndStragglerCQE TestCtrlContextCancelReapsCommand TestCtrlContextCancelGraceExpires TestCloseDuringUnboundedCtrlWait TestCloseWhileWaitForCompletionParked TestRealRingOpenCloseNoRegistration TestSparseBufferTable TestFixedFil
 - `unit/test_unit` fail: 6 pass, 1 fail, 0 skip; failed: TestURingInterface     unit_test.go:75: NewRing failed: io_uring_setup entries=32 flags=0xc00: invalid argument 
+
+### full-ubuntu-24.04 (6.8.0-142-generic): no-ublk
 
 ### ubuntu-24.04-hwe-6.17.0-40 (6.17.0-40-generic): fail
 - `integration/large-io` timeout: 0 pass, 0 fail, 0 skip; killed after 300s; last:  /usr/local/go/src/testing/testing.go:1934 +0xea created by testing.(*T).Run in goroutine 19  /usr/local/go/src/testing/testing.go:1997 +0x465 

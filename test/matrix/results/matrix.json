@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-04T18:06:12+00:00",
+ "generated": "2026-10-04T18:19:05+00:00",
  "go_ublk_commit": "4d9712f0f26e9575349aefc6b0ab87ea143b3ca1",
  "runs": [
   {
@@ -7067,7 +7067,7 @@
    "arch": "x86_64",
    "boot": "initramfs",
    "accel": "",
-   "date": "2026-10-04T18:06:12+00:00",
+   "date": "2026-10-04T18:19:05+00:00",
    "ublk_drv": false,
    "features": "",
    "oops": false,
@@ -12177,7 +12177,7 @@
    "arch": "x86_64",
    "boot": "initramfs",
    "accel": "",
-   "date": "2026-10-04T18:06:12+00:00",
+   "date": "2026-10-04T18:19:05+00:00",
    "ublk_drv": false,
    "features": "",
    "oops": false,
@@ -18530,6 +18530,586 @@
     "pass": 7,
     "fail": 2,
     "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "full-ubuntu-24.04",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 cloud image",
+   "kernel": "6.8.0-142-generic",
+   "upstream": "6.8",
+   "arch": "x86_64",
+   "boot": "full-vm",
+   "accel": "tcg",
+   "date": "2026-10-04T18:07:41+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.1,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "37 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 1.5,
+     "detail": "55 pass, 0 fail, 2 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "45 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "full-ubuntu-24.04-extra",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 cloud image + linux-modules-extra",
+   "kernel": "6.8.0-142-generic",
+   "upstream": "6.8",
+   "arch": "x86_64",
+   "boot": "full-vm",
+   "accel": "tcg",
+   "date": "2026-10-04T18:18:15+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\",\"srcversion\":\"3EEA037C46C1E6B583496F4\",\"library\":\"features 0x1fe known=true\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.5,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "37 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 1.5,
+     "detail": "55 pass, 0 fail, 2 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "45 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 122.3,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 42.8,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.97,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.81,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 2.44,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.07,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.1,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.09,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.08,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.12,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.1,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.88,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.12,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.82,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.53,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.1,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.09,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.34,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "pass",
+     "duration_s": 0.63,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.39,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.48,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "pass",
+     "duration_s": 0.11,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "pass",
+     "duration_s": 5.32,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/list-high-id",
+     "status": "pass",
+     "duration_s": 0.09,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/delete-async",
+     "status": "skip",
+     "duration_s": 0.07,
+     "detail": "kernel lacks DEL_DEV_ASYNC (6.11+): device 0: ublk DEL_DEV_ASYNC dev 0: operation not supported"
+    },
+    {
+     "test": "features/probe",
+     "status": "pass",
+     "duration_s": 0.0,
+     "detail": ""
+    },
+    {
+     "test": "features/integrity-inline",
+     "status": "pass",
+     "duration_s": 0.89,
+     "detail": ""
+    },
+    {
+     "test": "features/integrity-user-copy",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "features/integrity-need-get-data",
+     "status": "pass",
+     "duration_s": 0.82,
+     "detail": ""
+    },
+    {
+     "test": "features/integrity-threads-per-queue",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks PER_IO_DAEMON (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/integrity-batch-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks BATCH_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/integrity-batch-io-user-copy",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks BATCH_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/zero-copy",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks SUPPORT_ZERO_COPY (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/batch-io-zero-copy",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks SUPPORT_ZERO_COPY|AUTO_BUF_REG|BATCH_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/batch-io-close-under-load",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks BATCH_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/zero-copy-close-under-load",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks SUPPORT_ZERO_COPY (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/handler-async",
+     "status": "pass",
+     "duration_s": 0.62,
+     "detail": ""
+    },
+    {
+     "test": "features/fua",
+     "status": "pass",
+     "duration_s": 0.11,
+     "detail": ""
+    },
+    {
+     "test": "features/tag-find",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "features/resize",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks UPDATE_SIZE (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/no-partition-scan",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks NO_AUTO_PART_SCAN (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/safe-stop",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks SAFE_STOP_DEV (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "lifecycle/ctx-cancel-under-load",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "recovery/kill-and-recover",
+     "status": "pass",
+     "duration_s": 0.54,
+     "detail": ""
+    },
+    {
+     "test": "recovery/detach-handoff",
+     "status": "pass",
+     "duration_s": 0.55,
+     "detail": ""
+    },
+    {
+     "test": "recovery/queue-mode",
+     "status": "pass",
+     "duration_s": 1.17,
+     "detail": ""
+    },
+    {
+     "test": "recovery/fail-io-mode",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks USER_RECOVERY_FAIL_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "recovery/batch-kill-and-recover",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks BATCH_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "recovery/batch-detach-handoff",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks BATCH_IO (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "recovery/integrity-kill-and-recover",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks INTEGRITY (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/zoned",
+     "status": "pass",
+     "duration_s": 0.31,
+     "detail": ""
+    },
+    {
+     "test": "features/integrity",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks INTEGRITY (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/shared-memory",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks SHMEM_ZC (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/io-desc-size",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "kernel lacks IO_DESC_SIZE (reports URING_CMD_COMP_IN_TASK|NEED_GET_DATA|USER_RECOVERY|USER_RECOVERY_REISSUE|UNPRIVILEGED_DEV|CMD_IOCTL_ENCODE|USER_COPY|ZONED, known=true)"
+    },
+    {
+     "test": "features/unprivileged",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 57,
+    "fail": 0,
+    "skip": 18,
     "error": 0
    }
   },

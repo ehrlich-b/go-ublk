@@ -17,7 +17,7 @@ id=$1
 rundir=${2:-$RUNS/full-$(date +%Y%m%d-%H%M%S)}
 row=$(awk -F'\t' -v id="$id" '$1 == id' "$MATRIX_DIR/full-distro/images.tsv")
 [ -n "$row" ] || die "no $id in full-distro/images.tsv"
-IFS=$'\t' read -r _ family distro url <<<"$row"
+IFS=$'\t' read -r _ family distro url prep <<<"$row"
 ACCEL=${ACCEL:-tcg}
 QEMU=${QEMU:-qemu-system-x86_64}
 MEM=${MEM:-3072}
@@ -50,11 +50,12 @@ rm -f "$out/console.log" "$out/results.log" "$out/run.json" "$out/disk.qcow2"
 fmt=$(qemu-img info --output=json "$img" | python3 -c 'import json,sys; print(json.load(sys.stdin)["format"])')
 qemu-img create -q -f qcow2 -F "$fmt" -b "$img" "$out/disk.qcow2" 20G || die "$id: overlay failed"
 
-cat >"$out/user-data" <<'EOF'
-#cloud-config
-runcmd:
-  - [bash, -c, "mkdir -p /mnt/goublk && mount -o ro LABEL=GOUBLKPAYLD /mnt/goublk && exec bash /mnt/goublk/guest-run.sh"]
-EOF
+{
+	echo "#cloud-config"
+	echo "runcmd:"
+	[ -n "${prep:-}" ] && printf '  - [bash, -c, %s]\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$prep > /dev/console 2>&1")"
+	echo '  - [bash, -c, "mkdir -p /mnt/goublk && mount -o ro LABEL=GOUBLKPAYLD /mnt/goublk && exec bash /mnt/goublk/guest-run.sh"]'
+} >"$out/user-data"
 printf 'instance-id: %s\nlocal-hostname: matrix\n' "$id" >"$out/meta-data"
 cloud-localds "$out/seed.iso" "$out/user-data" "$out/meta-data" || die "$id: cloud-localds failed"
 
