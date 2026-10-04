@@ -53,7 +53,7 @@ endif
 # Core Targets
 #==============================================================================
 
-.PHONY: all build verify suite crash clean test test-unit test-uapi-fuzz test-integration test-large-io-kernel \
+.PHONY: all build verify suite release-check crash clean test test-unit test-uapi-fuzz test-integration test-large-io-kernel \
 	test-large-io-kernel-compile deps tidy fmt lint vet help
 
 all: deps build test
@@ -136,6 +136,17 @@ test-uapi-fuzz:
 		-run='^$$' -fuzz='^FuzzCtrlDecoders$$' -fuzztime=$(FUZZ_TIME) ./internal/ctrl
 	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
 		-run='^$$' -fuzz='^FuzzEngine$$' -fuzztime=$(FUZZ_TIME) ./internal/queue
+
+# Everything CI checks, for a release candidate: formatting, vet, unit and race
+# tests, and a longer fuzzing pass. The real-kernel gates (ublk-suite under the
+# kernel matrix) run separately: see test/matrix and site/content/go-ublk/releases.md.
+release-check:
+	@test -z "$$(gofmt -l $$(git ls-files '*.go'))" || { gofmt -l $$(git ls-files '*.go'); exit 1; }
+	$(GOCMD) vet ./...
+	$(MAKE) test-unit
+	$(MAKE) test-race
+	$(MAKE) test-uapi-fuzz FUZZ_TIME=60s
+	$(MAKE) suite
 
 test-integration:
 	@echo "Running integration tests (requires root and ublk kernel support)..."
