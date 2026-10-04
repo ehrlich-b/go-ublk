@@ -1,0 +1,326 @@
+//go:build linux
+
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/ehrlich-b/go-ublk"
+)
+
+// Block-layer ioctls (include/uapi/linux/fs.h).
+const (
+	blkROGet     = 0x125e
+	blkSSZGet    = 0x1268
+	blkPBSZGet   = 0x127b
+	blkDiscard   = 0x1277
+	blkZeroOut   = 0x127f
+	blkGetSize64 = 0x80081272
+)
+
+// newDevice creates and starts a device and registers its Close as a cleanup.
+func newDevice(t *T, params ublk.DeviceParams) (*ublk.Device, error) {
+	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
+	if err != nil {
+		return nil, fmt.Errorf("CreateAndServe: %w", err)
+	}
+	t.Cleanup(func() {
+		if err := dev.Close(); err != nil {
+			t.Logf("cleanup: Close %s: %v", dev.Path, err)
+		}
+	})
+	if err := waitForNode(dev.Path, 5*time.Second); err != nil {
+		return nil, err
+	}
+	return dev, nil
+}
+
+func memParams(size int64) (ublk.DeviceParams, *memBackend) {
+	b := newMemBackend(size)
+	p := ublk.DefaultParams(b)
+	p.NumQueues = 2
+	p.QueueDepth = 64
+	return p, b
+}
+
+func waitForNode(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if fi, err := os.Stat(path); err == nil && fi.Mode()&os.ModeDevice != 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s did not appear within %s", path, timeout)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func waitForGone(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s still present after %s", path, timeout)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func ioctlInt(fd int, req uintptr) (int, error) {
+	var v int32
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), req, uintptr(unsafe.Pointer(&v))); e != 0 {
+		return 0, e
+	}
+	return int(v), nil
+}
+
+func blockSize64(fd int) (int64, error) {
+	var v uint64
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), blkGetSize64, uintptr(unsafe.Pointer(&v))); e != 0 {
+		return 0, e
+	}
+	return int64(v), nil
+}
+
+// blkRange issues BLKDISCARD or BLKZEROOUT over [off, off+length).
+func blkRange(fd int, req uintptr, off, length int64) error {
+	r := [2]uint64{uint64(off), uint64(length)}
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), req, uintptr(unsafe.Pointer(&r[0]))); e != 0 {
+		return e
+	}
+	return nil
+}
+
+// sysfsQueue reads /sys/block/<dev>/queue/<attr>.
+func sysfsQueue(devPath, attr string) (string, error) {
+	name := strings.TrimPrefix(devPath, "/dev/")
+	b, err := os.ReadFile("/sys/block/" + name + "/queue/" + attr)
+	return strings.TrimSpace(string(b)), err
+}
+
+func sysfsInt(devPath, attr string) (int64, error) {
+	s, err := sysfsQueue(devPath, attr)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(s, 10, 64)
+}
+
+// alignedBuf returns a 4096-aligned buffer, as O_DIRECT requires.
+func alignedBuf(n int) []byte {
+	raw := make([]byte, n+4096)
+	off := int(uintptr(unsafe.Pointer(&raw[0])) & 4095)
+	if off != 0 {
+		off = 4096 - off
+	}
+	return raw[off : off+n : off+n]
+}
+
+func pwriteFull(fd int, p []byte, off int64) error {
+	for done := 0; done < len(p); {
+		n, err := unix.Pwrite(fd, p[done:], off+int64(done))
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("pwrite at %d: wrote 0 bytes", off+int64(done))
+		}
+		done += n
+	}
+	return nil
+}
+
+func preadFull(fd int, p []byte, off int64) error {
+	for done := 0; done < len(p); {
+		n, err := unix.Pread(fd, p[done:], off+int64(done))
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("pread at %d: unexpected EOF", off+int64(done))
+		}
+		done += n
+	}
+	return nil
+}
+
+// rng is a small deterministic xorshift generator, so a failing seed replays.
+type rng struct{ s uint64 }
+
+func newRNG(seed uint64) *rng {
+	if seed == 0 {
+		seed = 0x9e3779b97f4a7c15
+	}
+	return &rng{s: seed}
+}
+
+func (r *rng) next() uint64 {
+	r.s ^= r.s << 13
+	r.s ^= r.s >> 7
+	r.s ^= r.s << 17
+	return r.s
+}
+
+func (r *rng) intn(n int) int { return int(r.next() % uint64(n)) }
+
+func (r *rng) fill(p []byte) {
+	for i := 0; i+8 <= len(p); i += 8 {
+		v := r.next()
+		for j := 0; j < 8; j++ {
+			p[i+j] = byte(v >> (8 * j))
+		}
+	}
+}
+
+func firstDiff(a, b []byte) int {
+	for i := range a {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return -1
+}
+
+func openFDs() int {
+	ents, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return -1
+	}
+	return len(ents)
+}
+
+func mapCount() int {
+	b, err := os.ReadFile("/proc/self/maps")
+	if err != nil {
+		return -1
+	}
+	return bytes.Count(b, []byte{'\n'})
+}
+
+// kmsgMark returns the current kernel log length, so kernelProblems can look
+// only at what a test produced.
+func kmsgMark() int {
+	out, err := exec.Command("dmesg").Output()
+	if err != nil {
+		return -1
+	}
+	return bytes.Count(out, []byte{'\n'})
+}
+
+// kernelProblems returns kernel log lines since mark that indicate a kernel
+// bug (oops, warning, hung task, use-after-free), or "" if none.
+func kernelProblems(mark int) string {
+	if mark < 0 {
+		return ""
+	}
+	out, err := exec.Command("dmesg").Output()
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(out), "\n")
+	if mark > len(lines) {
+		mark = 0
+	}
+	var bad []string
+	for _, l := range lines[mark:] {
+		for _, pat := range []string{"BUG:", "WARNING:", "Oops", "general protection", "blocked for more than",
+			"KASAN", "use-after-free", "Call Trace"} {
+			if strings.Contains(l, pat) {
+				bad = append(bad, strings.TrimSpace(l))
+				break
+			}
+		}
+	}
+	if len(bad) > 5 {
+		bad = append(bad[:5], fmt.Sprintf("... %d more", len(bad)-5))
+	}
+	return strings.Join(bad, " | ")
+}
+
+// The suite re-executes itself as a separate server process for tests that
+// kill a server (a device must outlive its creator's death, which can't be
+// tested in-process).
+const serverSubcommand = "__server"
+
+func serverMain(args []string) {
+	fs := flag.NewFlagSet(serverSubcommand, flag.ExitOnError)
+	size := fs.Int64("size", 64<<20, "device size")
+	_ = fs.Parse(args)
+
+	params, _ := memParams(*size)
+	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
+	if err != nil {
+		fmt.Printf("ERROR %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("READY %d\n", dev.ID)
+	select {} // serve until killed
+}
+
+// startServer launches a server subprocess and returns it with its device ID.
+func startServer(t *T, size int64) (*exec.Cmd, uint32, error) {
+	cmd := exec.Command("/proc/self/exe", serverSubcommand, "-size", strconv.FormatInt(size, 10))
+	cmd.Stderr = os.Stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, 0, err
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	line := make(chan string, 1)
+	go func() {
+		s := bufio.NewScanner(out)
+		if s.Scan() {
+			line <- s.Text()
+		}
+		close(line)
+	}()
+	select {
+	case l, ok := <-line:
+		if !ok {
+			return nil, 0, fmt.Errorf("server exited without reporting")
+		}
+		var id uint32
+		if _, err := fmt.Sscanf(l, "READY %d", &id); err != nil {
+			return nil, 0, fmt.Errorf("server: %s", l)
+		}
+		return cmd, id, nil
+	case <-time.After(30 * time.Second):
+		return nil, 0, fmt.Errorf("server did not report readiness")
+	}
+}
+
+func hasCommand(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func run(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %v: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

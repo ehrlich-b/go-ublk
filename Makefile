@@ -53,7 +53,7 @@ endif
 # Core Targets
 #==============================================================================
 
-.PHONY: all build verify crash clean test test-unit test-uapi-fuzz test-integration test-large-io-kernel \
+.PHONY: all build verify suite crash clean test test-unit test-uapi-fuzz test-integration test-large-io-kernel \
 	test-large-io-kernel-compile deps tidy fmt lint vet help
 
 all: deps build test
@@ -72,6 +72,14 @@ verify: FORCE
 	@mkdir -p bin
 	@echo "Building verify$(if $(BUILD_FLAGS), (with race detector),)..."
 	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/verify ./test/verify
+
+# Real-kernel conformance suite (test/suite): a static binary that runs every
+# device test as root and prints one JSON result per test. The matrix harness
+# boots it under each kernel. Destructive: only run it on a disposable machine.
+suite: FORCE
+	@mkdir -p bin
+	@echo "Building ublk-suite..."
+	@CGO_ENABLED=0 GOOS=linux $(GOBUILD) -o bin/ublk-suite ./test/suite
 
 ublk-loop: FORCE
 	@mkdir -p bin
