@@ -172,7 +172,7 @@ func (c *Controller) DelDev(ctx context.Context, id uint32) error {
 	return err
 }
 
-// DelDevAsync sends DEL_DEV_ASYNC (v6.11; the v6.10 driver mis-dispatches it
+// DelDevAsync sends DEL_DEV_ASYNC (v6.11; the v6.9 and v6.10 drivers mis-dispatch it
 // and returns ENOTSUPP): DEL_DEV without the wait for the device number to be
 // freed. The device is gone from the control plane when it returns, but its
 // number may not be reusable yet.

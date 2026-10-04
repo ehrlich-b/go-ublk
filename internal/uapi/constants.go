@@ -37,7 +37,7 @@ const (
 	// The header defines no UBLK_CMD_* names for these; the driver mirrors
 	// them privately with _IOC_NR(). Named here so code can switch on them.
 	UBLK_CMD_GET_FEATURES  = 0x13 // v6.5
-	UBLK_CMD_DEL_DEV_ASYNC = 0x14 // v6.10 (dispatch broken until v6.11)
+	UBLK_CMD_DEL_DEV_ASYNC = 0x14 // v6.9 (dispatch broken until v6.11)
 	UBLK_CMD_UPDATE_SIZE   = 0x15 // v6.16
 	UBLK_CMD_QUIESCE_DEV   = 0x16 // v6.16
 	UBLK_CMD_TRY_STOP_DEV  = 0x17 // v7.0
