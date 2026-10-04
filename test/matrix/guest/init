@@ -34,6 +34,10 @@ arg() { tr ' ' '\n' </proc/cmdline | sed -n "s/^goublk\.$1=//p" | tail -1; }
 up() { cut -d' ' -f1 /proc/uptime; }
 emit "{\"meta\":{\"phase\":\"boot\",\"uname\":\"$(uname -r)\",\"machine\":\"$(uname -m)\",\"boot_s\":$(up),\"cpus\":$(grep -c ^processor /proc/cpuinfo),\"mem_kb\":$(sed -n 's/^MemTotal: *\([0-9]*\).*/\1/p' /proc/meminfo)}}"
 
+# The kernel's own module autoload (mount -t xfs, crypto) execs
+# CONFIG_MODPROBE_PATH, which is /usr/sbin/modprobe on Fedora and /sbin/modprobe
+# elsewhere; point it at the one this userland has.
+command -v modprobe >/proc/sys/kernel/modprobe 2>/dev/null
 # Surface hung tasks well inside the host's wall-clock timeout.
 [ -w /proc/sys/kernel/hung_task_timeout_secs ] && echo 30 >/proc/sys/kernel/hung_task_timeout_secs
 echo 1 >/proc/sys/kernel/sysrq 2>/dev/null

@@ -75,8 +75,28 @@ hygiene() { # NAME
 		dstate=$(comm -12 <(echo "$dstate") <(ps -eo pid=,stat=,comm= | awk '$2 ~ /^D/ { print $1 ":" $3 }' | sort))
 	done
 	if [ -n "$leaked" ] || [ -n "$dstate" ]; then
+		diagnose "$dstate"
 		result "$1/hygiene" fail "$t0" "leaked:${leaked:- none} D-state:${dstate:- none}"
 	fi
+}
+
+# What a wedge looks like from inside: stacks of the stuck tasks, whether a
+# partition scan is in flight, the ublk lines of the kernel log. sysrq-w puts
+# every blocked task's stack on the console even where /proc/PID/stack is off.
+diagnose() { # "PID:COMM ..."
+	local p
+	echo "--- diagnostics ---"
+	echo "/proc/partitions:"; cat /proc/partitions
+	echo "ublk nodes: $(ls /dev/ublk* 2>/dev/null | tr '\n' ' ')"
+	for p in $1; do
+		p=${p%%:*}
+		echo "stack of $p ($(cat "/proc/$p/comm" 2>/dev/null), wchan $(cat "/proc/$p/wchan" 2>/dev/null)):"
+		cat "/proc/$p/stack" 2>/dev/null
+	done
+	echo "kernel log, ublk lines:"; dmesg | grep -iE 'ublk|blocked for more' | tail -30
+	echo w >/proc/sysrq-trigger 2>/dev/null
+	sleep 1
+	echo "--- end diagnostics ---"
 }
 
 # Go test binary -> one result. Counts top-level tests from -test.v output.

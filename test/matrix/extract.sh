@@ -30,18 +30,23 @@ for dir in "$DOWNLOADS"/*/; do
 		case $f in
 		*.deb) dpkg-deb -x "$f" "$stage" || ok= ;;
 		*.rpm) (cd "$stage" && rpm2cpio "$f" | cpio -idm --quiet --no-absolute-filenames) || ok= ;;
+		*.sig) ;;
 		*.pkg.tar.*) bsdtar -xf "$f" -C "$stage" || ok= ;;
 		esac
 	done
-	if [ -n "$ok" ] && python3 "$MATRIX_DIR/kmods.py" "$stage" "$KERNELS/$id" "$id"; then
+	mkdir -p "$KERNELS/$id"
+	rm -f "$KERNELS/$id/extract-error.json"
+	if [ -n "$ok" ] && python3 "$MATRIX_DIR/kmods.py" "$stage" "$KERNELS/$id" "$id" 2>"$stage.err"; then
 		cp "$dir/fetch.json" "$KERNELS/$id/fetch.json"
 		log "extracted $id"
 	else
-		log "extract FAILED for $id"
-		mkdir -p "$KERNELS/$id"
-		printf '{"id": "%s", "error": "extract failed"}\n' "$id" >"$KERNELS/$id/extract-error.json"
+		why=$([ -n "$ok" ] && tail -1 "$stage.err" || echo "a package did not unpack")
+		log "extract FAILED for $id: $why"
+		python3 -c 'import json,sys; json.dump({"id": sys.argv[1], "error": sys.argv[2]}, open(sys.argv[3], "w"))' \
+			"$id" "packages fetched but unusable: $why" "$KERNELS/$id/extract-error.json"
 		rc=1
 	fi
+	rm -f "$stage.err"
 	chmod -R u+w "$stage"
 	find "$stage" -mindepth 1 -delete
 	rmdir "$stage"

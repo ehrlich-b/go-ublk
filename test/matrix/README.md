@@ -116,7 +116,20 @@ wrapper), `JOBS` (concurrent guests, default 4), `MEM` (MiB per guest,
 default 2048), `SMP` (default 2), `TIMEOUT` (seconds per guest, default 3000
 under TCG and 1200 under KVM), `SCALE` (ublk-suite `-scale`, default 0.25
 under TCG and 1 under KVM), `PROFILE=quick` (shorter integrity sweep),
-`TESTS`, `EXTRA_APPEND` (kernel command line).
+`TESTS`, `SUITE_RUN` / `SUITE_SKIP` (ublk-suite `-run` / `-skip` regexps, no
+spaces), `EXTRA_APPEND` (kernel command line) and `ID_SUFFIX` (records a
+variant as its own row). For example, the RHEL 10 rows with io_uring turned
+on:
+
+```bash
+ID_SUFFIX=+io_uring EXTRA_APPEND=sysctl.kernel.io_uring_disabled=0 \
+  bash test/matrix/run-matrix.sh 'centos-stream-10 almalinux-10 rocky-10'
+```
+
+When a guest wedges (a leaked device, or a task in D state in every sample),
+the payload prints diagnostics to the console before moving on:
+`/proc/partitions`, the stuck tasks' `/proc/PID/stack`, the ublk lines of the
+kernel log, and a sysrq-w dump of every blocked task.
 
 Under TCG, a guest reaches `/init` in about 2 s. The full payload takes
 minutes, mostly in the integrity sweep and the unit tests. Budget about

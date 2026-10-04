@@ -244,6 +244,18 @@ for n in linux-image-$k linux-image-unsigned-$k linux-modules-$k linux-modules-e
   case $n in linux-image-*) got_image=1 ;; esac
 done
 [ -n "$got_image" ] || { echo "no image package for $k" >&2; exit 3; }
+# Newer Debian splits the image into a meta package plus linux-binary-$k and a
+# virtual linux-modules-$k: pull every dependency named after this kernel.
+apt-cache $T depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks \
+    --no-replaces --no-enhances "linux-image-$k" 2>/dev/null |
+  sed 's/^ *|\{0,1\}\(Depends: \)\{0,1\}//; s/[<>]//g' | grep -F -- "$k" | grep -v '^linux-headers' |
+  sort -u | while read -r n; do
+    ls /out/"${n}"_*.deb >/dev/null 2>&1 && continue
+    spec=$n; [ -n "$SUITE" ] && spec="$n/$SUITE"
+    uris=$(apt-get download --print-uris "$spec" 2>/dev/null) || continue
+    echo "$uris" | awk '{gsub("'"'"'","",$1); print "URL", $2, $1}'
+    apt-get download -q "$spec" >/dev/null 2>&1 || true
+  done
 '''
 
 DNF = r'''
@@ -268,7 +280,8 @@ zypper -q --non-interactive --gpg-auto-import-keys refresh >/dev/null
 for p in $(echo "$PKGS" | tr ',' ' '); do
   zypper -q --non-interactive download "$p" >/dev/null 2>&1 || echo "MISSING $p"
 done
-find /var/cache/zypp/packages -name '*.rpm' -exec cp {} /out/ \;
+# Newer openSUSE images have no find(1); zypper keeps packages at <repo>/<arch>/.
+for f in /var/cache/zypp/packages/*/*/*.rpm; do [ -e "$f" ] && cp "$f" /out/; done
 ls /out/*.rpm >/dev/null
 '''
 
@@ -415,6 +428,10 @@ def cmd_manifest(a):
             if not rec.get("version"):
                 rec["version"] = rec["kinfo"].get("kver", "")
                 rec["upstream"] = upstream_of(rec["version"])
+        x = os.path.join(KERNELS, kid, "extract-error.json")
+        if rec.get("status") == "ok" and not os.path.exists(k) and os.path.exists(x):
+            with open(x) as f:
+                rec.update(status="failed", error=json.load(f).get("error", "extract failed"))
         out.append(rec)
     dest = os.path.join(CACHE, "kernels.json")
     with open(dest, "w") as f:
