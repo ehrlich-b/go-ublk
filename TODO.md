@@ -383,7 +383,10 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
     CQE. On timeout (now `ErrCtrlTimeout`; `Config.CtrlTimeout` < 0 waits without one) that staging
     buffer is abandoned, never reused or unmapped, so a late write cannot reach the Go heap, and the
     late CQE is told apart by an internal user_data tag instead of being taken for the next
-    command's. Left for the ctrl side: callers' buffers must be heap or off-heap, not stack, and
+    command's. `Ring.SubmitCtrlCmdContext` cancels instead of abandoning: when its context is done
+    it sends IORING_OP_ASYNC_CANCEL (an io-wq worker blocked in an interruptible wait such as
+    END_USER_RECOVERY's gets a signal) and reaps the command's CQE within a 1s grace, returning
+    `ErrCtrlCanceled` with the Result. Left for the ctrl side: callers' buffers must be heap or off-heap, not stack, and
     reachable until `SubmitCtrlCmd` returns, because the address still arrives as an integer.
 
 ---

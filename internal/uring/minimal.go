@@ -3,6 +3,7 @@
 package uring
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -27,8 +28,14 @@ const (
 	// waiter notices a deadline, Close or context cancellation promptly.
 	ctrlWaitSlice = 100 * time.Millisecond
 	// ctrlTagBase marks the internal user_data of a synchronous control
-	// command, so its CQE can be told apart from a straggler's.
-	ctrlTagBase = uint64(0xC7) << 56
+	// command, so its CQE can be told apart from a straggler's;
+	// ctrlCancelTagBase marks the ASYNC_CANCEL sent for one.
+	ctrlTagBase       = uint64(0xC7) << 56
+	ctrlCancelTagBase = uint64(0xC8) << 56
+	ctrlTagSeqMask    = 1<<56 - 1
+	// defaultCtrlCancelGrace bounds the wait for a cancelled control command
+	// to finish before it is abandoned.
+	defaultCtrlCancelGrace = time.Second
 	// ctrlScratchSize holds the largest buffer a ublksrv_ctrl_cmd can describe
 	// (len is a u16).
 	ctrlScratchSize = 64 << 10
@@ -70,9 +77,10 @@ func (h *AsyncHandle) Wait(timeout time.Duration) (Result, error) {
 // (ublk_ctrl_uring_cmd rejects control commands in smaller ones with EINVAL)
 // and 32-byte CQEs.
 type minimalRing struct {
-	core        *IoUring
-	targetFd    int
-	ctrlTimeout time.Duration
+	core            *IoUring
+	targetFd        int
+	ctrlTimeout     time.Duration
+	ctrlCancelGrace time.Duration
 	// Pre-allocated so the I/O hot path does not allocate.
 	resultsPool []Result
 	cqePool     []minimalResult
@@ -110,11 +118,12 @@ func newMinimalRing(config Config) (*minimalRing, error) {
 	}
 	poolSize := max(int(core.CQEntries()), 64)
 	r := &minimalRing{
-		core:        core,
-		targetFd:    int(config.FD),
-		ctrlTimeout: config.CtrlTimeout,
-		resultsPool: make([]Result, 0, poolSize),
-		cqePool:     make([]minimalResult, poolSize),
+		core:            core,
+		targetFd:        int(config.FD),
+		ctrlTimeout:     config.CtrlTimeout,
+		ctrlCancelGrace: defaultCtrlCancelGrace,
+		resultsPool:     make([]Result, 0, poolSize),
+		cqePool:         make([]minimalResult, poolSize),
 	}
 	if r.ctrlTimeout == 0 {
 		r.ctrlTimeout = defaultCtrlTimeout
@@ -183,33 +192,53 @@ func (r *minimalRing) Close() error {
 	return nil
 }
 
-// SubmitCtrlCmd submits one ublk control command and waits for its CQE.
+// SubmitCtrlCmd submits one ublk control command and waits for its CQE; it
+// is SubmitCtrlCmdContext without a context.
+func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
+	return r.SubmitCtrlCmdContext(context.Background(), cmd, ctrlCmd, userData)
+}
+
+// SubmitCtrlCmdContext submits one ublk control command and waits for its CQE.
 //
 // Buffer contract: ctrlCmd.Addr and ctrlCmd.Len describe the command's data
 // buffer (input, output or both; Len includes any dev_path prefix). ublk
 // runs most control commands on an io-wq worker that reads and writes that
-// buffer asynchronously, so SubmitCtrlCmd never hands the kernel the
-// caller's memory (Critical Bug #21): it copies the Len bytes at Addr into
-// ring-owned off-heap memory, points the SQE at the copy, and copies it back
-// to Addr once the CQE has been reaped, whatever its result. The caller's
-// buffer must be heap or off-heap memory, not a stack variable (its address
-// travels as an integer, which the runtime does not update when it moves a
-// stack), and must stay reachable (runtime.KeepAlive) until SubmitCtrlCmd
-// returns. Addr 0 or Len 0 means no buffer. *ctrlCmd itself is copied into
-// the SQE before submission and may live anywhere.
+// buffer asynchronously, so the kernel is never handed the caller's memory
+// (Critical Bug #21): the Len bytes at Addr are copied into ring-owned
+// off-heap memory, the SQE points at the copy, and it is copied back to Addr
+// once the CQE has been reaped, whatever its result. The caller's buffer must
+// be heap or off-heap memory, not a stack variable (its address travels as an
+// integer, which the runtime does not update when it moves a stack), and must
+// stay reachable (runtime.KeepAlive) until the call returns. Addr 0 or Len 0
+// means no buffer. *ctrlCmd itself is copied into the SQE before submission
+// and may live anywhere.
 //
-// The wait is bounded by Config.CtrlTimeout: 10s by default (Critical Bug
-// #8), unbounded if negative. If SubmitCtrlCmd stops waiting after the
-// command was submitted (deadline, Close, or a failed wait) the error wraps
+// Cancelling ctx cancels the command: an IORING_OP_ASYNC_CANCEL interrupts it
+// (a command blocked on an io-wq worker gets a signal, so interruptible waits
+// such as END_USER_RECOVERY's end with -EINTR), and the call keeps waiting up
+// to a second for its CQE. If the CQE is reaped, the command is finished and
+// its buffer copied back: the call returns the Result, whose Value says what
+// the kernel did (the command may have completed before the cancel landed),
+// together with an error wrapping ErrCtrlCanceled and ctx.Err(). A ctx that is
+// already done returns ctx.Err() without submitting.
+//
+// The wait is also bounded by Config.CtrlTimeout: 10s by default (Critical
+// Bug #8), unbounded if negative; the deadline does not cancel. To bound a
+// command and still reap it, use a ctx deadline with CtrlTimeout < 0. If the
+// call stops waiting before the CQE is reaped (deadline, Close, a failed wait,
+// or a cancelled command that ignores the cancel) the error wraps
 // ErrCtrlTimeout: the command may still execute. Its staging buffer is then
 // abandoned, never reused or unmapped, so a late kernel write lands nowhere
 // live, and its eventual CQE is recognised by an internal user_data tag and
-// discarded by the next command. Errors before submission never wrap
-// ErrCtrlTimeout.
+// discarded by the next command. Errors before submission wrap neither.
 //
 // Not safe for concurrent use: one command at a time per ring.
 // Result.UserData returns userData.
-func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
+func (r *minimalRing) SubmitCtrlCmdContext(ctx context.Context, cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd,
+	userData uint64) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !r.acquire() {
 		return nil, ErrRingClosed
 	}
@@ -237,7 +266,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 		*addr = uint64(uintptr(unsafe.Pointer(&r.ctrlScratch[0])))
 	}
 	r.ctrlSeq++
-	tag := ctrlTagBase | r.ctrlSeq&(1<<56-1)
+	tag := ctrlTagBase | r.ctrlSeq&ctrlTagSeqMask
 	sqe := r.core.GetSQE128()
 	if sqe == nil {
 		return nil, fmt.Errorf("submit control command %#x: %w", cmd, ErrRingFull)
@@ -249,8 +278,8 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 		r.core.withdrawUnsubmitted()
 		return nil, fmt.Errorf("io_uring_enter submit failed: %w", err)
 	}
-	res, err := r.waitCtrlCompletion(tag)
-	if err != nil {
+	res, reaped, err := r.waitCtrlCompletion(ctx, tag)
+	if !reaped {
 		if user != nil {
 			r.ctrlScratch = nil // abandoned to the in-flight command; leaked on purpose
 		}
@@ -263,41 +292,87 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	if res < 0 {
 		result.err = fmt.Errorf("operation failed with result: %d", res)
 	}
-	return result, nil
+	return result, err
 }
 
-// waitCtrlCompletion waits for the CQE tagged tag, discarding any other
-// (a straggler from an abandoned command). It re-waits across EINTR and
-// empty bounded wakeups until the CQE arrives, the deadline passes or the
-// ring is closed. UBLK_F_URING_CMD_COMP_IN_TASK defers control completions
-// to task work, so one io_uring_enter can return before the CQE is posted.
-func (r *minimalRing) waitCtrlCompletion(tag uint64) (int32, error) {
+// waitCtrlCompletion waits for the CQE tagged tag. reaped reports whether it
+// was consumed; err is non-nil if the wait was cut short (ErrCtrlTimeout) or
+// the command cancelled (ErrCtrlCanceled, with reaped true). It re-waits
+// across EINTR and empty bounded wakeups: UBLK_F_URING_CMD_COMP_IN_TASK defers
+// control completions to task work, so one io_uring_enter can return before
+// the CQE is posted.
+func (r *minimalRing) waitCtrlCompletion(ctx context.Context, tag uint64) (int32, bool, error) {
 	var deadline time.Time
 	if r.ctrlTimeout > 0 {
 		deadline = time.Now().Add(r.ctrlTimeout)
 	}
 	for {
-		for cqe := r.core.PeekCQE(); cqe != nil; cqe = r.core.PeekCQE() {
-			userData, res := cqe.UserData, cqe.Res
-			r.core.CQESeen()
-			if userData == tag {
-				return res, nil
-			}
-			logging.Default().Warn("discarded stale control completion", "user_data", userData, "res", res)
+		if res, ok := r.reapCtrl(tag); ok {
+			return res, true, nil
+		}
+		if cause := ctx.Err(); cause != nil {
+			return r.cancelCtrl(tag, cause)
 		}
 		if r.closing.Load() {
-			return 0, fmt.Errorf("ring closed while waiting for control command completion: %w", ErrCtrlTimeout)
+			return 0, false, fmt.Errorf("ring closed while waiting for control command completion: %w", ErrCtrlTimeout)
 		}
 		wait := ctrlWaitSlice
 		if !deadline.IsZero() {
 			left := time.Until(deadline)
 			if left <= 0 {
-				return 0, fmt.Errorf("no control command completion after %s: %w", r.ctrlTimeout, ErrCtrlTimeout)
+				return 0, false, fmt.Errorf("no control command completion after %s: %w", r.ctrlTimeout, ErrCtrlTimeout)
 			}
 			wait = min(wait, left)
 		}
 		if err := r.core.WaitCQEs(1, wait); err != nil && err != unix.ETIME {
-			return 0, fmt.Errorf("io_uring_enter wait failed: %w (%w)", err, ErrCtrlTimeout)
+			return 0, false, fmt.Errorf("io_uring_enter wait failed: %w (%w)", err, ErrCtrlTimeout)
+		}
+	}
+}
+
+// reapCtrl consumes ready CQEs until it finds the one tagged tag. Others
+// are stragglers of abandoned commands or the CQEs of cancel requests.
+func (r *minimalRing) reapCtrl(tag uint64) (int32, bool) {
+	for cqe := r.core.PeekCQE(); cqe != nil; cqe = r.core.PeekCQE() {
+		userData, res := cqe.UserData, cqe.Res
+		r.core.CQESeen()
+		if userData == tag {
+			return res, true
+		}
+		if userData&^ctrlTagSeqMask != ctrlCancelTagBase {
+			logging.Default().Warn("discarded stale control completion", "user_data", userData, "res", res)
+		}
+	}
+	return 0, false
+}
+
+// cancelCtrl asks the kernel to cancel the command tagged tag and waits up to
+// ctrlCancelGrace for its CQE. The cancel's own CQE (0, -ENOENT if the
+// command already finished, -EALREADY if it was running and got signalled)
+// is discarded: only the command's CQE says how it ended.
+func (r *minimalRing) cancelCtrl(tag uint64, cause error) (int32, bool, error) {
+	sqe := r.core.GetSQE128()
+	if sqe == nil {
+		return 0, false, fmt.Errorf("no SQE to cancel the control command (%w): %w", cause, ErrCtrlTimeout)
+	}
+	PrepCancel(&sqe.SQE, tag, 0)
+	sqe.UserData = ctrlCancelTagBase | tag&ctrlTagSeqMask
+	if _, err := r.core.Submit(); err != nil {
+		r.core.withdrawUnsubmitted()
+		return 0, false, fmt.Errorf("submit control command cancel: %w (%w, %w)", err, cause, ErrCtrlTimeout)
+	}
+	deadline := time.Now().Add(r.ctrlCancelGrace)
+	for {
+		if res, ok := r.reapCtrl(tag); ok {
+			return res, true, fmt.Errorf("control command cancelled (%w): %w", cause, ErrCtrlCanceled)
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			return 0, false, fmt.Errorf("control command still running %s after cancel (%w): %w",
+				r.ctrlCancelGrace, cause, ErrCtrlTimeout)
+		}
+		if err := r.core.WaitCQEs(1, min(ctrlWaitSlice, left)); err != nil && err != unix.ETIME {
+			return 0, false, fmt.Errorf("io_uring_enter wait failed: %w (%w, %w)", err, cause, ErrCtrlTimeout)
 		}
 	}
 }
