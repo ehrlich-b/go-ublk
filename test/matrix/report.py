@@ -5,6 +5,10 @@
                    --kinfo F --fetch F --commit-file F
       Turn one guest's console.log + results.log into OUTDIR/run.json.
 
+  report.py reparse RUNDIR [RUNDIR ...]
+      Re-derive every run.json under RUNDIR from its saved logs (after a
+      classifier change, e.g. a new entry in KNOWN_KERNEL_BUGS).
+
   report.py aggregate RUNDIR [RUNDIR ...] --out DIR [--manifest kernels.json]
       Merge run.json files (a later RUNDIR wins per id), add fetch-failed
       kernels from the manifest, and write DIR/matrix.json (the docs-site
@@ -22,6 +26,17 @@ OOPS_RE = re.compile(r"(Oops[:\s]|BUG: |kernel BUG at|general protection fault|U
                      r"KASAN:|UBSAN:|Kernel panic|soft lockup|blocked for more than \d+ seconds|"
                      r"refcount_t: |list_add corruption|list_del corruption)")
 WARN_RE = re.compile(r"WARNING: CPU: \d+ PID: \d+ at (\S+)")
+# Kernel reports already root-caused as kernel bugs that are not go-ublk's
+# fault: (name, regex for the report line, regex that must also appear in the
+# kernel log, note). Matching lines are recorded, not counted as an oops.
+KNOWN_KERNEL_BUGS = [
+    ("io_uring-counted_by-ubsan",
+     re.compile(r"UBSAN: array-index-out-of-bounds in \S*io_uring/rsrc\.c"),
+     re.compile(r"io_buffer_register_bvec"),
+     "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring "
+     "io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md"
+     "#found-by-go-ublks-kernel-matrix)"),
+]
 MARK = "@@GOUBLK@@ "
 SUMMARY_KEYS = ("pass", "fail", "skip", "error")
 
@@ -77,7 +92,9 @@ def cmd_parse(a):
     kinfo = load(a.kinfo, {})
     fetch = load(a.fetch, {})
     commit = ""
-    if os.path.exists(a.commit_file):
+    if getattr(a, "commit", ""):
+        commit = a.commit
+    elif os.path.exists(a.commit_file):
         commit = open(a.commit_file).read().strip()
 
     meta, results = {}, []
@@ -118,7 +135,14 @@ def cmd_parse(a):
     if a.oops_in_dmesg_only:
         m = re.search(r"@@GOUBLK-DMESG-BEGIN@@\n(.*?)@@GOUBLK-DMESG-END@@", console, re.S)
         klog = m.group(1) if m else ""
-    oops_lines = [l.strip() for l in klog.splitlines() if OOPS_RE.search(l) and MARK not in l]
+    all_oops = [l.strip() for l in klog.splitlines() if OOPS_RE.search(l) and MARK not in l]
+    known, oops_lines = {}, []
+    for l in all_oops:
+        bug = next((b for b in KNOWN_KERNEL_BUGS if b[1].search(l) and b[2].search(klog)), None)
+        if bug:
+            known.setdefault(bug[0], []).append(l)
+        else:
+            oops_lines.append(l)
     warns = sorted({m.group(1) for m in WARN_RE.finditer(klog)})
     oops = bool(oops_lines)
     if oops:
@@ -126,6 +150,10 @@ def cmd_parse(a):
         excerpt = klog[idx:idx + 1200]
         results.append({"test": "kernel-log", "status": "fail", "duration_s": 0.0,
                         "detail": f"{len(oops_lines)} oops/hang line(s); first: {excerpt}"})
+    for name, lines in known.items():
+        note = next(b[3] for b in KNOWN_KERNEL_BUGS if b[0] == name)
+        results.append({"test": f"kernel-log/{name}", "status": "skip", "duration_s": 0.0,
+                        "detail": f"{note}; {len(lines)} line(s), first: {lines[0]}"})
 
     # A guest OOM kill is the harness's fault (MEM too small for the payload),
     # and whatever test it hit failed for that reason: say so explicitly.
@@ -171,7 +199,7 @@ def cmd_parse(a):
         "arch": meta.get("machine", "x86_64"),
         "boot": a.boot,
         "accel": a.accel,
-        "date": now(),
+        "date": getattr(a, "date", "") or now(),
         "ublk_drv": has_ublk,
         # Only a hex bitmask: the docs site decodes this field numerically.
         "features": probe.get("features", "") if str(probe.get("features", "")).startswith("0x") else "",
@@ -195,11 +223,38 @@ def cmd_parse(a):
             "config": kinfo.get("config", {}),
             "warnings": warns,
             "oops_lines": oops_lines[:20],
+            "known_kernel_bugs": {k: v[:4] for k, v in known.items()},
             "version": fetch.get("version", ""),
         },
     }
     with open(os.path.join(a.outdir, "run.json"), "w") as f:
         json.dump(run, f, indent=1)
+
+
+def cmd_reparse(a):
+    """Re-derive run.json from the saved logs, e.g. after a classifier change."""
+    kernels = os.path.join(os.environ.get("MATRIX_HOME", os.path.expanduser("~/goublk-matrix")), "cache", "kernels")
+    for d in a.rundirs:
+        for p in sorted(glob.glob(os.path.join(d, "*", "run.json"))):
+            old = load(p)
+            if not old:
+                continue
+            det = old.get("detail", {})
+            outdir = os.path.dirname(p)
+            base = re.split(r"[~+]", old["id"])[0]
+            kdir = os.path.join(kernels, base)
+            fetch = os.path.join(kdir, "fetch.json")
+            if not os.path.exists(fetch):
+                fetch = os.path.join(outdir, "fetch.json")
+            ns = argparse.Namespace(
+                outdir=outdir, id=old["id"], rc=det.get("qemu_rc", 0), wall=det.get("wall_s", 0),
+                accel=old.get("accel", "tcg"), timeout=det.get("timeout_s") or 0,
+                kinfo=os.path.join(kdir, "kinfo.json"), fetch=fetch, commit_file="",
+                commit=det.get("go_ublk_commit", ""), date=old.get("date", ""), boot=old.get("boot", "initramfs"),
+                append=det.get("extra_append", ""), oops_in_dmesg_only=old.get("accel") == "native",
+                hung_poweroff=any(x["test"] == "poweroff" for x in old.get("results", [])))
+            cmd_parse(ns)
+            print(f"reparsed {old['id']}")
 
 
 SCHEMA_KEYS = ("id", "family", "distro", "kernel", "upstream", "arch", "boot", "accel", "date",
@@ -324,13 +379,15 @@ def main():
     p.add_argument("--kinfo", default="")
     p.add_argument("--fetch", default="")
     p.add_argument("--commit-file", default="")
+    rp = sub.add_parser("reparse")
+    rp.add_argument("rundirs", nargs="+")
     g = sub.add_parser("aggregate")
     g.add_argument("rundirs", nargs="+")
     g.add_argument("--out", required=True)
     g.add_argument("--manifest", default="")
     g.add_argument("--commit", default="", help="go_ublk_commit to record (default: from the runs)")
     a = ap.parse_args()
-    {"parse": cmd_parse, "aggregate": cmd_aggregate}[a.cmd](a)
+    {"parse": cmd_parse, "aggregate": cmd_aggregate, "reparse": cmd_reparse}[a.cmd](a)
 
 
 if __name__ == "__main__":

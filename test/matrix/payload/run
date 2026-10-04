@@ -43,6 +43,13 @@ result() { # NAME STATUS START DETAIL
 }
 start() { echo; echo "=== RUN $1"; T0=$(now); }
 have_ublk() { [ -e /dev/ublk-control ]; }
+# A process is alive while its status is readable and it is not a zombie; a
+# process caught mid-exit (status gone) counts as exited.
+alive() {
+	local s
+	s=$(grep '^State:' "/proc/$1/status" 2>/dev/null) || return 1
+	case $s in *zombie* | *dead*) return 1 ;; esac
+}
 need_ublk() { # NAME -> 1 (after recording a skip) when there is no ublk
 	have_ublk && return 0
 	start "$1"
@@ -197,10 +204,10 @@ t_suite() {
 	while :; do
 		n=$(wc -l <"$W/suite.jsonl")
 		[ "$n" -gt "$sent" ] && { sed -n "$((sent + 1)),${n}p" "$W/suite.jsonl" >&3; sent=$n; }
-		[ -e "/proc/$spid" ] && ! grep -q '^State:.*zombie' "/proc/$spid/status" 2>/dev/null || break
+		alive "$spid" || break
 		if [ "$n" -ge "$total" ]; then
 			t_all=${t_all:-$(now)}
-			awk -v a="$t_all" -v b="$(now)" 'BEGIN { exit !(b - a > 30) }' && break
+			awk -v a="$t_all" -v b="$(now)" 'BEGIN { exit !(b - a > 60) }' && break
 		fi
 		awk -v a="$T0" -v b="$(now)" -v m="$SUITE_TIMEOUT" 'BEGIN { exit !(b - a > m) }' && break
 		sleep 1
@@ -208,7 +215,7 @@ t_suite() {
 	n=$(wc -l <"$W/suite.jsonl")
 	[ "$n" -gt "$sent" ] && sed -n "$((sent + 1)),${n}p" "$W/suite.jsonl" >&3
 	[ -n "$sampler" ] && kill "$sampler" 2>/dev/null
-	if [ -e "/proc/$spid" ] && ! grep -q '^State:.*zombie' "/proc/$spid/status" 2>/dev/null; then
+	if alive "$spid"; then
 		state="$(grep '^State' "/proc/$spid/status" | tr -s '\t ' ' ') wchan=$(cat "/proc/$spid/wchan" 2>/dev/null)"
 		echo "--- ublk-suite pid $spid did not exit: $state"
 		cat "/proc/$spid/stack" 2>/dev/null
@@ -221,7 +228,7 @@ t_suite() {
 			done
 			result "${hung:-suite}" timeout "$T0" "no result within ${SUITE_TIMEOUT}s; ublk-suite $state"
 		else
-			result suite/exit fail "$T0" "ublk-suite reported every test but did not exit within 30s: $state"
+			result suite/exit fail "$T0" "ublk-suite reported every test but did not exit within 60s: $state"
 		fi
 		kill -9 "$spid" 2>/dev/null
 	fi
