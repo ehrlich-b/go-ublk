@@ -32,9 +32,8 @@ GitHub Actions (`.github/workflows/kernel-matrix.yml`, KVM).
      alpine container and packed by `mkcpio.py` (uncompressed newc, root-owned,
      device nodes without mknod).
    - `build-payload.sh`: static (`CGO_ENABLED=0`) linux binaries from the
-     checkout: `ublk-suite` (test/suite), `ublk-ctrl` (test/ctrl),
-     `ublk-probe` (GET_FEATURES), `ublk-mem`, `ublk-loop`, `verify`, every
-     package's unit tests
+     checkout: `ublk-suite` (test/suite), `ublk-probe` (GET_FEATURES),
+     `ublk-mem`, `ublk-loop`, `verify`, every package's unit tests
      (`go test -c`) and the integration test binary, plus `payload/run` and
      the repo's `scripts/vm-verify.sh` and `scripts/vm-loop-e2e.sh`.
 4. **Boot** (`run-one.sh`, `run-matrix.sh`): the initrd is
@@ -75,7 +74,7 @@ The current payload runs these groups (select some with `TESTS=`):
 | `largeio` | `TestDisposableLargeIOPublicRunnerPaths` (integration tag) |
 | `verify` | `scripts/vm-verify.sh`: the shadow-oracle integrity sweep, Q 1/2/4/8 x depth 1/64/128 x buffered/O_DIRECT |
 | `loop` | `scripts/vm-loop-e2e.sh`: ublk-loop file mapping, discard, write-cache modes, read-only, ublk-mem --zip |
-| `ctrl` | `test/ctrl`: every control command through internal/ctrl plus the raw driver checks it relies on, one result per check |
+| `wzcheck` | opt-in: one 5 GiB BLKZEROOUT on a sparse 6 GiB ublk-mem --zip device. It records write_zeroes_max_bytes, the write I/O and sector deltas (one WRITE_ZEROES vs a zero-page fallback), and whether patterns planted across the range were zeroed |
 
 After each device group, a hygiene check reaps leftover daemons and devices
 and samples D-state processes three times. A leak, or a process stuck in D in

@@ -3,10 +3,11 @@
 // Command ublk-probe reports what the running kernel's ublk driver offers, as
 // one JSON object on stdout, for the kernel matrix: the UBLK_U_CMD_GET_FEATURES
 // bitmask (raw and decoded), whether the kernel answered the ioctl-encoded or
-// only the legacy opcode, and the loaded module's srcversion.
+// only the legacy opcode, the loaded module's srcversion, and what the public
+// ublk.Probe() reports.
 //
-// The library has no GET_FEATURES call of its own, so this drives a control
-// ring directly through internal/uring.
+// The raw probe drives a control ring directly through internal/uring, so it
+// is an independent check of the library's own answer.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	ublk "github.com/ehrlich-b/go-ublk"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
@@ -45,6 +47,9 @@ type report struct {
 	Opcode     string   `json:"opcode,omitempty"`
 	Srcversion string   `json:"srcversion,omitempty"`
 	Error      string   `json:"error,omitempty"`
+	// What the public ublk.Probe() says, as a cross-check of the raw probe
+	// above and to record the library's own error text.
+	Library string `json:"library"`
 }
 
 func getFeatures(ring uring.Ring, op uint32) (uint64, error) {
@@ -87,6 +92,11 @@ func main() {
 		r.Srcversion = strings.TrimSpace(string(b))
 	}
 	r.Features = "unknown"
+	if ks, err := ublk.Probe(); err != nil {
+		r.Library = "error: " + err.Error()
+	} else {
+		r.Library = fmt.Sprintf("features 0x%x known=%v", uint64(ks.Features), ks.Known)
+	}
 	defer func() {
 		out, _ := json.Marshal(r)
 		fmt.Println(string(out))

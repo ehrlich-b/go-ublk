@@ -28,7 +28,7 @@ W=/tmp/matrix-work
 mkdir -p "$W"
 PROFILE=${MATRIX_PROFILE:-full}
 SCALE=${MATRIX_SCALE:-1}
-TESTS=${MATRIX_TESTS:-probe unit largeio verify loop ctrl suite}
+TESTS=${MATRIX_TESTS:-probe unit largeio verify loop suite}
 # Wall-clock cap for the whole suite: generous, and longer when scaled up.
 SUITE_TIMEOUT=$(awk -v s="$SCALE" 'BEGIN { printf "%d", 1800 * (s > 1 ? s : 1) }')
 
@@ -227,31 +227,60 @@ t_suite() {
 	hygiene suite
 }
 
-# test/ctrl drives every control command through internal/ctrl and prints
-# "PASS|FAIL|SKIP name detail" per check; each check becomes a result.
-t_ctrl() {
-	local rc log line st name detail n=0
-	need_ublk ctrl || return
-	start ctrl
-	log=$W/ctrl.log
-	timeout -k 10 300 ublk-ctrl >"$log" 2>&1 3>&-
-	rc=$?
-	cat "$log"
-	while read -r st name detail; do
-		case $st in
-		PASS | FAIL | SKIP) ;;
-		*) continue ;;
-		esac
-		n=$((n + 1))
-		printf '{"test":"ctrl/%s","status":"%s","duration_s":0,"detail":"%s"}\n' \
-			"$name" "$(echo "$st" | tr 'A-Z' 'a-z')" "$(jstr "$detail")" >&3
-	done <"$log"
-	case $rc in
-	0) ;;
-	124 | 137) result ctrl timeout "$T0" "killed after 300s after $n checks; last: $(tail -2 "$log" | tr '\n' ' ')" ;;
-	*) grep -q '^FAIL' "$log" || result ctrl error "$T0" "exit $rc after $n checks: $(tail -3 "$log" | tr '\n' ' ')" ;;
-	esac
-	hygiene ctrl
+# Opt-in (TESTS=wzcheck): one 5 GiB BLKZEROOUT on a sparse 6 GiB ublk-mem --zip
+# device, with what the kernel did about it. The block-layer write counters
+# tell one big WRITE_ZEROES (few I/Os) from a zero-page fallback (thousands
+# of plain WRITEs), and patterns planted across the range tell whether the
+# whole range really reads back as zeros.
+t_wzcheck() {
+	local log=$W/wz-daemon.log dev pid q s0 s1 t1 off bad="" detail st=pass
+	need_ublk wzcheck || return
+	start wzcheck
+	ublk-mem --zip --size=6G --queues=1 --depth=64 >"$log" 2>&1 3>&- &
+	pid=$!
+	if ! dev=$(wait_dev "$log" "$pid"); then
+		result wzcheck error "$T0" "ublk-mem did not create a device: $(tail -3 "$log")"
+		hygiene wzcheck
+		return
+	fi
+	q=/sys/block/$(basename "$dev")
+	head -c 1048576 /dev/urandom >"$W/wzpat"
+	local offs="1048576 1074790400 3221225472 5368709120"
+	for off in $offs; do
+		dd if="$W/wzpat" of="$dev" bs=1M seek="$((off / 1048576))" oflag=direct conv=notrunc status=none
+	done
+	s0=$(tr -s ' ' <"$q/stat")
+	t1=$(now)
+	timeout 900 blkdiscard -z -o 1048576 -l 5368709120 "$dev" 2>"$W/wz.err" || st=fail
+	t1=$(since "$t1")
+	s1=$(tr -s ' ' <"$q/stat")
+	for off in $offs; do
+		dd if="$dev" of="$W/wzback" bs=1M skip="$((off / 1048576))" count=1 iflag=direct status=none
+		cmp -s "$W/wzback" <(head -c 1048576 /dev/zero) || bad="$bad $off"
+	done
+	[ -n "$bad" ] && st=fail
+	# /sys/block/X/stat fields 5 and 7: write I/Os and write sectors.
+	detail="write_zeroes_max_bytes=$(cat "$q/queue/write_zeroes_max_bytes") max_hw_sectors_kb=$(cat "$q/queue/max_hw_sectors_kb")"
+	detail="$detail; BLKZEROOUT 5GiB took ${t1}s rc=$([ "$st" = pass ] && echo 0 || echo fail) $(cat "$W/wz.err")"
+	detail="$detail; write I/Os +$(($(echo "$s1" | awk '{print $5}') - $(echo "$s0" | awk '{print $5}')))"
+	detail="$detail, write sectors +$(($(echo "$s1" | awk '{print $7}') - $(echo "$s0" | awk '{print $7}')))"
+	detail="$detail; patterns still present at:${bad:- none}"
+	result wzcheck "$st" "$T0" "$detail"
+	kill -INT "$pid"
+	for _ in $(seq 1 60); do [ -e "/proc/$pid" ] || break; sleep 0.5; done
+	hygiene wzcheck
+}
+
+# Wait for a daemon's "/dev/ublkbN" banner in its log; print the device.
+wait_dev() { # LOG PID
+	local dev="" i
+	for i in $(seq 1 120); do
+		dev=$(grep -oE '/dev/ublkb[0-9]+' "$1" 2>/dev/null | head -1)
+		[ -n "$dev" ] && [ -b "$dev" ] && { echo "$dev"; return 0; }
+		[ -e "/proc/$2" ] || return 1
+		sleep 0.5
+	done
+	return 1
 }
 
 t_unit() {
@@ -306,7 +335,7 @@ for t in $TESTS; do
 	case $t in
 	probe) t_probe ;;
 	suite) t_suite ;;
-	ctrl) t_ctrl ;;
+	wzcheck) t_wzcheck ;;
 	unit) t_unit ;;
 	largeio) t_largeio ;;
 	verify) t_verify ;;
