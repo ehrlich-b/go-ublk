@@ -264,7 +264,8 @@ func serverMain(args []string) {
 	fs := flag.NewFlagSet(serverSubcommand, flag.ExitOnError)
 	size := fs.Int64("size", 64<<20, "device size")
 	file := fs.String("file", "", "back the device with this file instead of RAM")
-	recovery := fs.Bool("recovery", false, "create with RecoveryReissue")
+	recovery := fs.Bool("recovery", false, "create with a RecoveryMode (see -recovery-mode)")
+	mode := fs.String("recovery-mode", "reissue", "with -recovery: reissue, queue or fail-io")
 	detach := fs.Bool("detach-on-usr1", false, "on SIGUSR1, Detach and exit 0")
 	unpriv := fs.Bool("unprivileged", false, "create an unprivileged device (run as a non-root user)")
 	batch := fs.Bool("batch", false, "serve with BatchIO")
@@ -291,7 +292,8 @@ func serverMain(args []string) {
 		params.BatchIO = true
 	}
 	if *recovery {
-		params.Recovery = ublk.RecoveryReissue
+		params.Recovery = map[string]ublk.RecoveryMode{"reissue": ublk.RecoveryReissue,
+			"queue": ublk.RecoveryQueue, "fail-io": ublk.RecoveryFailIO}[*mode]
 	}
 	if *unpriv {
 		params.EnableUnprivileged = true

@@ -90,6 +90,8 @@ func init() {
 	register("lifecycle/ctx-cancel-under-load", 2*time.Minute, testCtxCancelUnderLoad)
 	register("recovery/kill-and-recover", 3*time.Minute, testKillAndRecover)
 	register("recovery/detach-handoff", 3*time.Minute, testDetachHandoff)
+	register("recovery/queue-mode", 2*time.Minute, testQueueMode)
+	register("recovery/fail-io-mode", 2*time.Minute, testFailIOMode)
 	register("recovery/batch-kill-and-recover", 3*time.Minute, func(t *T) error {
 		if err := needFeatures(ublk.FeatureBatchIO); err != nil {
 			return err
@@ -544,6 +546,7 @@ func killAndRecover(t *T, extra ...string) error {
 	if err != nil {
 		return err
 	}
+	t.Cleanup(func() { _ = ublk.DeleteDevice(id) }) // if the test fails before Recover
 	dpath := fmt.Sprintf("/dev/ublkb%d", id)
 	if err := waitForNode(dpath, 5*time.Second); err != nil {
 		return err
@@ -602,6 +605,130 @@ func killAndRecover(t *T, extra ...string) error {
 	return nil
 }
 
+// crashIdleServer starts a file-backed server with the given RecoveryMode,
+// writes a pattern at offset 0 through it, SIGKILLs it while idle and waits
+// for the kernel to reach want. It returns the open block device, the
+// pattern, and what Recover needs. The caller closes the block device before
+// its cleanups run: DEL_DEV waits for the last opener.
+func crashIdleServer(t *T, mode string, want ublk.KernelDeviceState) (*os.File, []byte, string, uint32, error) {
+	const size = 16 << 20
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-%s-%d", mode, os.Getpid()))
+	t.Cleanup(func() { _ = os.Remove(path) })
+	cmd, id, err := startServer(t, size, "-file", path, "-recovery", "-recovery-mode", mode)
+	if err != nil {
+		return nil, nil, "", 0, err
+	}
+	t.Cleanup(func() { _ = ublk.DeleteDevice(id) }) // if the test fails before Recover
+	dpath := fmt.Sprintf("/dev/ublkb%d", id)
+	if err := waitForNode(dpath, 5*time.Second); err != nil {
+		return nil, nil, "", 0, err
+	}
+	f, err := os.OpenFile(dpath, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return nil, nil, "", 0, err
+	}
+	p := alignedBuf(64 << 10)
+	newRNG(91).fill(p)
+	if err := pwriteFull(int(f.Fd()), p, 0); err != nil {
+		f.Close()
+		return nil, nil, "", 0, fmt.Errorf("write before the crash: %w", err)
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	if err := waitKernelState(id, want, 30*time.Second); err != nil {
+		f.Close()
+		return nil, nil, "", 0, fmt.Errorf("after SIGKILL: %w", err)
+	}
+	return f, p, path, id, nil
+}
+
+func recoverFile(t *T, path string, id uint32) error {
+	b, err := openFileBackend(path, 16<<20)
+	if err != nil {
+		return err
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	dev, err := ublk.Recover(context.Background(), id, ublk.DefaultParams(b), nil)
+	if err != nil {
+		return fmt.Errorf("Recover: %w", err)
+	}
+	t.Cleanup(func() { _ = dev.Close() })
+	return nil
+}
+
+// testQueueMode: with RecoveryQueue, I/O issued while the server is gone is
+// held, not failed, and completes once a new server recovers the device.
+func testQueueMode(t *T) error {
+	if err := needFeatures(ublk.FeatureUserRecovery); err != nil {
+		return err
+	}
+	f, p, path, id, err := crashIdleServer(t, "queue", ublk.KernelStateQuiesced)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	done := make(chan error, 1)
+	go func() {
+		q := alignedBuf(len(p))
+		err := preadFull(int(f.Fd()), q, 0)
+		if err == nil && !bytes.Equal(p, q) {
+			err = fmt.Errorf("read back different data")
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return fmt.Errorf("a read with no server completed (%v); RecoveryQueue must hold it", err)
+	case <-time.After(time.Second):
+	}
+	if err := recoverFile(t, path, id); err != nil {
+		return err
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("held read after Recover: %w", err)
+		}
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("held read still blocked 30s after Recover")
+	}
+	return nil
+}
+
+// testFailIOMode: with RecoveryFailIO, I/O to a device whose server died
+// fails at once instead of waiting, and works again after Recover with the
+// data written before the crash intact.
+func testFailIOMode(t *T) error {
+	if err := needFeatures(ublk.FeatureUserRecovery | ublk.FeatureRecoveryFailIO); err != nil {
+		return err
+	}
+	f, p, path, id, err := crashIdleServer(t, "fail-io", ublk.KernelStateFailIO)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	q := alignedBuf(len(p))
+	start := time.Now()
+	if err := preadFull(int(f.Fd()), q, 0); err == nil {
+		return fmt.Errorf("a read with no server succeeded in FAIL_IO")
+	} else {
+		t.Logf("read in FAIL_IO failed after %s: %v", time.Since(start).Round(time.Millisecond), err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		return fmt.Errorf("a read in FAIL_IO took %s; it must fail at once", took)
+	}
+	if err := recoverFile(t, path, id); err != nil {
+		return err
+	}
+	if err := preadFull(int(f.Fd()), q, 0); err != nil {
+		return fmt.Errorf("read after Recover: %w", err)
+	}
+	if !bytes.Equal(p, q) {
+		return fmt.Errorf("data written before the crash changed")
+	}
+	return nil
+}
+
 // testDetachHandoff is a zero-downtime upgrade: the old server Detaches and
 // exits while a writer is busy, and this process Recovers the device. The
 // writer must see no error at all and every block must read back intact.
@@ -620,6 +747,7 @@ func detachHandoff(t *T, extra ...string) error {
 	if err != nil {
 		return err
 	}
+	t.Cleanup(func() { _ = ublk.DeleteDevice(id) }) // if the test fails before Recover
 	dpath := fmt.Sprintf("/dev/ublkb%d", id)
 	if err := waitForNode(dpath, 5*time.Second); err != nil {
 		return err
