@@ -29,6 +29,7 @@ func FuzzCtrlDecoders(f *testing.F) {
 			return controlTestResult(res), nil
 		}}
 		c := newTestController(ring)
+		defer c.Close() // each controller maps command pages; release them per input
 		padded := make([]byte, 4096)
 		copy(padded, reply)
 
