@@ -173,7 +173,8 @@ def cmd_parse(a):
         "accel": a.accel,
         "date": now(),
         "ublk_drv": has_ublk,
-        "features": probe.get("features", ""),
+        # Only a hex bitmask: the docs site decodes this field numerically.
+        "features": probe.get("features", "") if str(probe.get("features", "")).startswith("0x") else "",
         "oops": oops,
         "status": status,
         "results": results,

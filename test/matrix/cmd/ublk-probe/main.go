@@ -92,10 +92,12 @@ func main() {
 		r.Srcversion = strings.TrimSpace(string(b))
 	}
 	r.Features = "unknown"
+	libOldKernel := false
 	if ks, err := ublk.Probe(); err != nil {
 		r.Library = "error: " + err.Error()
 	} else {
 		r.Library = fmt.Sprintf("features 0x%x known=%v", uint64(ks.Features), ks.Known)
+		libOldKernel = !ks.Known
 	}
 	defer func() {
 		out, _ := json.Marshal(r)
@@ -127,7 +129,15 @@ func main() {
 		r.Opcode = "legacy"
 		if legacyErr != nil {
 			r.Opcode = ""
-			r.Error = errors.Join(fmt.Errorf("ioctl-encoded: %w", err), fmt.Errorf("legacy: %w", legacyErr)).Error()
+			msg := errors.Join(fmt.Errorf("ioctl-encoded: %w", err), fmt.Errorf("legacy: %w", legacyErr)).Error()
+			if libOldKernel {
+				// GET_FEATURES arrived in 6.5; before that there is nothing to
+				// ask, and the library agrees. That is a fact, not a failure.
+				r.Features = "none"
+				r.Library += "; kernel has no GET_FEATURES (" + strings.ReplaceAll(msg, "\n", "; ") + ")"
+				return
+			}
+			r.Error = msg
 			return
 		}
 	}
