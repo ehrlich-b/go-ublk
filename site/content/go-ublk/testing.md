@@ -24,6 +24,7 @@ A block device that returns the wrong bytes is worse than one that returns error
 | Crash consistency | SIGKILL the daemon mid-write, recover, verify | `make vm-crash` |
 | Power-fail consistency | Hard-reset the VM (`sysrq-b`) mid-write, reboot, verify | `make vm-powerfail` |
 | Shutdown storm | Normal reboot with a mounted ext4 under load; hunts for oopses, lost writeback and wedged reboots | `make vm-shutdown-storm` |
+| Soak | Hours of crc32c-verified fio on ext4 through the shipped systemd units; a crash or an upgrade handoff every few minutes in the first half, then the server's RSS and open fds sampled for leaks; ends with `e2fsck` and a clean stop. A selftest first proves the verifier catches one corrupted block | `make vm-soak` |
 | Stress and performance | Alternating e2e and benchmark runs; fio against a loop baseline | `make vm-stress`, `make vm-benchmark` |
 
 ### The crash oracle
