@@ -76,7 +76,7 @@ The server owns everything else, and in particular three obligations that are ea
 |---|---|---|
 | Hardware queues per device | 4096 (`UBLK_MAX_NR_QUEUES`), and at most the number of CPU IDs | `ADD_DEV` clamps `nr_hw_queues` to `nr_cpu_ids` and returns the result |
 | Tags per queue | 4096 (`UBLK_MAX_QUEUE_DEPTH`) | `ADD_DEV` rejects 0 or more than 4096 |
-| Bytes per request | `max_io_buf_bytes` from `ADD_DEV`, rounded down to a page. The user-copy address space allows 32 MiB per tag (`UBLK_IO_BUF_BITS` = 25) | <!-- VERIFY: whether any kernel version caps max_io_buf_bytes at 32 MiB at ADD_DEV; 6.17 only rounds it down to PAGE_SIZE --> |
+| Bytes per request | `max_io_buf_bytes` from `ADD_DEV`, rounded down to a page | `ADD_DEV` applies no other cap (6.17, 7.3-rc5); the user-copy offset encoding leaves 25 bits (32 MiB) per tag |
 | Sector unit | 512 bytes, always | Descriptors and parameters count 512-byte sectors |
 | Logical block size | 512 bytes to `PAGE_SIZE`, power of two | `SET_PARAMS` validation |
 | Device IDs | 0 to 2<sup>20</sup> - 1 | Minor-number space; unprivileged devices are further capped by the `ublks_max` module parameter |

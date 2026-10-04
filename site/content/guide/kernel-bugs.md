@@ -98,7 +98,7 @@ The `dev_info` fix is a reminder for servers too: zero `struct ublksrv_ctrl_dev_
 
 - **Ubuntu on AWS.** It ships in `linux-modules-extra-*-aws`, not in the base AWS kernel image. Without that package there is no `/dev/ublk-control`: install `linux-modules-extra-$(uname -r)`.
 - **WSL2.** Microsoft's WSL2 kernel (6.6.87.2-microsoft-standard-WSL2 at the time of writing) is built without `ublk_drv`. Test in a VM.
-- **Not loaded.** The module is not auto-loaded on first open of `/dev/ublk-control`. <!-- VERIFY: whether ublk_drv declares a devname/misc alias that lets udev create /dev/ublk-control and autoload the module --> Run `modprobe ublk_drv`, or list it in `/etc/modules-load.d/`.
+- **Not loaded.** The module is not auto-loaded on first open of `/dev/ublk-control`: the control node is a misc device with a dynamic minor and the driver declares no device-name alias (checked in 6.17 and 7.3-rc5), so `/dev/ublk-control` only exists once the module is loaded. Run `modprobe ublk_drv`, or list it in `/etc/modules-load.d/`.
 
 `modinfo ublk_drv` tells you whether the module exists for the running kernel; `ls -l /dev/ublk-control` whether it is loaded.
 

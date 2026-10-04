@@ -52,7 +52,7 @@ The kernel copies `dev_path_len` bytes from `addr`, stopping at the first NUL, r
 - the path names a character device whose device number is this ublk device's char node, otherwise `-EPERM`;
 - the caller passes `inode_permission` on it: read access for `GET_DEV_INFO`, `GET_DEV_INFO2`, `GET_QUEUE_AFFINITY`, `GET_PARAMS` and `GET_FEATURES`; read and write access for `START_DEV`, `STOP_DEV`, `DEL_DEV`, `SET_PARAMS`, `START_USER_RECOVERY`, `END_USER_RECOVERY`, `UPDATE_SIZE` and `QUIESCE_DEV`.
 
-If both pass, the kernel advances `addr` and shrinks `len` by `dev_path_len` before running the command, so the payload must start exactly `dev_path_len` bytes in. Commands without a payload (`START_DEV`, `STOP_DEV`, `DEL_DEV`) still carry the path, with `len == dev_path_len`. A command code that is not in either list fails with `-EINVAL` on an unprivileged device; in the 6.17 driver that includes `DEL_DEV_ASYNC`. <!-- VERIFY: which command codes newer kernels (7.0+: TRY_STOP_DEV, REG_BUF, UNREG_BUF) accept in the unprivileged permission switch -->
+If both pass, the kernel advances `addr` and shrinks `len` by `dev_path_len` before running the command, so the payload must start exactly `dev_path_len` bytes in. Commands without a payload (`START_DEV`, `STOP_DEV`, `DEL_DEV`) still carry the path, with `len == dev_path_len`. 7.3-rc5 adds `TRY_STOP_DEV`, `REG_BUF` and `UNREG_BUF` to the read-and-write list. A command code that is not in either list fails with `-EINVAL` on an unprivileged device; in both 6.17 and 7.3-rc5 that includes `DEL_DEV_ASYNC`.
 
 Two commands never carry the path: `ADD_DEV`, because the device does not exist yet, and `UBLK_U_CMD_GET_FEATURES`, which the kernel answers before looking up any device.
 

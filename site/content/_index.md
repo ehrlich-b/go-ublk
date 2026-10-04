@@ -15,15 +15,15 @@ heroLinks:
 
 <div class="cards">
 <a class="card" href="/guide/">
-<h3>The ublk guide</h3>
+<p class="card-title">The ublk guide</p>
 <p>Architecture, every control command, the FETCH and COMMIT data plane, copy modes and zero copy, batch I/O, user recovery, and which kernel added what. Language-agnostic.</p>
 </a>
 <a class="card" href="/go-ublk/">
-<h3>go-ublk</h3>
+<p class="card-title">go-ublk</p>
 <p>Implement a small <code>Backend</code> interface shaped like <code>io.ReaderAt</code> and <code>io.WriterAt</code>, and get a <code>/dev/ublkbN</code>. The library handles io_uring, the kernel protocol and the device lifecycle.</p>
 </a>
 <a class="card" href="/reference/">
-<h3>Reference</h3>
+<p class="card-title">Reference</p>
 <p>The full kernel UAPI surface with the release that introduced each item and its go-ublk status, plus a compatibility matrix of test runs per kernel.</p>
 </a>
 </div>
