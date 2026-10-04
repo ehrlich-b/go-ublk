@@ -17,16 +17,6 @@ import (
 // Minimal io_uring structures for URING_CMD operations only
 // Based on kernel include/uapi/linux/io_uring.h
 
-const (
-	IORING_SETUP_SQE128 = 1 << 10
-	IORING_SETUP_CQE32  = 1 << 11
-
-	// io_uring mmap offsets
-	IORING_OFF_SQ_RING = 0
-	IORING_OFF_CQ_RING = 0x8000000
-	IORING_OFF_SQES    = 0x10000000
-)
-
 // SQE128 structure for URING_CMD
 // With SQE128 enabled, the cmd area for URING_CMD is 80 bytes starting at byte 48
 // The kernel UAPI says: "If IORING_SETUP_SQE128, this field is 80 bytes" for io_uring_sqe.cmd
