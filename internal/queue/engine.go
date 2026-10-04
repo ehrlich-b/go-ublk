@@ -101,8 +101,9 @@ type engineConfig struct {
 	bufSize      int
 	userCopy     bool // UBLK_F_USER_COPY: data moves by pread/pwrite on charFd
 	zeroCopy     *zeroCopyConfig
-	batch        bool // UBLK_F_BATCH_IO
-	zoned        bool // batch elements carry the zone-append LBA
+	batch        bool          // UBLK_F_BATCH_IO
+	zoned        bool          // batch elements carry the zone-append LBA
+	shmem        *SharedMemory // UBLK_F_SHMEM_ZC regions, or nil
 	// UBLK_F_INTEGRITY: per-tag metadata buffers of integSize bytes, holding
 	// integMeta bytes per integInterval bytes of data.
 	integ         unsafe.Pointer
@@ -700,7 +701,20 @@ func (e *engine) dispatch(i int) {
 		r.NrZones = d.NrSectors
 		r.Length = min(int64(d.NrSectors)*BlkZoneSize, int64(e.cfg.bufSize))
 	}
-	if r.Op.carriesData() {
+	if r.Flags&FlagSharedMemory != 0 {
+		// The request's pages are in a region we registered: no copy either
+		// way, Data is that memory.
+		var ok bool
+		if e.cfg.shmem != nil {
+			r.Data, ok = e.cfg.shmem.slice(d.Addr, r.Length)
+		}
+		if !ok {
+			r.state.Store(reqAsync)
+			r.Complete(fmt.Errorf("shared-memory request at %#x+%d is outside every registered region: %w",
+				d.Addr, r.Length, syscall.EIO))
+			return
+		}
+	} else if r.Op.carriesData() {
 		if r.Length > int64(e.cfg.bufSize) {
 			r.state.Store(reqAsync)
 			r.Complete(fmt.Errorf("%d-byte request exceeds the %d-byte tag buffer: %w",
@@ -749,7 +763,7 @@ func (e *engine) call(r *Request) {
 			}
 		}
 	}()
-	if e.cfg.userCopy && r.Data != nil && (r.Op == OpWrite || r.Op == OpZoneAppend) {
+	if e.cfg.userCopy && r.Data != nil && r.Flags&FlagSharedMemory == 0 && (r.Op == OpWrite || r.Op == OpZoneAppend) {
 		if err := e.copyIn(r); err != nil {
 			r.Complete(err)
 			return
@@ -801,7 +815,7 @@ func (e *engine) copyOut(r *Request, n int) error {
 // beforeCommit runs on the completing goroutine, before the request is handed
 // back to the engine: a user-copy read's data goes to the kernel here.
 func (e *engine) beforeCommit(r *Request) {
-	if e.cfg.userCopy && r.result > 0 && (r.Op == OpRead || r.Op == OpReportZones) {
+	if e.cfg.userCopy && r.result > 0 && r.Flags&FlagSharedMemory == 0 && (r.Op == OpRead || r.Op == OpReportZones) {
 		if err := e.copyOut(r, int(r.result)); err != nil {
 			r.result = -Errno(err)
 		} else if r.Integrity != nil {

@@ -48,20 +48,21 @@ func TestConvertFieldSetCompleteness(t *testing.T) {
 	// Public fields that reach the kernel by another route, each covered by
 	// TestConvertFeatureFlags or used by the data plane rather than ctrl.
 	elsewhere := map[string]string{
-		"Backend":            "typed Backend vs interfaces.Backend; forwarded via DefaultDeviceParams",
-		"Handler":            "data plane only",
-		"Inline":             "data plane only",
-		"ThreadsPerQueue":    "data plane, plus UBLK_F_PER_IO_DAEMON in Flags",
-		"SafeStop":           "selects TRY_STOP_DEV in Stop",
-		"Recovery":           "UBLK_F_USER_RECOVERY* in Flags",
-		"NeedGetData":        "UBLK_F_NEED_GET_DATA in Flags",
-		"NoPartitionScan":    "UBLK_F_NO_AUTO_PART_SCAN in Flags",
-		"Tag":                "UblksrvFlags",
-		"HandlerDiscard":     "CanDiscard",
-		"HandlerWriteZeroes": "CanWriteZeroes",
-		"Zoned":              "ZoneSectors and the zoned limits",
-		"Integrity":          "a uapi.UblkParamIntegrity built from it",
-		"BatchIO":            "UBLK_F_BATCH_IO in Flags",
+		"Backend":              "typed Backend vs interfaces.Backend; forwarded via DefaultDeviceParams",
+		"Handler":              "data plane only",
+		"Inline":               "data plane only",
+		"ThreadsPerQueue":      "data plane, plus UBLK_F_PER_IO_DAEMON in Flags",
+		"SafeStop":             "selects TRY_STOP_DEV in Stop",
+		"Recovery":             "UBLK_F_USER_RECOVERY* in Flags",
+		"NeedGetData":          "UBLK_F_NEED_GET_DATA in Flags",
+		"NoPartitionScan":      "UBLK_F_NO_AUTO_PART_SCAN in Flags",
+		"Tag":                  "UblksrvFlags",
+		"HandlerDiscard":       "CanDiscard",
+		"HandlerWriteZeroes":   "CanWriteZeroes",
+		"Zoned":                "ZoneSectors and the zoned limits",
+		"Integrity":            "a uapi.UblkParamIntegrity built from it",
+		"BatchIO":              "UBLK_F_BATCH_IO in Flags",
+		"SharedMemoryZeroCopy": "UBLK_F_SHMEM_ZC in Flags",
 	}
 	for f := range pubFields {
 		if _, ok := elsewhere[f]; ok {

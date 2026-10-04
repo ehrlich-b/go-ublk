@@ -16,6 +16,8 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/ehrlich-b/go-ublk"
 )
 
@@ -1080,5 +1082,100 @@ func testIntegrity(t *T) error {
 	if err := preadFull(fd, one, 1<<20+16384); err != nil {
 		return fmt.Errorf("an intact block failed to read after another was corrupted: %w", err)
 	}
+	return nil
+}
+
+func init() {
+	register("features/shared-memory", 2*time.Minute, testSharedMemory)
+}
+
+// shmemProbe records whether requests arrived through shared memory.
+type shmemProbe struct {
+	*memBackend
+	region []byte
+	hits   atomic.Int64
+}
+
+func (s *shmemProbe) HandleRequest(r *ublk.Request) {
+	if r.Flags&ublk.FlagSharedMemory != 0 && len(r.Data) > 0 {
+		lo := uintptr(unsafe.Pointer(&s.region[0]))
+		p := uintptr(unsafe.Pointer(&r.Data[0]))
+		if p >= lo && p < lo+uintptr(len(s.region)) {
+			s.hits.Add(1)
+		}
+	}
+	var err error
+	switch r.Op {
+	case ublk.OpRead:
+		_, err = s.ReadAt(r.Data, r.Offset)
+	case ublk.OpWrite:
+		_, err = s.WriteAt(r.Data, r.Offset)
+	case ublk.OpFlush:
+	default:
+		err = syscall.EOPNOTSUPP
+	}
+	r.Complete(err)
+}
+
+// testSharedMemory: O_DIRECT I/O from a buffer inside a registered memfd
+// mapping reaches the handler with FlagSharedMemory and Data aliasing that
+// mapping, and the bytes are right in both directions.
+func testSharedMemory(t *T) error {
+	if err := needFeatures(ublk.FeatureSharedMemoryZC); err != nil {
+		return err
+	}
+	const regionSize = 4 << 20
+	fd, err := unix.MemfdCreate("ublk-suite-shm", unix.MFD_CLOEXEC)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := unix.Ftruncate(fd, regionSize); err != nil {
+		return err
+	}
+	region, err := unix.Mmap(fd, 0, regionSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return err
+	}
+	defer unix.Munmap(region)
+
+	probe := &shmemProbe{memBackend: newMemBackend(16 << 20), region: region}
+	params := ublk.DefaultParams(nil)
+	params.Backend, params.Handler, params.Size = nil, probe, 16<<20
+	params.NumQueues, params.QueueDepth = 1, 16
+	params.SharedMemoryZeroCopy = true
+	dev, err := newDevice(t, params)
+	if err != nil {
+		return err
+	}
+	if _, err := dev.RegisterSharedMemory(region, false); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	src := region[64<<10 : 128<<10]
+	newRNG(31).fill(src)
+	if err := pwriteFull(int(f.Fd()), src, 1<<20); err != nil {
+		return fmt.Errorf("write from the shared region: %w", err)
+	}
+	got := make([]byte, len(src))
+	if _, err := probe.ReadAt(got, 1<<20); err != nil || !bytes.Equal(got, src) {
+		return fmt.Errorf("backend did not receive the shared-memory write")
+	}
+	dst := region[1<<20 : 1<<20+len(src)]
+	clear(dst)
+	if err := preadFull(int(f.Fd()), dst, 1<<20); err != nil {
+		return fmt.Errorf("read into the shared region: %w", err)
+	}
+	if !bytes.Equal(dst, src) {
+		return fmt.Errorf("read into the shared region returned different bytes")
+	}
+	if probe.hits.Load() == 0 {
+		return fmt.Errorf("no request arrived through shared memory (FlagSharedMemory with Data in the region)")
+	}
+	t.Logf("%d requests served zero-copy from shared memory", probe.hits.Load())
 	return nil
 }

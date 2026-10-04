@@ -47,6 +47,7 @@ type Device struct {
 	charFd    int
 	runners   []*queue.Queue
 	handler   Handler
+	shmem     queue.SharedMemory
 	unwatch   chan struct{} // closed to stop the supervisors
 	// leaving is set before an orderly stop or detach is asked of the
 	// kernel, whose queues may then exit before the request returns; the
@@ -126,6 +127,13 @@ type DeviceParams struct {
 	// data (UBLK_F_NEED_GET_DATA). Supported for completeness; it costs a round
 	// trip per write and buys nothing with go-ublk's fixed per-tag buffers.
 	NeedGetData bool
+
+	// SharedMemoryZeroCopy lets the device skip copies for requests whose
+	// pages lie in memory registered with Device.RegisterSharedMemory
+	// (UBLK_F_SHMEM_ZC, kernel 7.1+): such requests arrive with
+	// FlagSharedMemory and Data pointing into that memory. Not with
+	// EnableZeroCopy.
+	SharedMemoryZeroCopy bool
 
 	// BatchIO fetches and commits requests many at a time per command
 	// (UBLK_F_BATCH_IO, kernel 7.0+) instead of one command per request.
@@ -333,6 +341,9 @@ func validateParams(params *DeviceParams) error {
 			return fmt.Errorf("Integrity: MetadataSize %d must be 1..255 and IntervalSize %d a power of two from 512 to LogicalBlockSize",
 				ip.MetadataSize, iv)
 		}
+	}
+	if params.SharedMemoryZeroCopy && params.EnableZeroCopy {
+		return fmt.Errorf("SharedMemoryZeroCopy cannot be combined with EnableZeroCopy")
 	}
 	if params.BatchIO && (params.EnableZeroCopy || params.NeedGetData || params.ThreadsPerQueue > 1) {
 		return fmt.Errorf("BatchIO cannot be combined with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1")
@@ -740,6 +751,7 @@ func (d *Device) startQueues() error {
 
 			IntegrityInterval: d.integrityInterval(),
 			IntegrityMetadata: d.integrityMetadata(),
+			SharedMemory:      &d.shmem,
 		})
 		if err == nil {
 			d.runners = append(d.runners, q)
@@ -1245,6 +1257,9 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	}
 	if params.BatchIO {
 		flags |= uapi.UBLK_F_BATCH_IO
+	}
+	if params.SharedMemoryZeroCopy {
+		flags |= uapi.UBLK_F_SHMEM_ZC
 	}
 	ctrlParams.Flags = flags
 	return ctrlParams

@@ -42,7 +42,9 @@ type QueueConfig struct {
 	// metadata: bytes of metadata per interval of data. Zero: none.
 	IntegrityInterval int
 	IntegrityMetadata int
-	Logger            interfaces.Logger
+	// SharedMemory holds the regions registered for UBLK_F_SHMEM_ZC.
+	SharedMemory *SharedMemory
+	Logger       interfaces.Logger
 
 	newRing func(entries uint32) (ring, error) // tests substitute a fake kernel
 }
@@ -188,6 +190,7 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 			zeroCopy:      zc,
 			batch:         cfg.Flags&uapi.UBLK_F_BATCH_IO != 0,
 			zoned:         cfg.Flags&uapi.UBLK_F_ZONED != 0,
+			shmem:         cfg.SharedMemory,
 			integ:         integPtr,
 			integSize:     integSize,
 			integInterval: cfg.IntegrityInterval,

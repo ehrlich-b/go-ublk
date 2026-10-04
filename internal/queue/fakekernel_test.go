@@ -230,6 +230,7 @@ type fkReq struct {
 	nr     uint32
 	data   []byte // payload for writes
 	id     int
+	shm    uint64 // shared-memory zero copy: descriptor address (index<<32|off); no copy
 }
 
 type fkCommit struct {
@@ -452,7 +453,7 @@ func (k *fakeKernel) uringCmd(sqe *uring.SQE) {
 			return
 		}
 		c := fkCommit{tag: uint16(tag), id: ts.cur.id, op: ts.cur.op, result: cmd.Result, addr: cmd.Addr}
-		if ts.cur.op == uapi.UBLK_IO_OP_READ && cmd.Result > 0 && k.bufTable == 0 {
+		if ts.cur.op == uapi.UBLK_IO_OP_READ && cmd.Result > 0 && k.bufTable == 0 && ts.cur.shm == 0 {
 			c.data = make([]byte, cmd.Result)
 			if k.ufile >= 0 {
 				_, _ = unix.Pread(k.ufile, c.data, userCopyPos(0, uint16(tag), 0))
@@ -541,6 +542,13 @@ func (k *fakeKernel) deliver(tag int) {
 	atomic.StoreUint32((*uint32)(unsafe.Add(base, 4)), r.nr)
 	atomic.StoreUint64((*uint64)(unsafe.Add(base, 8)), r.sector)
 	atomic.StoreUint64((*uint64)(unsafe.Add(base, 16)), ts.addr)
+	if r.shm != 0 {
+		atomic.StoreUint32((*uint32)(base), uint32(r.op)|r.flags|uint32(FlagSharedMemory))
+		atomic.StoreUint64((*uint64)(unsafe.Add(base, 16)), r.shm)
+		ts.state = fkOwned
+		k.post(ts.ud, uapi.UBLK_IO_RES_OK)
+		return
+	}
 	if r.op == uapi.UBLK_IO_OP_WRITE && k.needGetData {
 		ts.state = fkGetData
 		k.post(ts.ud, uapi.UBLK_IO_RES_NEED_GET_DATA)

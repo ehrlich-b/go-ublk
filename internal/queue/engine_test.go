@@ -558,3 +558,51 @@ func TestEngineBatchCopy(t *testing.T)           { testBatch(t, false, false, 0)
 func TestEngineBatchCopyInline(t *testing.T)     { testBatch(t, true, false, 0) }
 func TestEngineBatchUserCopy(t *testing.T)       { testBatch(t, false, true, 0) }
 func TestEngineBatchPartialCommits(t *testing.T) { testBatch(t, false, false, 1) }
+
+// TestEngineSharedMemory: a request flagged UBLK_IO_F_SHMEM_ZC gets Data
+// pointing into the registered region at the descriptor's offset, and one
+// outside every region fails.
+func TestEngineSharedMemory(t *testing.T) {
+	k := newFakeKernel(t, 2, testBufSize)
+	region := make([]byte, 1<<20)
+	copy(region[8192:], pattern(4096, 7))
+	shm := &SharedMemory{}
+	shm.Add(3, region)
+	var gotData []byte
+	h := HandlerFunc(func(r *Request) {
+		if r.Flags&FlagSharedMemory != 0 && r.Op == OpWrite {
+			gotData = r.Data
+		}
+		if r.Op == OpRead && r.Flags&FlagSharedMemory != 0 {
+			copy(r.Data, pattern(len(r.Data), 9)) // "read" straight into the region
+		}
+		r.Complete(nil)
+	})
+	e := newEngine(engineConfig{
+		tagLo: 0, tagHi: 2, charFd: -1, desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
+		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize, shmem: shm,
+		handler: h, inline: true, cpu: -1, waitInterval: 20 * time.Millisecond,
+		newRing: func(uint32) (ring, error) { return k, nil },
+	})
+	if err := e.start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { e.abandon(); <-e.done })
+	k.inject(0, fkReq{op: uapi.UBLK_IO_OP_WRITE, nr: 8, shm: 3<<32 | 8192, id: 1})
+	k.inject(1, fkReq{op: uapi.UBLK_IO_OP_READ, nr: 8, shm: 3<<32 | 65536, id: 2})
+	k.inject(0, fkReq{op: uapi.UBLK_IO_OP_WRITE, nr: 8, shm: 9<<32 | 0, id: 3})
+	c := k.waitCommits(3, 5*time.Second)
+	byID := map[int]int32{}
+	for _, x := range c {
+		byID[x.id] = x.result
+	}
+	if byID[1] != 4096 || byID[2] != 4096 || byID[3] != -int32(syscall.EIO) {
+		t.Fatalf("results %v", byID)
+	}
+	if &gotData[0] != &region[8192] {
+		t.Fatalf("shared-memory write's Data does not alias the registered region")
+	}
+	if !bytes.Equal(region[65536:65536+4096], pattern(4096, 9)) {
+		t.Fatalf("shared-memory read did not land in the region")
+	}
+}
