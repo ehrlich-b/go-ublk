@@ -43,10 +43,12 @@ type Device struct {
 	depth     int
 	blockSize int
 	maxIO     int
+	descSize  int    // dev_info.io_desc_size (24 unless UBLK_F_IO_DESC_SIZE)
 	flags     uint64 // negotiated UBLK_F_* features
 	charFd    int
 	runners   []*queue.Queue
 	handler   Handler
+	shmem     queue.SharedMemory
 	unwatch   chan struct{} // closed to stop the supervisors
 	// leaving is set before an orderly stop or detach is asked of the
 	// kernel, whose queues may then exit before the request returns; the
@@ -116,10 +118,33 @@ type DeviceParams struct {
 	// devices always use user copy.
 	Zoned ZonedParams
 
+	// Integrity gives every block integrity metadata (kernel 7.0+, needs
+	// CONFIG_BLK_DEV_INTEGRITY). Requests then carry Request.Integrity; a
+	// Backend must implement IntegrityBackend. User copy is turned on
+	// automatically, as the kernel requires.
+	Integrity *IntegrityParams
+
 	// NeedGetData makes the kernel ask for a write's buffer before copying its
 	// data (UBLK_F_NEED_GET_DATA). Supported for completeness; it costs a round
 	// trip per write and buys nothing with go-ublk's fixed per-tag buffers.
 	NeedGetData bool
+
+	// IODescSize requests I/O descriptors larger than the standard 24 bytes
+	// (UBLK_F_IO_DESC_SIZE, kernel 7.3+): 24..256, a multiple of 8. The extra
+	// bytes reach a Handler as Request.DescriptorExtra. 0 leaves the default.
+	IODescSize int
+
+	// SharedMemoryZeroCopy lets the device skip copies for requests whose
+	// pages lie in memory registered with Device.RegisterSharedMemory
+	// (UBLK_F_SHMEM_ZC, kernel 7.1+): such requests arrive with
+	// FlagSharedMemory and Data pointing into that memory. Not with
+	// EnableZeroCopy.
+	SharedMemoryZeroCopy bool
+
+	// BatchIO fetches and commits requests many at a time per command
+	// (UBLK_F_BATCH_IO, kernel 7.0+) instead of one command per request.
+	// Not with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1.
+	BatchIO bool
 
 	// NoPartitionScan stops the kernel scanning the device for a partition
 	// table when it starts (UBLK_F_NO_AUTO_PART_SCAN, kernel 7.0+).
@@ -189,6 +214,39 @@ type ZonedParams struct {
 	// MaxZoneAppendSize is the largest zone append in bytes (0: MaxIOSize).
 	MaxZoneAppendSize int
 }
+
+// IntegrityParams describes per-block integrity metadata
+// (UBLK_PARAM_TYPE_INTEGRITY). With a checksum type the kernel's block layer
+// generates protection information on write and verifies it on read; the
+// server only stores and returns the metadata.
+type IntegrityParams struct {
+	// MetadataSize is the metadata bytes per interval (required).
+	MetadataSize int
+	// IntervalSize is the data bytes each metadata entry covers: a power of
+	// two from 512 to LogicalBlockSize (0: LogicalBlockSize).
+	IntervalSize int
+	// Checksum is the protection-information format, IntegrityCsum*.
+	Checksum IntegrityCsum
+	// RefTag checks the reference tag (the low 32 bits of the block number),
+	// as in T10 Type 1 protection; needs a checksum.
+	RefTag bool
+	// PIOffset is where the protection tuple starts within the metadata.
+	PIOffset int
+	// TagSize is the size of an application tag, if any.
+	TagSize int
+	// MaxIntegritySegments limits metadata segments per request (0: none).
+	MaxIntegritySegments uint16
+}
+
+// IntegrityCsum selects the protection-information checksum.
+type IntegrityCsum uint8
+
+const (
+	IntegrityCsumNone      IntegrityCsum = uapi.LBMD_PI_CSUM_NONE         // metadata only
+	IntegrityCsumIP        IntegrityCsum = uapi.LBMD_PI_CSUM_IP           // IP checksum, 8-byte tuple
+	IntegrityCsumCRC16     IntegrityCsum = uapi.LBMD_PI_CSUM_CRC16_T10DIF // T10-DIF CRC16, 8-byte tuple
+	IntegrityCsumCRC64NVMe IntegrityCsum = uapi.LBMD_PI_CSUM_CRC64_NVME   // NVMe CRC64, 16-byte tuple
+)
 
 // RecoveryMode selects what happens to a device whose server exits without
 // deleting it (a crash, or Device.Detach). With any mode but RecoveryNone the
@@ -271,6 +329,33 @@ func validateParams(params *DeviceParams) error {
 		if params.EnableZeroCopy || params.EnableUnprivileged {
 			return fmt.Errorf("EnableZoned cannot be combined with EnableZeroCopy or EnableUnprivileged")
 		}
+	}
+	if ip := params.Integrity; ip != nil {
+		if params.Handler == nil {
+			if _, ok := params.Backend.(IntegrityBackend); !ok {
+				return fmt.Errorf("Integrity needs a Handler or a Backend that implements IntegrityBackend")
+			}
+		}
+		if params.EnableZeroCopy || params.EnableUnprivileged {
+			return fmt.Errorf("Integrity cannot be combined with EnableZeroCopy or EnableUnprivileged")
+		}
+		iv := ip.IntervalSize
+		if iv == 0 {
+			iv = params.LogicalBlockSize
+		}
+		if ip.MetadataSize < 1 || ip.MetadataSize > 255 || iv < uapi.SectorSize || iv > params.LogicalBlockSize || iv&(iv-1) != 0 {
+			return fmt.Errorf("Integrity: MetadataSize %d must be 1..255 and IntervalSize %d a power of two from 512 to LogicalBlockSize",
+				ip.MetadataSize, iv)
+		}
+	}
+	if d := params.IODescSize; d != 0 && (d < 24 || d > 256 || d%8 != 0) {
+		return fmt.Errorf("IODescSize is %d; must be 0, or 24..256 and a multiple of 8", d)
+	}
+	if params.SharedMemoryZeroCopy && params.EnableZeroCopy {
+		return fmt.Errorf("SharedMemoryZeroCopy cannot be combined with EnableZeroCopy")
+	}
+	if params.BatchIO && (params.EnableZeroCopy || params.NeedGetData || params.ThreadsPerQueue > 1) {
+		return fmt.Errorf("BatchIO cannot be combined with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1")
 	}
 	if params.Recovery < RecoveryNone || params.Recovery > RecoveryFailIO {
 		return fmt.Errorf("Recovery is %d; not a RecoveryMode", params.Recovery)
@@ -512,7 +597,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 
 	controller, err := createController()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create controller: %w", err)
+		return nil, fmt.Errorf("failed to create controller: %w", explainControlError(err))
 	}
 	defer controller.Close()
 
@@ -548,6 +633,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	}
 
 	d := newDevice(deviceID, params, options, deviceInfo.Flags)
+	d.descSize = descSizeOf(deviceInfo)
 	if options.Logger != nil {
 		options.Logger.Printf("Device created: %s (ID: %d) - call Start() to begin I/O", d.Path, d.ID)
 	}
@@ -672,6 +758,11 @@ func (d *Device) startQueues() error {
 			Logger:       d.options.Logger,
 			ZeroCopyFile: zcFile,
 			ZeroCopyBase: zcBase,
+
+			DescSize:          d.descSize,
+			IntegrityInterval: d.integrityInterval(),
+			IntegrityMetadata: d.integrityMetadata(),
+			SharedMemory:      &d.shmem,
 		})
 		if err == nil {
 			d.runners = append(d.runners, q)
@@ -683,6 +774,32 @@ func (d *Device) startQueues() error {
 		}
 	}
 	return nil
+}
+
+// descSizeOf is the descriptor stride the kernel uses for a device.
+func descSizeOf(info *uapi.UblksrvCtrlDevInfo) int {
+	if info.Flags&uapi.UBLK_F_IO_DESC_SIZE != 0 && info.IODescSize >= 24 {
+		return int(info.IODescSize)
+	}
+	return 24
+}
+
+func (d *Device) integrityInterval() int {
+	ip := d.params.Integrity
+	if ip == nil || d.flags&uapi.UBLK_F_INTEGRITY == 0 {
+		return 0
+	}
+	if ip.IntervalSize > 0 {
+		return ip.IntervalSize
+	}
+	return d.blockSize
+}
+
+func (d *Device) integrityMetadata() int {
+	if d.integrityInterval() == 0 {
+		return 0
+	}
+	return d.params.Integrity.MetadataSize
 }
 
 // openCharDevice opens /dev/ublkcN, waiting briefly for the node to appear and
@@ -1110,6 +1227,7 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	ctrlParams.IOMinSize = params.IOMinSize
 	ctrlParams.IOOptSize = params.IOOptSize
 	ctrlParams.DMAAlignment = params.DMAAlignment
+	ctrlParams.IODescSize = uint16(params.IODescSize)
 
 	if params.EnableZoned {
 		ctrlParams.EnableUserCopy = true // the kernel requires it for zoned devices
@@ -1123,6 +1241,30 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 		ctrlParams.MaxZoneAppendSectors = uint32(appendMax / uapi.SectorSize)
 	}
 
+	if ip := params.Integrity; ip != nil {
+		ctrlParams.EnableUserCopy = true // the kernel requires it for integrity
+		iv := ip.IntervalSize
+		if iv == 0 {
+			iv = params.LogicalBlockSize
+		}
+		var capFlags uint32
+		if ip.Checksum != IntegrityCsumNone {
+			capFlags |= uapi.LBMD_PI_CAP_INTEGRITY
+		}
+		if ip.RefTag {
+			capFlags |= uapi.LBMD_PI_CAP_REFTAG
+		}
+		ctrlParams.Integrity = &uapi.UblkParamIntegrity{
+			Flags:                capFlags,
+			MaxIntegritySegments: ip.MaxIntegritySegments,
+			IntervalExp:          uint8(sizeShift(iv)),
+			MetadataSize:         uint8(ip.MetadataSize),
+			PIOffset:             uint8(ip.PIOffset),
+			CsumType:             uint8(ip.Checksum),
+			TagSize:              uint8(ip.TagSize),
+		}
+	}
+
 	flags := params.Recovery.flags()
 	if params.NeedGetData {
 		flags |= uapi.UBLK_F_NEED_GET_DATA
@@ -1133,8 +1275,22 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	if params.ThreadsPerQueue > 1 {
 		flags |= uapi.UBLK_F_PER_IO_DAEMON
 	}
+	if params.BatchIO {
+		flags |= uapi.UBLK_F_BATCH_IO
+	}
+	if params.SharedMemoryZeroCopy {
+		flags |= uapi.UBLK_F_SHMEM_ZC
+	}
 	ctrlParams.Flags = flags
 	return ctrlParams
+}
+
+func sizeShift(n int) int {
+	s := 0
+	for ; n > 1; n >>= 1 {
+		s++
+	}
+	return s
 }
 
 // fuaHonored reports whether the server acts on per-I/O FUA: a Handler is

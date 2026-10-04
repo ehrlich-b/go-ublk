@@ -282,10 +282,15 @@ func testConcurrentCreate(t *T) error {
 // return promptly (STOP_DEV drains in-flight I/O through the still-running
 // queues), the writers must see errors rather than hang, and the device must
 // be gone afterwards (Critical Bug #8).
-func testCloseUnderLoad(t *T) error {
+func testCloseUnderLoad(t *T) error { return closeUnderLoad(t, nil) }
+
+func closeUnderLoad(t *T, mutate func(*ublk.DeviceParams)) error {
 	mark := kmsgMark()
 	params, _ := memParams(64 << 20)
 	params.NumQueues, params.QueueDepth = 4, 64
+	if mutate != nil {
+		mutate(&params)
+	}
 	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
 	if err != nil {
 		return err

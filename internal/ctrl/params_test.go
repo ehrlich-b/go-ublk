@@ -216,3 +216,42 @@ func TestParamStructSizesMatchUAPI(t *testing.T) {
 		t.Errorf("sizeof(ublk_param_discard) = %d, want 20", got)
 	}
 }
+
+// TestRangeLimitsFitA32BitRequest pins the fix for silent partial zeroouts:
+// kernels before 6.11 put a whole write-zeroes request in one bio whose byte
+// count is 32 bits, so the advertised limits must stay under 4 GiB.
+func TestRangeLimitsFitA32BitRequest(t *testing.T) {
+	for _, lbs := range []int{512, 1024, 4096} {
+		p := DefaultDeviceParams(&wzBackend{})
+		p.LogicalBlockSize = lbs
+		d, ok := discardParams(&p)
+		if !ok {
+			t.Fatalf("lbs %d: no discard block", lbs)
+		}
+		for name, v := range map[string]uint32{"discard": d.MaxDiscardSectors, "write-zeroes": d.MaxWriteZeroesSectors} {
+			if uint64(v)<<9 > 1<<32-1 {
+				t.Errorf("lbs %d: max %s %d sectors = %d bytes, does not fit 32 bits", lbs, name, v, uint64(v)<<9)
+			}
+			if v%uint32(lbs/512) != 0 || v == 0 {
+				t.Errorf("lbs %d: max %s %d sectors is not a positive multiple of the block", lbs, name, v)
+			}
+		}
+	}
+	// A caller's smaller limit is kept.
+	p := DefaultDeviceParams(&wzBackend{})
+	p.MaxDiscardSectors = 2048
+	if d, _ := discardParams(&p); d.MaxWriteZeroesSectors != 2048 {
+		t.Errorf("explicit 2048-sector limit became %d", d.MaxWriteZeroesSectors)
+	}
+}
+
+// wzBackend implements both range interfaces.
+type wzBackend struct{}
+
+func (wzBackend) ReadAt(p []byte, off int64) (int, error)  { return len(p), nil }
+func (wzBackend) WriteAt(p []byte, off int64) (int, error) { return len(p), nil }
+func (wzBackend) Size() int64                              { return 1 << 30 }
+func (wzBackend) Close() error                             { return nil }
+func (wzBackend) Flush() error                             { return nil }
+func (wzBackend) Discard(off, n int64) error               { return nil }
+func (wzBackend) WriteZeroes(off, n int64) error           { return nil }

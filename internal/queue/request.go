@@ -96,6 +96,14 @@ type Request struct {
 	// where to put the bytes read for OpRead. Nil for operations without data
 	// and in zero-copy mode, where the bytes never pass through the server.
 	Data []byte
+	// Integrity is the request's integrity metadata (FlagIntegrity, on a
+	// device with integrity parameters): what to store for a write, where to
+	// put the stored metadata for a read. MetadataSize bytes per interval.
+	Integrity []byte
+	// DescriptorExtra is the part of the kernel's I/O descriptor beyond the
+	// standard 24 bytes, on a device created with a larger IODescSize
+	// (UBLK_F_IO_DESC_SIZE, kernel 7.3+); nil otherwise. Read-only.
+	DescriptorExtra []byte
 
 	e      *engine
 	state  atomic.Uint32

@@ -129,6 +129,8 @@ test-uapi-fuzz:
 		-run='^$$' -fuzz='^FuzzUAPIEncodings$$' -fuzztime=$(FUZZ_TIME) ./internal/uapi
 	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
 		-run='^$$' -fuzz='^FuzzCtrlDecoders$$' -fuzztime=$(FUZZ_TIME) ./internal/ctrl
+	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
+		-run='^$$' -fuzz='^FuzzEngine$$' -fuzztime=$(FUZZ_TIME) ./internal/queue
 
 test-integration:
 	@echo "Running integration tests (requires root and ublk kernel support)..."

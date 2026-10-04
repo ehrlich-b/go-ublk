@@ -130,6 +130,17 @@ A panic in a backend method is recovered: the request fails with `EIO` and, with
 
 Failed operations are counted in [metrics](/go-ublk/lifecycle/#metrics) and reported to an `Observer` with `success == false`.
 
+## Integrity metadata
+
+With `DeviceParams.Integrity`, every block carries metadata (for example an 8-byte T10-DIF tuple per 512 bytes). Implement `IntegrityBackend`:
+
+```go
+func (b *store) WriteIntegrity(meta []byte, off int64) error // metadata for the blocks at off
+func (b *store) ReadIntegrity(meta []byte, off int64) error  // return what was stored
+```
+
+`WriteAt`/`ReadAt` still move the data; these move the metadata for the same range. With a checksum type configured, the kernel generates the protection information on write and verifies it on read, so a backend only has to store it faithfully — a tuple returned wrong fails that block's read with `EILSEQ`. For blocks that were never written, return all `0xff` bytes, the T10 escape value that turns checking off for them; otherwise reading them (even the kernel's own partition scan) fails verification. A `Handler` sees the same metadata as `Request.Integrity`.
+
 ## Zero copy
 
 A backend that stores the device linearly in a file or block device can skip the copy entirely. Implement `ZeroCopyBackend`:

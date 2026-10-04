@@ -428,6 +428,18 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     new device. (The Arch oops is a kernel bug worth reporting upstream.)
 
 
+
+24. **[FIXED — 2026-10-04] On kernels before 6.11, a zeroout of 4 GiB or more succeeded but
+    zeroed only the length mod 4 GiB.** Found by the kernel matrix: `blkdiscard -z -o 1M -l 5G`
+    exited 0, the disk stats showed one 1 GiB write-zeroes, and data planted at 1 GiB, 3 GiB and
+    5 GiB was still there — on mainline 6.4, 6.6, 6.9, 6.10, openSUSE Leap 15.6 and Ubuntu's 6.8 (the
+    default noble kernel). go-ublk advertised `max_write_zeroes_sectors = 0xffffffff`; pre-6.11
+    `__blkdev_issue_write_zeroes` builds the whole request in one bio when it fits the limit and
+    stores `nr_sects << 9` in the 32-bit `bi_size`, so 5 GiB became 1 GiB and the call returned
+    success. The advertised discard and write-zeroes limits are now capped at `UINT32_MAX >> 9`
+    rounded down to the logical block; the suite's range tests also check data at the end of the
+    range. Correct on 6.11.11, 7.0.14 and 7.0.0-38 before and after the fix.
+
 ---
 
 ## Production Roadmap (BCDR use)

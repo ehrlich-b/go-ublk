@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/ctrl"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
@@ -73,11 +75,19 @@ func Probe() (KernelSupport, error) {
 // explainControlError adds the usual cause to errors opening the control
 // plane.
 func explainControlError(err error) error {
+	var errno syscall.Errno
+	errors.As(err, &errno)
 	switch {
-	case errors.Is(err, os.ErrNotExist):
+	case errno == syscall.ENOENT:
 		return fmt.Errorf("%w (is the ublk_drv module loaded? try: modprobe ublk_drv)", err)
-	case errors.Is(err, syscall.EPERM) && !errors.Is(err, os.ErrPermission):
-		return fmt.Errorf("%w (io_uring may be disabled: check sysctl kernel.io_uring_disabled)", err)
+	case errno == syscall.EPERM && strings.Contains(err.Error(), "io_uring"):
+		// io_uring_setup itself was refused: the RHEL 10 family ships with
+		// kernel.io_uring_disabled set. (syscall.EPERM also matches
+		// os.ErrPermission, so test the errno itself.)
+		return fmt.Errorf("%w (io_uring is disabled: set sysctl kernel.io_uring_disabled=0, "+
+			"or 1 with this process in kernel.io_uring_group)", err)
+	case errno == syscall.EACCES || errno == syscall.EPERM:
+		return fmt.Errorf("%w (creating ublk devices needs root or CAP_SYS_ADMIN, or EnableUnprivileged with udev rules)", err)
 	}
 	return err
 }
@@ -311,6 +321,7 @@ func Recover(ctx context.Context, id uint32, params DeviceParams, options *Optio
 	}
 
 	d := newDevice(id, params, options, info.Flags)
+	d.descSize = descSizeOf(info)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -340,4 +351,54 @@ func Recover(ctx context.Context, id uint32, params DeviceParams, options *Optio
 		options.Logger.Printf("Device %s recovered with %d queues", d.Path, d.queues)
 	}
 	return d, nil
+}
+
+// RegisterSharedMemory registers mem for shared-memory zero copy (the device
+// needs DeviceParams.SharedMemoryZeroCopy; kernel 7.1+). mem must be
+// page-aligned shared memory — typically an mmap of a memfd or hugetlbfs file
+// that the applications using the device also map. An O_DIRECT request whose
+// pages all lie in one registered region then reaches the handler with
+// FlagSharedMemory and Request.Data pointing into mem: neither side copies.
+// readOnly pins the pages without write access (for a write-sealed memfd);
+// only writes can then match. The memory must stay mapped until
+// UnregisterSharedMemory returns. Returns the region's index.
+func (d *Device) RegisterSharedMemory(mem []byte, readOnly bool) (uint16, error) {
+	if !d.Features().Has(FeatureSharedMemoryZC) {
+		return 0, fmt.Errorf("%w: the device was not created with SharedMemoryZeroCopy (kernel 7.1+)", ErrNotImplemented)
+	}
+	if len(mem) == 0 {
+		return 0, fmt.Errorf("empty region")
+	}
+	c, err := createController()
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	var flags uint32
+	if readOnly {
+		flags = uapi.UBLK_SHMEM_BUF_READ_ONLY
+	}
+	addr := uintptr(unsafe.Pointer(&mem[0]))
+	idx, err := c.RegBuf(context.Background(), d.ID, addr, uint64(len(mem)), flags)
+	if err != nil {
+		return 0, fmt.Errorf("register shared memory: %w", err)
+	}
+	d.shmem.Add(idx, mem)
+	return idx, nil
+}
+
+// UnregisterSharedMemory unregisters a region registered with
+// RegisterSharedMemory. The kernel freezes the device's queue while it does,
+// so no request is using the region afterwards.
+func (d *Device) UnregisterSharedMemory(index uint16) error {
+	c, err := createController()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.UnregBuf(context.Background(), d.ID, index); err != nil {
+		return fmt.Errorf("unregister shared memory %d: %w", index, err)
+	}
+	d.shmem.Remove(index)
+	return nil
 }

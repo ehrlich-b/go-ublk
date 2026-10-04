@@ -31,6 +31,9 @@ func (h *backendHandler) HandleRequest(r *Request) {
 	case OpRead:
 		n, rerr := h.b.ReadAt(r.Data, r.Offset)
 		err = readResultError(n, len(r.Data), rerr)
+		if ib, ok := h.b.(interfaces.IntegrityBackend); ok && err == nil && r.Integrity != nil {
+			err = ib.ReadIntegrity(r.Integrity, r.Offset)
+		}
 		if h.obs != nil {
 			h.obs.ObserveRead(uint64(r.Length), uint64(time.Since(start)), err == nil)
 		}
@@ -43,6 +46,9 @@ func (h *backendHandler) HandleRequest(r *Request) {
 			n, werr = h.b.WriteAt(r.Data, r.Offset)
 		}
 		err = writeResultError(n, len(r.Data), werr)
+		if ib, ok := h.b.(interfaces.IntegrityBackend); ok && err == nil && r.Integrity != nil {
+			err = ib.WriteIntegrity(r.Integrity, r.Offset)
+		}
 		if h.obs != nil {
 			h.obs.ObserveWrite(uint64(r.Length), uint64(time.Since(start)), err == nil)
 		}

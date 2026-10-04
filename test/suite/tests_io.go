@@ -331,8 +331,14 @@ func rangeTest(t *T, size, off, length int64, discard bool) error {
 			}
 		}
 	}
-	if err := pwriteFull(fd, pattern, off); err != nil {
-		return err
+	// Data at the start and at the end of the range: a kernel that silently
+	// handles only part of a large request (pre-6.11 truncated write-zeroes
+	// over 4 GiB to the length mod 4 GiB) leaves the tail intact.
+	inside := []int64{off, off + length - int64(len(pattern))}
+	for _, p := range inside {
+		if err := pwriteFull(fd, pattern, p); err != nil {
+			return err
+		}
 	}
 
 	if err := blkRange(fd, req, off, length); err != nil {
@@ -342,11 +348,13 @@ func rangeTest(t *T, size, off, length int64, discard bool) error {
 		return fmt.Errorf("%s: %w", what, err)
 	}
 	got := alignedBuf(len(pattern))
-	if err := preadFull(fd, got, off); err != nil {
-		return err
-	}
-	if !bytes.Equal(got, make([]byte, len(got))) {
-		return fmt.Errorf("%s range still holds data after the backend zeroed it", what)
+	for _, p := range inside {
+		if err := preadFull(fd, got, p); err != nil {
+			return err
+		}
+		if !bytes.Equal(got, make([]byte, len(got))) {
+			return fmt.Errorf("%s of [%d,+%d) succeeded but data at %d is still there", what, off, length, p)
+		}
 	}
 	for _, g := range guards {
 		if g >= 0 && g+int64(len(pattern)) <= size {

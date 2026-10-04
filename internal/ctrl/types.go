@@ -63,6 +63,14 @@ type DeviceParams struct {
 	MaxOpenZones         uint32
 	MaxActiveZones       uint32
 	MaxZoneAppendSectors uint32
+
+	// IODescSize, if nonzero, requests UBLK_F_IO_DESC_SIZE with descriptors of
+	// this many bytes (24..256, a multiple of 8; kernel 7.3+).
+	IODescSize uint16
+
+	// Integrity, if set, is sent as UBLK_PARAM_TYPE_INTEGRITY with
+	// UBLK_F_INTEGRITY (which needs USER_COPY).
+	Integrity *uapi.UblkParamIntegrity
 }
 
 // DeviceSize is the device size in bytes.

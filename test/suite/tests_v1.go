@@ -16,6 +16,8 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/ehrlich-b/go-ublk"
 )
 
@@ -33,6 +35,10 @@ func init() {
 		{"user-copy", ublk.FeatureUserCopy, func(p *ublk.DeviceParams) { p.EnableUserCopy = true }},
 		{"need-get-data", ublk.FeatureNeedGetData, func(p *ublk.DeviceParams) { p.NeedGetData = true }},
 		{"threads-per-queue", ublk.FeaturePerIODaemon, func(p *ublk.DeviceParams) { p.ThreadsPerQueue = 4 }},
+		{"batch-io", ublk.FeatureBatchIO, func(p *ublk.DeviceParams) { p.BatchIO = true }},
+		{"batch-io-user-copy", ublk.FeatureBatchIO | ublk.FeatureUserCopy, func(p *ublk.DeviceParams) {
+			p.BatchIO, p.EnableUserCopy = true, true
+		}},
 	} {
 		m := m
 		register("features/integrity-"+m.name, 3*time.Minute, func(t *T) error {
@@ -46,6 +52,28 @@ func init() {
 		})
 	}
 	register("features/zero-copy", 3*time.Minute, testZeroCopy)
+	register("features/batch-io-close-under-load", 2*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureBatchIO); err != nil {
+			return err
+		}
+		return closeUnderLoad(t, func(p *ublk.DeviceParams) { p.BatchIO = true })
+	})
+	register("features/zero-copy-close-under-load", 2*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureZeroCopy); err != nil {
+			return err
+		}
+		path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-zcl-%d", os.Getpid()))
+		t.Cleanup(func() { _ = os.Remove(path) })
+		fb, err := openFileBackend(path, 64<<20)
+		if err != nil {
+			return err
+		}
+		t.Cleanup(func() { _ = fb.Close() })
+		return closeUnderLoad(t, func(p *ublk.DeviceParams) {
+			p.Backend = zcFile{fb}
+			p.EnableZeroCopy = true
+		})
+	})
 	register("features/handler-async", 3*time.Minute, testHandlerAsync)
 	register("features/fua", time.Minute, testFUA)
 	register("features/tag-find", time.Minute, testTagFind)
@@ -941,6 +969,263 @@ func testZoned(t *T) error {
 		if err != nil || len(zones) != 1 || zones[0].cond != c.cond {
 			return fmt.Errorf("after zone %s: %+v (%v), want cond %#x", c.name, zones, err, c.cond)
 		}
+	}
+	return nil
+}
+
+func init() {
+	register("features/integrity", 3*time.Minute, testIntegrity)
+}
+
+// integMem is a RAM backend that also stores integrity metadata.
+type integMem struct {
+	*memBackend
+	mu       sync.Mutex
+	meta     map[int64][]byte // per interval offset
+	interval int64
+	metaSize int
+	writes   atomic.Int64
+}
+
+func (m *integMem) WriteIntegrity(meta []byte, off int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.writes.Add(1)
+	for i := 0; i*m.metaSize < len(meta); i++ {
+		m.meta[off+int64(i)*m.interval] = append([]byte(nil), meta[i*m.metaSize:(i+1)*m.metaSize]...)
+	}
+	return nil
+}
+
+func (m *integMem) ReadIntegrity(meta []byte, off int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := 0; i*m.metaSize < len(meta); i++ {
+		if v, ok := m.meta[off+int64(i)*m.interval]; ok {
+			copy(meta[i*m.metaSize:], v)
+		} else {
+			// Never written: the T10 escape (application tag 0xffff) tells the
+			// block layer not to check this block.
+			for j := i * m.metaSize; j < (i+1)*m.metaSize; j++ {
+				meta[j] = 0xff
+			}
+		}
+	}
+	return nil
+}
+
+// testIntegrity: with T10-DIF CRC16 protection and reference tags, the block
+// layer generates protection information on write and verifies it on read.
+// The backend must receive non-zero metadata, reads must verify, and
+// corrupting one stored tuple must fail exactly that block's read.
+func testIntegrity(t *T) error {
+	if err := needFeatures(ublk.FeatureIntegrity | ublk.FeatureUserCopy); err != nil {
+		return err
+	}
+	b := &integMem{memBackend: newMemBackend(16 << 20), meta: map[int64][]byte{}, interval: 512, metaSize: 8}
+	params := ublk.DefaultParams(b)
+	params.NumQueues, params.QueueDepth = 1, 32
+	params.Integrity = &ublk.IntegrityParams{MetadataSize: 8, IntervalSize: 512,
+		Checksum: ublk.IntegrityCsumCRC16, RefTag: true}
+	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
+	if err != nil {
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.EOPNOTSUPP) {
+			return skipf("kernel refused integrity parameters (CONFIG_BLK_DEV_INTEGRITY?): %v", err)
+		}
+		return err
+	}
+	t.Cleanup(func() { _ = dev.Close() })
+	if err := waitForNode(dev.Path, 5*time.Second); err != nil {
+		return err
+	}
+	name := dev.Path[len("/dev/"):]
+	if fmtb, err := os.ReadFile("/sys/block/" + name + "/integrity/format"); err == nil {
+		t.Logf("integrity format %s", bytes.TrimSpace(fmtb))
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fd := int(f.Fd())
+	p := alignedBuf(64 << 10)
+	newRNG(21).fill(p)
+	if err := pwriteFull(fd, p, 1<<20); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	if b.writes.Load() == 0 {
+		return fmt.Errorf("the backend never received integrity metadata for a write")
+	}
+	b.mu.Lock()
+	tuple := b.meta[1<<20]
+	b.mu.Unlock()
+	if len(tuple) != 8 || bytes.Equal(tuple, make([]byte, 8)) {
+		return fmt.Errorf("stored metadata for the first block is %x; the block layer should have generated a PI tuple", tuple)
+	}
+	q := alignedBuf(len(p))
+	if err := preadFull(fd, q, 1<<20); err != nil {
+		return fmt.Errorf("read with verification: %w", err)
+	}
+	if !bytes.Equal(p, q) {
+		return fmt.Errorf("read back differs")
+	}
+	// Corrupt the guard tag of the block at 1 MiB + 8 KiB.
+	b.mu.Lock()
+	b.meta[1<<20+8192][0] ^= 0xff
+	b.mu.Unlock()
+	one := alignedBuf(4096)
+	if err := preadFull(fd, one, 1<<20+8192); err == nil {
+		return fmt.Errorf("a block with a corrupted PI tuple read back without error")
+	} else {
+		t.Logf("corrupted block read failed as it should: %v", err)
+	}
+	if err := preadFull(fd, one, 1<<20+16384); err != nil {
+		return fmt.Errorf("an intact block failed to read after another was corrupted: %w", err)
+	}
+	return nil
+}
+
+func init() {
+	register("features/shared-memory", 2*time.Minute, testSharedMemory)
+}
+
+// shmemProbe records whether requests arrived through shared memory.
+type shmemProbe struct {
+	*memBackend
+	region []byte
+	hits   atomic.Int64
+}
+
+func (s *shmemProbe) HandleRequest(r *ublk.Request) {
+	if r.Flags&ublk.FlagSharedMemory != 0 && len(r.Data) > 0 {
+		lo := uintptr(unsafe.Pointer(&s.region[0]))
+		p := uintptr(unsafe.Pointer(&r.Data[0]))
+		if p >= lo && p < lo+uintptr(len(s.region)) {
+			s.hits.Add(1)
+		}
+	}
+	var err error
+	switch r.Op {
+	case ublk.OpRead:
+		_, err = s.ReadAt(r.Data, r.Offset)
+	case ublk.OpWrite:
+		_, err = s.WriteAt(r.Data, r.Offset)
+	case ublk.OpFlush:
+	default:
+		err = syscall.EOPNOTSUPP
+	}
+	r.Complete(err)
+}
+
+// testSharedMemory: O_DIRECT I/O from a buffer inside a registered memfd
+// mapping reaches the handler with FlagSharedMemory and Data aliasing that
+// mapping, and the bytes are right in both directions.
+func testSharedMemory(t *T) error {
+	if err := needFeatures(ublk.FeatureSharedMemoryZC); err != nil {
+		return err
+	}
+	const regionSize = 4 << 20
+	fd, err := unix.MemfdCreate("ublk-suite-shm", unix.MFD_CLOEXEC)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := unix.Ftruncate(fd, regionSize); err != nil {
+		return err
+	}
+	region, err := unix.Mmap(fd, 0, regionSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return err
+	}
+	defer unix.Munmap(region)
+
+	probe := &shmemProbe{memBackend: newMemBackend(16 << 20), region: region}
+	params := ublk.DefaultParams(nil)
+	params.Backend, params.Handler, params.Size = nil, probe, 16<<20
+	params.NumQueues, params.QueueDepth = 1, 16
+	params.SharedMemoryZeroCopy = true
+	dev, err := newDevice(t, params)
+	if err != nil {
+		return err
+	}
+	if _, err := dev.RegisterSharedMemory(region, false); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	src := region[64<<10 : 128<<10]
+	newRNG(31).fill(src)
+	if err := pwriteFull(int(f.Fd()), src, 1<<20); err != nil {
+		return fmt.Errorf("write from the shared region: %w", err)
+	}
+	got := make([]byte, len(src))
+	if _, err := probe.ReadAt(got, 1<<20); err != nil || !bytes.Equal(got, src) {
+		return fmt.Errorf("backend did not receive the shared-memory write")
+	}
+	dst := region[1<<20 : 1<<20+len(src)]
+	clear(dst)
+	if err := preadFull(int(f.Fd()), dst, 1<<20); err != nil {
+		return fmt.Errorf("read into the shared region: %w", err)
+	}
+	if !bytes.Equal(dst, src) {
+		return fmt.Errorf("read into the shared region returned different bytes")
+	}
+	if probe.hits.Load() == 0 {
+		return fmt.Errorf("no request arrived through shared memory (FlagSharedMemory with Data in the region)")
+	}
+	t.Logf("%d requests served zero-copy from shared memory", probe.hits.Load())
+	return nil
+}
+
+func init() {
+	register("features/io-desc-size", time.Minute, testIODescSize)
+}
+
+// testIODescSize creates a device with 32-byte descriptors and checks I/O
+// still works and handlers see the 8 extra bytes.
+func testIODescSize(t *T) error {
+	if err := needFeatures(ublk.FeatureIODescSize); err != nil {
+		return err
+	}
+	m := newMemBackend(16 << 20)
+	var extra atomic.Int64
+	h := ublk.HandlerFunc(func(r *ublk.Request) {
+		extra.Store(int64(len(r.DescriptorExtra)))
+		var err error
+		switch r.Op {
+		case ublk.OpRead:
+			_, err = m.ReadAt(r.Data, r.Offset)
+		case ublk.OpWrite:
+			_, err = m.WriteAt(r.Data, r.Offset)
+		}
+		r.Complete(err)
+	})
+	params := ublk.DefaultParams(nil)
+	params.Backend, params.Handler, params.Size = nil, h, 16<<20
+	params.NumQueues, params.QueueDepth = 2, 32
+	params.IODescSize = 32
+	dev, err := newDevice(t, params)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	p, q := alignedBuf(64<<10), alignedBuf(64<<10)
+	newRNG(41).fill(p)
+	if err := pwriteFull(int(f.Fd()), p, 8<<20); err != nil {
+		return err
+	}
+	if err := preadFull(int(f.Fd()), q, 8<<20); err != nil || !bytes.Equal(p, q) {
+		return fmt.Errorf("I/O with 32-byte descriptors: %v", err)
+	}
+	if extra.Load() != 8 {
+		return fmt.Errorf("DescriptorExtra is %d bytes, want 8", extra.Load())
 	}
 	return nil
 }
