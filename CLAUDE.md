@@ -98,7 +98,7 @@ go-ublk/
 
 ## Technical Constraints
 
-- Linux kernel >= 6.8 (IOCTL encoding required)
+- Linux kernel >= 6.4 (ioctl-encoded commands); newer features are negotiated per device
 - io_uring with URING_CMD support required
 - Device creation requires root or CAP_SYS_ADMIN
 
