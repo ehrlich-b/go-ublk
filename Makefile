@@ -277,7 +277,7 @@ check-module:
 # VM Testing (requires VM_HOST, VM_USER configured)
 #==============================================================================
 
-.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e vm-crash vm-powerfail vm-shutdown-storm storm-cycle vm-test-unit
+.PHONY: vm-check vm-copy vm-e2e vm-simple-e2e vm-benchmark vm-reset vm-stress vm-fuzz vm-verify vm-loop-e2e vm-crash vm-powerfail vm-shutdown-storm vm-soak storm-cycle vm-test-unit
 
 # Check VM configuration before running VM targets
 vm-check:
@@ -432,6 +432,17 @@ STORM_SIZE   ?= 1G
 STORM_ARM    ?= arm
 VM_SERIAL_LOG ?= $(HOME)/.lima/ublk/serialv.log
 STORM_OOPS_RE = Oops|BUG:|Call trace:|Unable to handle|Internal error|general protection|kernel NULL pointer|KASAN|refcount_t|soft lockup
+
+# Soak: hours of verified fs I/O through the shipped systemd units, with crash
+# and upgrade handoffs in the first half and a leak check in the second.
+SOAK_HOURS ?= 4
+SOAK_SIZE ?= 2G
+SOAK_EVENT_S ?= 300
+vm-soak: ublk-loop
+	@$(VM_SSH) "mkdir -p $(VM_DIR)/systemd"
+	@$(VM_SCP) bin/ublk-loop scripts/vm-soak.sh $(VM_USER)@$(VM_HOST):$(VM_DIR)/
+	@$(VM_SCP) examples/systemd/ublk-loop@.service examples/systemd/srv-ublk0.mount $(VM_USER)@$(VM_HOST):$(VM_DIR)/systemd/
+	@$(VM_SSH) "cd $(VM_DIR) && chmod +x vm-soak.sh && ./vm-soak.sh $(SOAK_HOURS) $(SOAK_SIZE) $(SOAK_EVENT_S)"
 
 vm-shutdown-storm: ublk-loop
 	@echo "=============================================="
