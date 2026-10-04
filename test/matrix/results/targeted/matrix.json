@@ -1,0 +1,877 @@
+{
+ "generated": "2026-10-04T18:06:13+00:00",
+ "go_ublk_commit": "0aa26d9",
+ "runs": [
+  {
+   "id": "mainline-6.4~write-zeroes-large-capped",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.4.0-060400-generic",
+   "upstream": "6.4",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:40:36+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.4~wzcheck",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.4.0-060400-generic",
+   "upstream": "6.4",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:30+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.5,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.4~wzcheck-capped",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.4.0-060400-generic",
+   "upstream": "6.4",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:40:36+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "pass",
+     "duration_s": 1.5,
+     "detail": "write_zeroes_max_bytes=4294966784 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +2, write sectors +10485760; patterns still present at: none"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.6.158~wzcheck",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.6.158-0606158-generic",
+   "upstream": "6.6",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:38+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.5,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.9.12~wzcheck",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.9.12-060912-generic",
+   "upstream": "6.9",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:27:24+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.9,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~verify-sweep-1",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:19:46+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 104.8,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~verify-sweep-2",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:19:46+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 104.7,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~verify-sweep-3",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:19:51+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 104.8,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~write-zeroes-large-1",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:17:52+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.17,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~write-zeroes-large-2",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:17:53+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.17,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~write-zeroes-large-3",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:17:58+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.18,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~write-zeroes-large-capped",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:40:37+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~wzcheck-1",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:06+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.7,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~wzcheck-2",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:14+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.7,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~wzcheck-3",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:22+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.8,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14~wzcheck-capped",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:40:31+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "pass",
+     "duration_s": 1.6,
+     "detail": "write_zeroes_max_bytes=4294966784 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +2, write sectors +10485760; patterns still present at: none"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.11.11~wzcheck",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.11.11-061111-generic",
+   "upstream": "6.11",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:46+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "pass",
+     "duration_s": 1.7,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +2, write sectors +10485760; patterns still present at: none"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-7.0.14~wzcheck",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "7.0.14-070014-generic",
+   "upstream": "7.0",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:25:53+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "pass",
+     "duration_s": 1.7,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +2, write sectors +10485760; patterns still present at: none"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "opensuse-leap-15.6~wzcheck",
+   "family": "suse",
+   "distro": "openSUSE Leap 15.6",
+   "kernel": "6.4.0-150600.23.103-default",
+   "upstream": "6.4",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:27:15+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.4,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-22.04-hwe~wzcheck",
+   "family": "ubuntu",
+   "distro": "Ubuntu 22.04 HWE",
+   "kernel": "6.8.0-138-generic",
+   "upstream": "6.8",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:27:07+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.7,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.1s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-ga~write-zeroes-large-capped",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 GA",
+   "kernel": "6.8.0-146-generic",
+   "upstream": "6.8",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:40:31+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-ga~wzcheck",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 GA",
+   "kernel": "6.8.0-146-generic",
+   "upstream": "6.8",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:26:57+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "fail",
+     "duration_s": 1.9,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +1, write sectors +2097152; patterns still present at: 1074790400 3221225472 5368709120"
+    }
+   ],
+   "summary": {
+    "pass": 0,
+    "fail": 1,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-ga~wzcheck-capped",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 GA",
+   "kernel": "6.8.0-146-generic",
+   "upstream": "6.8",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:40:31+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "pass",
+     "duration_s": 1.6,
+     "detail": "write_zeroes_max_bytes=4294966784 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +2, write sectors +10485760; patterns still present at: none"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-hwe-6.17.0-40~possible8",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 HWE 6.17.0-40 (known-bad control) [possible_cpus=8]",
+   "kernel": "6.17.0-40-generic",
+   "upstream": "6.17",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T16:43:12+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\",\"srcversion\":\"6A00163FD3030280266148D\",\"library\":\"features 0x7fff known=true\"}"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "timeout",
+     "duration_s": 310.2,
+     "detail": "0 pass, 0 fail, 0 skip; killed after 300s; last:  /usr/local/go/src/testing/testing.go:1934 +0xea created by testing.(*T).Run in goroutine 20  /usr/local/go/src/testing/testing.go:1997 +0x465 "
+    },
+    {
+     "test": "integration/large-io/hygiene",
+     "status": "fail",
+     "duration_s": 5.4,
+     "detail": "leaked: none D-state:169:integration.tes"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [    3.123517] BUG: kernel NULL pointer dereference, address: 0000000000000000\n[    3.123906] #PF: supervisor read access in kernel mode\n[    3.123990] #PF: error_code(0x0000) - not-present page\n[    3.124076] PGD 2031067 P4D 211a067 PUD 2110067 PMD 0 \n[    3.124286] Oops: Oops: 0000 [#1] SMP NOPTI\n[    3.124508] CPU: 1 UID: 0 PID: 174 Comm: iou-wrk-169 Not tainted 6.17.0-40-generic #40~24.04.1-Ubuntu PREEMPT(voluntary) \n[    3.124793] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[    3.125010] RIP: 0010:ublk_init_queues+0x4e/0x1f0 [ublk_drv]\n[    3.126142] Code: 48 c7 c0 40 bc 7c 9e 31 db 48 89 45 d0 45 0f b7 6f 0a 8b 35 c4 cb e7 dd 31 c0 45 8d 65 01 41 c1 e4 06 eb 12 49 8b 4f 50 89 c2 <3b> 1c 91 0f 84 25 01 00 00 83 c0 01 89 c2 48 c7 c7 60 b5 63 9d e8\n[    3.126302] RSP: 0018:ff581391c0363bd0 EFLAGS: 00000293\n[    3.126361] RAX: 0000000000000000 RBX: 0000000000000000 RCX: 0000000000000000\n[    3.126412] RDX: 0000000000000000 RSI: 0000000000000002 RDI: 0000000000000000\n[    3.126490] RBP: ff581391c0363c08 R08: 0000000000000000 R09: 0000000000000000\n[    3.126605] R10: 0000000000000000 R11: 0000000000000000 R12:"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 2,
+    "skip": 0,
+    "error": 1
+   }
+  },
+  {
+   "id": "ubuntu-24.04-hwe-6.17.0-40~smp4",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 HWE 6.17.0-40 (known-bad control)",
+   "kernel": "6.17.0-40-generic",
+   "upstream": "6.17",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T16:37:57+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\",\"srcversion\":\"6A00163FD3030280266148D\",\"library\":\"features 0x7fff known=true\"}"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "timeout",
+     "duration_s": 310.2,
+     "detail": "0 pass, 0 fail, 0 skip; killed after 300s; last:  /usr/local/go/src/testing/testing.go:1934 +0xea created by testing.(*T).Run in goroutine 35  /usr/local/go/src/testing/testing.go:1997 +0x465 "
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [    5.569189] BUG: kernel NULL pointer dereference, address: 0000000000000000\n[    5.569608] #PF: supervisor read access in kernel mode\n[    5.569707] #PF: error_code(0x0000) - not-present page\n[    5.569859] PGD 3e7a7067 P4D 3e4e7067 PUD 3e7af067 PMD 0 \n[    5.570330] Oops: Oops: 0000 [#1] SMP NOPTI\n[    5.570665] CPU: 1 UID: 0 PID: 190 Comm: iou-wrk-187 Not tainted 6.17.0-40-generic #40~24.04.1-Ubuntu PREEMPT(voluntary) \n[    5.571182] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[    5.571654] RIP: 0010:ublk_init_queues+0x4e/0x1f0 [ublk_drv]\n[    5.572356] Code: 48 c7 c0 40 bc fc 91 31 db 48 89 45 d0 45 0f b7 6f 0a 8b 35 c4 cb 47 d1 31 c0 45 8d 65 01 41 c1 e4 06 eb 12 49 8b 4f 50 89 c2 <3b> 1c 91 0f 84 25 01 00 00 83 c0 01 89 c2 48 c7 c7 60 b5 e3 90 e8\n[    5.572649] RSP: 0018:ff6e7d1e003afbd0 EFLAGS: 00000297\n[    5.572759] RAX: 0000000000000000 RBX: 0000000000000000 RCX: 0000000000000000\n[    5.572873] RDX: 0000000000000000 RSI: 0000000000000004 RDI: 0000000000000000\n[    5.573159] RBP: ff6e7d1e003afc08 R08: 0000000000000000 R09: 0000000000000000\n[    5.573267] R10: 0000000000000000 R11: 0000000000000000 R"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 1,
+    "skip": 0,
+    "error": 1
+   }
+  },
+  {
+   "id": "ubuntu-24.04-hwe-7.0.0-38~ctx-cancel-idle-1",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 HWE 7.0.0-38 (Slide-tested)",
+   "kernel": "7.0.0-38-generic",
+   "upstream": "7.0",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:17:59+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.39,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-hwe-7.0.0-38~ctx-cancel-idle-2",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 HWE 7.0.0-38 (Slide-tested)",
+   "kernel": "7.0.0-38-generic",
+   "upstream": "7.0",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:17:59+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.37,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-hwe-7.0.0-38~ctx-cancel-idle-3",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 HWE 7.0.0-38 (Slide-tested)",
+   "kernel": "7.0.0-38-generic",
+   "upstream": "7.0",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:18:03+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.36,
+     "detail": ""
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "ubuntu-24.04-hwe-7.0.0-38~wzcheck",
+   "family": "ubuntu",
+   "distro": "Ubuntu 24.04 HWE 7.0.0-38 (Slide-tested)",
+   "kernel": "7.0.0-38-generic",
+   "upstream": "7.0",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T15:26:02+00:00",
+   "ublk_drv": true,
+   "features": "",
+   "oops": false,
+   "status": "pass",
+   "results": [
+    {
+     "test": "wzcheck",
+     "status": "pass",
+     "duration_s": 1.7,
+     "detail": "write_zeroes_max_bytes=2199023255040 max_hw_sectors_kb=1024; BLKZEROOUT 5GiB took 0.2s, blkdiscard exit 0 ; write I/Os +2, write sectors +10485760; patterns still present at: none"
+    }
+   ],
+   "summary": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+   }
+  }
+ ]
+}

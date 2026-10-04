@@ -1,0 +1,2087 @@
+[
+ {
+  "id": "almalinux-10",
+  "family": "rhel",
+  "distro": "AlmaLinux 10",
+  "version": "6.12.0-211.56.1.el10_2",
+  "upstream": "6.12",
+  "source": "dnf in almalinux:10",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/10.2/BaseOS/x86_64/os/Packages/kernel-core-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "sha256": "5c9b65e7c08d8fc9deb6443e046afd68d1dddccd7d6a752a76cfdbb20ab00630"
+   },
+   {
+    "file": "kernel-modules-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/10.2/BaseOS/x86_64/os/Packages/kernel-modules-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "sha256": "c699d073c6557906e22c514b77a716b123c6f8f697ec9bb70cc30a62dbefcf0e"
+   },
+   {
+    "file": "kernel-modules-core-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/10.2/BaseOS/x86_64/os/Packages/kernel-modules-core-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "sha256": "aa215a46c2b5f359269ff74b398666bcfdc1a1390434b3d135d65fe050819955"
+   },
+   {
+    "file": "kernel-modules-extra-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/10.2/BaseOS/x86_64/os/Packages/kernel-modules-extra-6.12.0-211.56.1.el10_2.x86_64.rpm",
+    "sha256": "94f4ba0de584e793745f24bae3c5e9c5f1dea0d016fb3b2685cc50b3cb1d5314"
+   }
+  ],
+  "kver": "6.12.0-211.56.1.el10_2.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "almalinux-9",
+  "family": "rhel",
+  "distro": "AlmaLinux 9",
+  "version": "5.14.0-687.53.1.el9_8",
+  "upstream": "5.14",
+  "source": "dnf in almalinux:9",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/9.8/BaseOS/x86_64/os/Packages/kernel-core-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "sha256": "e899d0fbf1f993da71c56a8a63baf766dbc6ae17ffb034c59febd09a39e678f9"
+   },
+   {
+    "file": "kernel-modules-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/9.8/BaseOS/x86_64/os/Packages/kernel-modules-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "sha256": "028ed2f755e5e582b59c042ce84fc84b29c6416ff5e875fe0774de964da56440"
+   },
+   {
+    "file": "kernel-modules-core-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/9.8/BaseOS/x86_64/os/Packages/kernel-modules-core-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "sha256": "6ec833ecba36b91395b5721e670635483ffa8f1cf1e0f9c365d96c7735da9ea6"
+   },
+   {
+    "file": "kernel-modules-extra-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "url": "http://mirrors.rit.edu/almalinux/9.8/BaseOS/x86_64/os/Packages/kernel-modules-extra-5.14.0-687.53.1.el9_8.x86_64.rpm",
+    "sha256": "2de1a7883a8fc8de58a8959608f0d0ce57a555ef15f4d9d2d020a286055b940c"
+   }
+  ],
+  "kver": "5.14.0-687.53.1.el9_8.x86_64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "amazon-2023-6.1",
+  "family": "amazon",
+  "distro": "Amazon Linux 2023 (6.1)",
+  "version": "6.1.186-228.376.amzn2023",
+  "upstream": "6.1",
+  "source": "dnf in amazonlinux:2023",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-6.1.186-228.376.amzn2023.x86_64.rpm",
+    "url": "https://cdn.amazonlinux.com/al2023/core/guids/e2ad65cc2659f83c707304b5ab189ed04b5458f4744c2331760b10f79058452b/x86_64/../../../../blobstore/d18bbb6b4e0a3f43fffc4d8b2d16b0fae50799eccd6d85e52d05a2356dae6b36/kernel-6.1.186-228.376.amzn2023.x86_64.rpm",
+    "sha256": "d18bbb6b4e0a3f43fffc4d8b2d16b0fae50799eccd6d85e52d05a2356dae6b36"
+   },
+   {
+    "file": "kernel-modules-extra-6.1.186-228.376.amzn2023.x86_64.rpm",
+    "url": "https://cdn.amazonlinux.com/al2023/core/guids/e2ad65cc2659f83c707304b5ab189ed04b5458f4744c2331760b10f79058452b/x86_64/../../../../blobstore/36c0892ad24d5aa6777f3b4637e1077e072148cda2c5089e3bbaa020c8f002e5/kernel-modules-extra-6.1.186-228.376.amzn2023.x86_64.rpm",
+    "sha256": "36c0892ad24d5aa6777f3b4637e1077e072148cda2c5089e3bbaa020c8f002e5"
+   }
+  ],
+  "kver": "6.1.186-228.376.amzn2023.x86_64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "n",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "y"
+  }
+ },
+ {
+  "id": "amazon-2023-6.12",
+  "family": "amazon",
+  "distro": "Amazon Linux 2023 (6.12)",
+  "version": "6.12.103-129.197.amzn2023",
+  "upstream": "6.12",
+  "source": "dnf in amazonlinux:2023",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel6.12-6.12.103-129.197.amzn2023.x86_64.rpm",
+    "url": "https://cdn.amazonlinux.com/al2023/core/guids/e2ad65cc2659f83c707304b5ab189ed04b5458f4744c2331760b10f79058452b/x86_64/../../../../blobstore/7dde5b5182a823af259707515716815ab5313a6dfa68e3cc8a26311269601f8f/kernel6.12-6.12.103-129.197.amzn2023.x86_64.rpm",
+    "sha256": "7dde5b5182a823af259707515716815ab5313a6dfa68e3cc8a26311269601f8f"
+   },
+   {
+    "file": "kernel6.12-modules-extra-6.12.103-129.197.amzn2023.x86_64.rpm",
+    "url": "https://cdn.amazonlinux.com/al2023/core/guids/e2ad65cc2659f83c707304b5ab189ed04b5458f4744c2331760b10f79058452b/x86_64/../../../../blobstore/e4d6fa3aad756bad15d1de4cd6f737d6ac1ecef6ad6aec0cd96be72e8b3863f1/kernel6.12-modules-extra-6.12.103-129.197.amzn2023.x86_64.rpm",
+    "sha256": "e4d6fa3aad756bad15d1de4cd6f737d6ac1ecef6ad6aec0cd96be72e8b3863f1"
+   }
+  ],
+  "kver": "6.12.103-129.197.amzn2023.x86_64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "n",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "y"
+  }
+ },
+ {
+  "id": "arch",
+  "family": "arch",
+  "distro": "Arch Linux",
+  "version": "7.2.8-arch1-2",
+  "upstream": "7.2",
+  "source": "pacman in archlinux:latest",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-7.2.8.arch1-2-x86_64.pkg.tar.zst",
+    "url": "https://fastly.mirror.pkgbuild.com/core/os/x86_64/linux-7.2.8.arch1-2-x86_64.pkg.tar.zst",
+    "sha256": "99745cb20f82292d5285d9cb4307970f80844ba94d816ce6d708689d1a1895b4"
+   }
+  ],
+  "kver": "7.2.8-arch1-2",
+  "ublk_drv": "module",
+  "config": {}
+ },
+ {
+  "id": "arch-lts",
+  "family": "arch",
+  "distro": "Arch Linux LTS",
+  "version": "6.18.55-1-lts",
+  "upstream": "6.18",
+  "source": "pacman in archlinux:latest",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-lts-6.18.55-1-x86_64.pkg.tar.zst",
+    "url": "https://fastly.mirror.pkgbuild.com/core/os/x86_64/linux-lts-6.18.55-1-x86_64.pkg.tar.zst",
+    "sha256": "d7b80550feb4309cd812bb21d0965d6e26f5ec72241c96a7ad57a3eb8b5f7e12"
+   }
+  ],
+  "kver": "6.18.55-1-lts",
+  "ublk_drv": "module",
+  "config": {}
+ },
+ {
+  "id": "centos-stream-10",
+  "family": "rhel",
+  "distro": "CentOS Stream 10",
+  "version": "6.12.0-271.el10",
+  "upstream": "6.12",
+  "source": "dnf in quay.io/centos/centos:stream10",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-6.12.0-271.el10.x86_64.rpm",
+    "url": "https://mirror.tzulo.com/centos-stream/10-stream/BaseOS/x86_64/os/Packages/kernel-core-6.12.0-271.el10.x86_64.rpm",
+    "sha256": "9af580f8e9f3191d0909748615ac5cfd803c30eecade6803dd7ee7ae7a401847"
+   },
+   {
+    "file": "kernel-modules-6.12.0-271.el10.x86_64.rpm",
+    "url": "https://mirror.tzulo.com/centos-stream/10-stream/BaseOS/x86_64/os/Packages/kernel-modules-6.12.0-271.el10.x86_64.rpm",
+    "sha256": "3cbf54f46f3ba19999fbd90df476a23ac2d4bb5dfe18f175f3cd7c0fd0814bf8"
+   },
+   {
+    "file": "kernel-modules-core-6.12.0-271.el10.x86_64.rpm",
+    "url": "https://mirror.tzulo.com/centos-stream/10-stream/BaseOS/x86_64/os/Packages/kernel-modules-core-6.12.0-271.el10.x86_64.rpm",
+    "sha256": "bf1d118642547d93f831c03ae9173baabb24f73de638fd30d9750190407f5dbf"
+   },
+   {
+    "file": "kernel-modules-extra-6.12.0-271.el10.x86_64.rpm",
+    "url": "https://mirror.tzulo.com/centos-stream/10-stream/BaseOS/x86_64/os/Packages/kernel-modules-extra-6.12.0-271.el10.x86_64.rpm",
+    "sha256": "9e5d32e9187f46a94b4f9b6d8222bb78d9fa2fc643e8e62f16354682b45a3505"
+   }
+  ],
+  "kver": "6.12.0-271.el10.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "centos-stream-9",
+  "family": "rhel",
+  "distro": "CentOS Stream 9",
+  "version": "5.14.0-754.el9",
+  "upstream": "5.14",
+  "source": "dnf in quay.io/centos/centos:stream9",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-5.14.0-754.el9.x86_64.rpm",
+    "url": "http://ord.mirror.rackspace.com/centos-stream/9-stream/BaseOS/x86_64/os/Packages/kernel-core-5.14.0-754.el9.x86_64.rpm",
+    "sha256": "9aaf0bb5a6eef4a894c19e9a913ce4085998c3ac05842e3a82ebacc58be0ac4e"
+   },
+   {
+    "file": "kernel-modules-5.14.0-754.el9.x86_64.rpm",
+    "url": "http://ord.mirror.rackspace.com/centos-stream/9-stream/BaseOS/x86_64/os/Packages/kernel-modules-5.14.0-754.el9.x86_64.rpm",
+    "sha256": "87470d3ffbeb388d00164817d24fd0cdb40fa2b1f31ba47386de756421e9305c"
+   },
+   {
+    "file": "kernel-modules-core-5.14.0-754.el9.x86_64.rpm",
+    "url": "http://ord.mirror.rackspace.com/centos-stream/9-stream/BaseOS/x86_64/os/Packages/kernel-modules-core-5.14.0-754.el9.x86_64.rpm",
+    "sha256": "dc722ac80d70bf25a3b89edf9cfb06e6ea1f1f0dfde0720d733bf9b594495d43"
+   },
+   {
+    "file": "kernel-modules-extra-5.14.0-754.el9.x86_64.rpm",
+    "url": "http://ord.mirror.rackspace.com/centos-stream/9-stream/BaseOS/x86_64/os/Packages/kernel-modules-extra-5.14.0-754.el9.x86_64.rpm",
+    "sha256": "40182e15bbfc4095fc75af3bd4f4b14e725a5051cea6f4066a687f49b30b484f"
+   }
+  ],
+  "kver": "5.14.0-754.el9.x86_64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "debian-12",
+  "family": "debian",
+  "distro": "Debian 12",
+  "version": "6.1.0-53-amd64",
+  "upstream": "6.1",
+  "source": "apt in debian:12",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.1.0-53-amd64_6.1.187-1_amd64.deb",
+    "url": "http://deb.debian.org/debian-security/pool/updates/main/l/linux-signed-amd64/linux-image-6.1.0-53-amd64_6.1.187-1_amd64.deb",
+    "sha256": "06084640348130d77a6cdfa66a63e4ef7dd9d8f840c4ade523efad08cb117f09"
+   }
+  ],
+  "kver": "6.1.0-53-amd64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "debian-12-backports",
+  "family": "debian",
+  "distro": "Debian 12 backports",
+  "version": "6.12.95+deb12-amd64",
+  "upstream": "6.12",
+  "source": "apt in debian:12",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.12.95+deb12-amd64_6.12.95-1~bpo12+1_amd64.deb",
+    "url": "http://deb.debian.org/debian/pool/main/l/linux-signed-amd64/linux-image-6.12.95%2bdeb12-amd64_6.12.95-1%7ebpo12%2b1_amd64.deb",
+    "sha256": "5e524b782be67cb0d6a2e7b51816a2ac519e573ef7324b9a63a4124365653ecc"
+   }
+  ],
+  "kver": "6.12.95+deb12-amd64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "debian-13",
+  "family": "debian",
+  "distro": "Debian 13",
+  "version": "6.12.111+deb13-amd64",
+  "upstream": "6.12",
+  "source": "apt in debian:13",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.12.111+deb13-amd64_6.12.111-1_amd64.deb",
+    "url": "http://deb.debian.org/debian-security/pool/updates/main/l/linux-signed-amd64/linux-image-6.12.111%2bdeb13-amd64_6.12.111-1_amd64.deb",
+    "sha256": "792e7a407f8f39fa0db3deeb6cda4e4bb56042963376133a072856b1c685d4f3"
+   }
+  ],
+  "kver": "6.12.111+deb13-amd64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "debian-13-backports",
+  "family": "debian",
+  "distro": "Debian 13 backports",
+  "version": "7.1.13+deb13-amd64",
+  "upstream": "7.1",
+  "source": "apt in debian:13",
+  "status": "failed",
+  "error": "extract failed",
+  "packages": [
+   {
+    "file": "linux-binary-7.1.13+deb13-amd64_7.1.13-1~bpo13+1_amd64.deb",
+    "url": "http://deb.debian.org/debian/pool/main/l/linux-signed-amd64/linux-binary-7.1.13%2bdeb13-amd64_7.1.13-1%7ebpo13%2b1_amd64.deb",
+    "sha256": "454df41f72dbc25c02c7941055d1c8d2a0deb891b8d962241423e8ca4ab81d1e"
+   },
+   {
+    "file": "linux-image-7.1.13+deb13-amd64_7.1.13-1~bpo13+1_amd64.deb",
+    "url": "http://deb.debian.org/debian/pool/main/l/linux-signed-amd64/linux-image-7.1.13%2bdeb13-amd64_7.1.13-1%7ebpo13%2b1_amd64.deb",
+    "sha256": "26009248efc184cda275e59aa5ec0d12ca803b2c7d498246d8e0434c62f8e9db"
+   }
+  ],
+  "kver": "",
+  "ublk_drv": null,
+  "config": {}
+ },
+ {
+  "id": "fedora-42",
+  "family": "fedora",
+  "distro": "Fedora 42",
+  "version": "6.19.14-108.fc42",
+  "upstream": "6.19",
+  "source": "dnf in fedora:42",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-6.19.14-108.fc42.x86_64.rpm",
+    "url": "http://mirror.math.princeton.edu/pub/fedora-archive/fedora/linux/updates/42/Everything/x86_64/Packages/k/kernel-core-6.19.14-108.fc42.x86_64.rpm",
+    "sha256": "c1c912b32bac58a17960dc1909d4e4dbab0c5ef698906769b550eaa5e02d11f8"
+   },
+   {
+    "file": "kernel-modules-6.19.14-108.fc42.x86_64.rpm",
+    "url": "http://mirror.math.princeton.edu/pub/fedora-archive/fedora/linux/updates/42/Everything/x86_64/Packages/k/kernel-modules-6.19.14-108.fc42.x86_64.rpm",
+    "sha256": "069b99b971c33c291310c18f3ca81f81f8bc40249abe7a545d7955f4bfbb1f8b"
+   },
+   {
+    "file": "kernel-modules-core-6.19.14-108.fc42.x86_64.rpm",
+    "url": "http://mirror.math.princeton.edu/pub/fedora-archive/fedora/linux/updates/42/Everything/x86_64/Packages/k/kernel-modules-core-6.19.14-108.fc42.x86_64.rpm",
+    "sha256": "c7aee080b3455df44bfb6d892b369f568d6172741c9afc171a75acbe2416c45c"
+   },
+   {
+    "file": "kernel-modules-extra-6.19.14-108.fc42.x86_64.rpm",
+    "url": "http://mirror.math.princeton.edu/pub/fedora-archive/fedora/linux/updates/42/Everything/x86_64/Packages/k/kernel-modules-extra-6.19.14-108.fc42.x86_64.rpm",
+    "sha256": "f9ca1969151898b2179344dc0ac06832672b52d0968e380b689a7900b9bb5266"
+   }
+  ],
+  "kver": "6.19.14-108.fc42.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "fedora-43",
+  "family": "fedora",
+  "distro": "Fedora 43",
+  "version": "7.2.8-100.fc43",
+  "upstream": "7.2",
+  "source": "dnf in fedora:43",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-7.2.8-100.fc43.x86_64.rpm",
+    "url": "https://gigsouth.mm.fcix.net/fedora/linux/updates/43/Everything/x86_64/Packages/k/kernel-core-7.2.8-100.fc43.x86_64.rpm",
+    "sha256": "6b05058d02f92ecc45141007d680973fca7aa784810296ad3fb8654702910c34"
+   },
+   {
+    "file": "kernel-modules-7.2.8-100.fc43.x86_64.rpm",
+    "url": "https://gigsouth.mm.fcix.net/fedora/linux/updates/43/Everything/x86_64/Packages/k/kernel-modules-7.2.8-100.fc43.x86_64.rpm",
+    "sha256": "686324fa911bf9c01f3ff581f242391ceb6afbeb51ca231011f76ec9e0996088"
+   },
+   {
+    "file": "kernel-modules-core-7.2.8-100.fc43.x86_64.rpm",
+    "url": "https://gigsouth.mm.fcix.net/fedora/linux/updates/43/Everything/x86_64/Packages/k/kernel-modules-core-7.2.8-100.fc43.x86_64.rpm",
+    "sha256": "278b229e9ee828618d94afcf0feb2883eb2edc4c7a736272d2d877284f7d1bae"
+   },
+   {
+    "file": "kernel-modules-extra-7.2.8-100.fc43.x86_64.rpm",
+    "url": "https://gigsouth.mm.fcix.net/fedora/linux/updates/43/Everything/x86_64/Packages/k/kernel-modules-extra-7.2.8-100.fc43.x86_64.rpm",
+    "sha256": "4b3fbd795c634d3fca89118c4cf6bfa4e4d9c92325c75aaada1fcdb695ce7ade"
+   }
+  ],
+  "kver": "7.2.8-100.fc43.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "fedora-44",
+  "family": "fedora",
+  "distro": "Fedora 44",
+  "version": "7.2.8-200.fc44",
+  "upstream": "7.2",
+  "source": "dnf in fedora:44",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-7.2.8-200.fc44.x86_64.rpm",
+    "url": "http://cofractal-sea.mm.fcix.net/fedora/linux/updates/44/Everything/x86_64/Packages/k/kernel-core-7.2.8-200.fc44.x86_64.rpm",
+    "sha256": "b86953a9b3311aceeadb668bfa26aa8134af0d4a55dc5bae068bda1d0acf5c1f"
+   },
+   {
+    "file": "kernel-modules-7.2.8-200.fc44.x86_64.rpm",
+    "url": "http://cofractal-sea.mm.fcix.net/fedora/linux/updates/44/Everything/x86_64/Packages/k/kernel-modules-7.2.8-200.fc44.x86_64.rpm",
+    "sha256": "c45bd346831263d483fee9df6fed38eef0241d670dc289d2f23579460110c18f"
+   },
+   {
+    "file": "kernel-modules-core-7.2.8-200.fc44.x86_64.rpm",
+    "url": "http://cofractal-sea.mm.fcix.net/fedora/linux/updates/44/Everything/x86_64/Packages/k/kernel-modules-core-7.2.8-200.fc44.x86_64.rpm",
+    "sha256": "cd297a88bc579b59cab4be781ecfc57e765b3d9bbe47e77919a237ed50f0be16"
+   },
+   {
+    "file": "kernel-modules-extra-7.2.8-200.fc44.x86_64.rpm",
+    "url": "http://cofractal-sea.mm.fcix.net/fedora/linux/updates/44/Everything/x86_64/Packages/k/kernel-modules-extra-7.2.8-200.fc44.x86_64.rpm",
+    "sha256": "a298927d4544931cc2e782872f1b01aff02227f1f3b2a3a9be1bb30cfdb73243"
+   }
+  ],
+  "kver": "7.2.8-200.fc44.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.0.19",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.0.19",
+  "upstream": "6.0",
+  "source": "https://kernel.ubuntu.com/mainline/v6.0.19/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.0.19-060019-generic_6.0.19-060019.202301120739_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.0.19/amd64/linux-image-unsigned-6.0.19-060019-generic_6.0.19-060019.202301120739_amd64.deb",
+    "sha256": "b4f6d43d932173a8e8442fb60a54eff7b33824c35aea2adf460199ff49c969d6"
+   },
+   {
+    "file": "linux-modules-6.0.19-060019-generic_6.0.19-060019.202301120739_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.0.19/amd64/linux-modules-6.0.19-060019-generic_6.0.19-060019.202301120739_amd64.deb",
+    "sha256": "2678ed570ddfbbfd1baef22d04bb8c526d104930ce818ce35acd73591f44c5b9"
+   }
+  ],
+  "kver": "6.0.19-060019-generic",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.1.189",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.1.189",
+  "upstream": "6.1",
+  "source": "https://kernel.ubuntu.com/mainline/v6.1.189/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.1.189-0601189-generic_6.1.189-0601189.202610031033_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.1.189/amd64/linux-image-unsigned-6.1.189-0601189-generic_6.1.189-0601189.202610031033_amd64.deb",
+    "sha256": "c5551d9f9c027a8e232fecee375fb53c2a91820fafbbf619341b9ea23765ea7d"
+   },
+   {
+    "file": "linux-modules-6.1.189-0601189-generic_6.1.189-0601189.202610031033_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.1.189/amd64/linux-modules-6.1.189-0601189-generic_6.1.189-0601189.202610031033_amd64.deb",
+    "sha256": "807dd8516def2b1f3c6a84cc087468ba888a90306bc49b73130855e0057dc04c"
+   }
+  ],
+  "kver": "6.1.189-0601189-generic",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.10.14",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.10.14",
+  "upstream": "6.10",
+  "source": "https://kernel.ubuntu.com/mainline/v6.10.14/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.10.14-061014-generic_6.10.14-061014.202411070043_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.10.14/amd64/linux-image-unsigned-6.10.14-061014-generic_6.10.14-061014.202411070043_amd64.deb",
+    "sha256": "1f17be29b10917cb645e321ee427997b11d9866b2e15dcdfac2866ff5c407a01"
+   },
+   {
+    "file": "linux-modules-6.10.14-061014-generic_6.10.14-061014.202411070043_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.10.14/amd64/linux-modules-6.10.14-061014-generic_6.10.14-061014.202411070043_amd64.deb",
+    "sha256": "13ef6d25642639db6986839011f0dd4c57e96a396da5f30bad315a7f95711d68"
+   }
+  ],
+  "kver": "6.10.14-061014-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.11.11",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.11.11",
+  "upstream": "6.11",
+  "source": "https://kernel.ubuntu.com/mainline/v6.11.11/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.11.11-061111-generic_6.11.11-061111.202412051415_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.11.11/amd64/linux-image-unsigned-6.11.11-061111-generic_6.11.11-061111.202412051415_amd64.deb",
+    "sha256": "b760c0406366991c2e7729bbe01a1031057abd2d11d6b53e9445a0920db9854c"
+   },
+   {
+    "file": "linux-modules-6.11.11-061111-generic_6.11.11-061111.202412051415_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.11.11/amd64/linux-modules-6.11.11-061111-generic_6.11.11-061111.202412051415_amd64.deb",
+    "sha256": "a56a8e90b05b8340ce736699bb1120a721183f9916dd9ab13d3ec775f99af542"
+   }
+  ],
+  "kver": "6.11.11-061111-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.12.112",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.12.112",
+  "upstream": "6.12",
+  "source": "https://kernel.ubuntu.com/mainline/v6.12.112/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.12.112-0612112-generic_6.12.112-0612112.202610031248_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.12.112/amd64/linux-image-unsigned-6.12.112-0612112-generic_6.12.112-0612112.202610031248_amd64.deb",
+    "sha256": "aef277f274a42ec7c983e4c815de833549914bc4c1225d25cf91c6a725abe68e"
+   },
+   {
+    "file": "linux-modules-6.12.112-0612112-generic_6.12.112-0612112.202610031248_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.12.112/amd64/linux-modules-6.12.112-0612112-generic_6.12.112-0612112.202610031248_amd64.deb",
+    "sha256": "3a38208d1c640bbe69c20389404f6d457d1a3d51851610d7b02d97c22ed3fc00"
+   }
+  ],
+  "kver": "6.12.112-0612112-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.13.12",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.13.12",
+  "upstream": "6.13",
+  "source": "https://kernel.ubuntu.com/mainline/v6.13.12/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.13.12-061312-generic_6.13.12-061312.202504200842_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.13.12/amd64/linux-image-unsigned-6.13.12-061312-generic_6.13.12-061312.202504200842_amd64.deb",
+    "sha256": "c2f32654f548c59754160aec5c5b3e483a729e739b781c8896bf0a9154b98124"
+   },
+   {
+    "file": "linux-modules-6.13.12-061312-generic_6.13.12-061312.202504200842_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.13.12/amd64/linux-modules-6.13.12-061312-generic_6.13.12-061312.202504200842_amd64.deb",
+    "sha256": "98161302dee868c298681986f5e43a9eddb3185ea47569a4fc161cbcbb6f0169"
+   }
+  ],
+  "kver": "6.13.12-061312-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.14.11",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.14.11",
+  "upstream": "6.14",
+  "source": "https://kernel.ubuntu.com/mainline/v6.14.11/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.14.11-061411-generic_6.14.11-061411.202506101206_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.14.11/amd64/linux-image-unsigned-6.14.11-061411-generic_6.14.11-061411.202506101206_amd64.deb",
+    "sha256": "05e611c9fa2782ccd32d2ae9667e8bc0857418ae566cbc54786bc302347cad1c"
+   },
+   {
+    "file": "linux-modules-6.14.11-061411-generic_6.14.11-061411.202506101206_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.14.11/amd64/linux-modules-6.14.11-061411-generic_6.14.11-061411.202506101206_amd64.deb",
+    "sha256": "7425d05e6ab1419a4735d17cb99e7ff8188a825611c192263b91e117a78ccdc4"
+   }
+  ],
+  "kver": "6.14.11-061411-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.15.11",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.15.11",
+  "upstream": "6.15",
+  "source": "https://kernel.ubuntu.com/mainline/v6.15.11/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.15.11-061511-generic_6.15.11-061511.202508201748_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.15.11/amd64/linux-image-unsigned-6.15.11-061511-generic_6.15.11-061511.202508201748_amd64.deb",
+    "sha256": "12e6be98eae206efd1c5fd5f9238225df02a07dfd45e5066368f6944b4966213"
+   },
+   {
+    "file": "linux-modules-6.15.11-061511-generic_6.15.11-061511.202508201748_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.15.11/amd64/linux-modules-6.15.11-061511-generic_6.15.11-061511.202508201748_amd64.deb",
+    "sha256": "876a735823816c309d60a3d303006c683a7ca875cd0487773c1905cbb648007b"
+   }
+  ],
+  "kver": "6.15.11-061511-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.16.12",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.16.12",
+  "upstream": "6.16",
+  "source": "https://kernel.ubuntu.com/mainline/v6.16.12/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.16.12-061612-generic_6.16.12-061612.202510121336_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.16.12/amd64/linux-image-unsigned-6.16.12-061612-generic_6.16.12-061612.202510121336_amd64.deb",
+    "sha256": "7c5a775a59faf99f8698c3bc5395d77c55d554316c884a341f49f2a6607668cf"
+   },
+   {
+    "file": "linux-modules-6.16.12-061612-generic_6.16.12-061612.202510121336_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.16.12/amd64/linux-modules-6.16.12-061612-generic_6.16.12-061612.202510121336_amd64.deb",
+    "sha256": "b66ff86f3f4c5511e8252cd1358b5a4bfc64c1677ed52449a82049f0364a37db"
+   }
+  ],
+  "kver": "6.16.12-061612-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.17.12",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.17.12",
+  "upstream": "6.17",
+  "source": "https://kernel.ubuntu.com/mainline/v6.17.12/",
+  "status": "ok",
+  "notes": [
+   "v6.17.13: amd64 build failed"
+  ],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.17.12-061712-generic_6.17.12-061712.202512121841_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.17.12/amd64/linux-image-unsigned-6.17.12-061712-generic_6.17.12-061712.202512121841_amd64.deb",
+    "sha256": "b4ec741c176808799ad56cda17df9a69c24f6810ce8992faf814c6da449cb54c"
+   },
+   {
+    "file": "linux-modules-6.17.12-061712-generic_6.17.12-061712.202512121841_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.17.12/amd64/linux-modules-6.17.12-061712-generic_6.17.12-061712.202512121841_amd64.deb",
+    "sha256": "2f88f54d4d53e49314eda135ea2e04bc8074615477975bbcc0a1ef3b144d1b74"
+   }
+  ],
+  "kver": "6.17.12-061712-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.18.5",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.18.5",
+  "upstream": "6.18",
+  "source": "https://kernel.ubuntu.com/mainline/v6.18.5/",
+  "status": "failed",
+  "error": "v6.18.5: amd64 build failed",
+  "packages": [],
+  "kver": "",
+  "ublk_drv": null,
+  "config": {}
+ },
+ {
+  "id": "mainline-6.18.55",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.18.55",
+  "upstream": "6.18",
+  "source": "https://kernel.ubuntu.com/mainline/v6.18.55/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.18.55-061855-generic_6.18.55-061855.202610031245_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.18.55/amd64/linux-image-unsigned-6.18.55-061855-generic_6.18.55-061855.202610031245_amd64.deb",
+    "sha256": "510c01027df618ed21f2ab7027f946e7e8d64e4c88702722577470dca03ee30f"
+   },
+   {
+    "file": "linux-modules-6.18.55-061855-generic_6.18.55-061855.202610031245_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.18.55/amd64/linux-modules-6.18.55-061855-generic_6.18.55-061855.202610031245_amd64.deb",
+    "sha256": "0f532598e00ba37515288eda4b53426ee7ce53abb99d949c911873c679d6aaf5"
+   }
+  ],
+  "kver": "6.18.55-061855-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.19.14",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.19.14",
+  "upstream": "6.19",
+  "source": "https://kernel.ubuntu.com/mainline/v6.19.14/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.19.14-061914-generic_6.19.14-061914.202604221411_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.19.14/amd64/linux-image-unsigned-6.19.14-061914-generic_6.19.14-061914.202604221411_amd64.deb",
+    "sha256": "a829036affcb5572e1545e10ec7df92b9c6064243512b70802d0baf264b269ee"
+   },
+   {
+    "file": "linux-modules-6.19.14-061914-generic_6.19.14-061914.202604221411_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.19.14/amd64/linux-modules-6.19.14-061914-generic_6.19.14-061914.202604221411_amd64.deb",
+    "sha256": "405a08abd561638d332654f10d672fd7957b7f00274271c70ca7f3f2174a23cd"
+   }
+  ],
+  "kver": "6.19.14-061914-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.2",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.2",
+  "upstream": "6.2",
+  "source": "https://kernel.ubuntu.com/mainline/v6.2/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.2.0-060200-generic_6.2.0-060200.202302191831_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.2/amd64/linux-image-unsigned-6.2.0-060200-generic_6.2.0-060200.202302191831_amd64.deb",
+    "sha256": "8e0a99c2e1102b832199a0576d646a76a3677b708502b7fb86fdfb8306c2ae82"
+   },
+   {
+    "file": "linux-modules-6.2.0-060200-generic_6.2.0-060200.202302191831_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.2/amd64/linux-modules-6.2.0-060200-generic_6.2.0-060200.202302191831_amd64.deb",
+    "sha256": "0c4decaad41c6b9ce701a540d3c5807cd0b7de2b060384eac8e94d81989ceb2c"
+   }
+  ],
+  "kver": "6.2.0-060200-generic",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.3",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.3",
+  "upstream": "6.3",
+  "source": "https://kernel.ubuntu.com/mainline/v6.3/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.3.0-060300-generic_6.3.0-060300.202304232030_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.3/amd64/linux-image-unsigned-6.3.0-060300-generic_6.3.0-060300.202304232030_amd64.deb",
+    "sha256": "327f87babd8c2ae72357b75770725415ce8730867a74e40744ab69fc6b3f74ca"
+   },
+   {
+    "file": "linux-modules-6.3.0-060300-generic_6.3.0-060300.202304232030_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.3/amd64/linux-modules-6.3.0-060300-generic_6.3.0-060300.202304232030_amd64.deb",
+    "sha256": "d4ff3d4011f59296a73903fbbe15be1129d093e15c718988e16bcb3d568609a9"
+   }
+  ],
+  "kver": "6.3.0-060300-generic",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.4",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.4",
+  "upstream": "6.4",
+  "source": "https://kernel.ubuntu.com/mainline/v6.4/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.4.0-060400-generic_6.4.0-060400.202306271339_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.4/amd64/linux-image-unsigned-6.4.0-060400-generic_6.4.0-060400.202306271339_amd64.deb",
+    "sha256": "4092881b02fa9c245ac9ced89a7d680ff173efcd0f32c0e7e177fdb4dcd07511"
+   },
+   {
+    "file": "linux-modules-6.4.0-060400-generic_6.4.0-060400.202306271339_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.4/amd64/linux-modules-6.4.0-060400-generic_6.4.0-060400.202306271339_amd64.deb",
+    "sha256": "afb4e0f983125d0d7d0c57debd78ae462921e59da1034fc53e7905b6348c7dd7"
+   }
+  ],
+  "kver": "6.4.0-060400-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.5.11",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.5.11",
+  "upstream": "6.5",
+  "source": "https://kernel.ubuntu.com/mainline/v6.5.11/",
+  "status": "ok",
+  "notes": [
+   "v6.5.13: amd64 build failed",
+   "v6.5.12: amd64 build failed"
+  ],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.5.11/amd64/linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb",
+    "sha256": "f4282bafd0a13283d33cf3af7616397134c8fd525b459faa2af193e2f91dd678"
+   },
+   {
+    "file": "linux-modules-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.5.11/amd64/linux-modules-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb",
+    "sha256": "11d71fa6705ee6ecbac3c9eb5e27c3c83eaab6f7c66da9c13fb1bf0945bf6706"
+   }
+  ],
+  "kver": "6.5.11-060511-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.6.158",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.6.158",
+  "upstream": "6.6",
+  "source": "https://kernel.ubuntu.com/mainline/v6.6.158/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.6.158-0606158-generic_6.6.158-0606158.202610031241_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.6.158/amd64/linux-image-unsigned-6.6.158-0606158-generic_6.6.158-0606158.202610031241_amd64.deb",
+    "sha256": "4ede8333ddb591b98cbd67b0f808841d99293bafda4e13a1c4f220beb0d241f4"
+   },
+   {
+    "file": "linux-modules-6.6.158-0606158-generic_6.6.158-0606158.202610031241_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.6.158/amd64/linux-modules-6.6.158-0606158-generic_6.6.158-0606158.202610031241_amd64.deb",
+    "sha256": "23a148e72234e57fa5662c336d4c2a61baaf27f2dba77d9098e58b68eb6d25da"
+   }
+  ],
+  "kver": "6.6.158-0606158-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.7.10",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.7.10",
+  "upstream": "6.7",
+  "source": "https://kernel.ubuntu.com/mainline/v6.7.10/",
+  "status": "ok",
+  "notes": [
+   "v6.7.12: amd64 build failed",
+   "v6.7.11: amd64 build failed"
+  ],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.7.10-060710-generic_6.7.10-060710.202403151538_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.7.10/amd64/linux-image-unsigned-6.7.10-060710-generic_6.7.10-060710.202403151538_amd64.deb",
+    "sha256": "3cc6a765fe59e88ffb1e86d48af247224541c99fc8bc915af9753edb199cc950"
+   },
+   {
+    "file": "linux-modules-6.7.10-060710-generic_6.7.10-060710.202403151538_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.7.10/amd64/linux-modules-6.7.10-060710-generic_6.7.10-060710.202403151538_amd64.deb",
+    "sha256": "437639613eeb2b056957cffea7ef2641da0e06f7c8a016407d7fbf098ebfac3a"
+   }
+  ],
+  "kver": "6.7.10-060710-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.8.12",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.8.12",
+  "upstream": "6.8",
+  "source": "https://kernel.ubuntu.com/mainline/v6.8.12/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.8.12-060812-generic_6.8.12-060812.202501300202_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.8.12/amd64/linux-image-unsigned-6.8.12-060812-generic_6.8.12-060812.202501300202_amd64.deb",
+    "sha256": "95d53a3a4c0f969947bfc211ea770577d175f131f4bb28ac36c415b7722b592c"
+   },
+   {
+    "file": "linux-modules-6.8.12-060812-generic_6.8.12-060812.202501300202_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.8.12/amd64/linux-modules-6.8.12-060812-generic_6.8.12-060812.202501300202_amd64.deb",
+    "sha256": "872f775a0cd22d0e02f12a25c34abbf79c8b9316a28eb96948b03a5b59b54510"
+   }
+  ],
+  "kver": "6.8.12-060812-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-6.9.12",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "6.9.12",
+  "upstream": "6.9",
+  "source": "https://kernel.ubuntu.com/mainline/v6.9.12/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.9.12-060912-generic_6.9.12-060912.202502190936_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.9.12/amd64/linux-image-unsigned-6.9.12-060912-generic_6.9.12-060912.202502190936_amd64.deb",
+    "sha256": "093124b357f53e1661bc088bde797bc00a89495bd154b96122b5960f3e15c9b2"
+   },
+   {
+    "file": "linux-modules-6.9.12-060912-generic_6.9.12-060912.202502190936_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v6.9.12/amd64/linux-modules-6.9.12-060912-generic_6.9.12-060912.202502190936_amd64.deb",
+    "sha256": "18c9e0b50f504fed1d5d94e376b5bc6432ba1daf9736a221d856eef4279a83e4"
+   }
+  ],
+  "kver": "6.9.12-060912-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-7.0.14",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "7.0.14",
+  "upstream": "7.0",
+  "source": "https://kernel.ubuntu.com/mainline/v7.0.14/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-7.0.14-070014-generic_7.0.14-070014.202606271041_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.0.14/amd64/linux-image-unsigned-7.0.14-070014-generic_7.0.14-070014.202606271041_amd64.deb",
+    "sha256": "fb5e54e270e5aa40da7a404cbf448da176e26aba9c0deffb72639d1bc85b6ca9"
+   },
+   {
+    "file": "linux-modules-7.0.14-070014-generic_7.0.14-070014.202606271041_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.0.14/amd64/linux-modules-7.0.14-070014-generic_7.0.14-070014.202606271041_amd64.deb",
+    "sha256": "1a2f03d00d24f2f2fcd1e8b1b9b3e5b3754310383f08cf7a0600f2924ddff29c"
+   }
+  ],
+  "kver": "7.0.14-070014-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-7.1.13",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "7.1.13",
+  "upstream": "7.1",
+  "source": "https://kernel.ubuntu.com/mainline/v7.1.13/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-7.1.13-070113-generic_7.1.13-070113.202609032040_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.1.13/amd64/linux-image-unsigned-7.1.13-070113-generic_7.1.13-070113.202609032040_amd64.deb",
+    "sha256": "9fbf0b2b9331dfe2d4f1226b711b863fc2ea5e1a77ce2a1bfa277827f6fb9a46"
+   },
+   {
+    "file": "linux-modules-7.1.13-070113-generic_7.1.13-070113.202609032040_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.1.13/amd64/linux-modules-7.1.13-070113-generic_7.1.13-070113.202609032040_amd64.deb",
+    "sha256": "1737e4686fa8b72421cdf095ee3d26a537b7e334f77d2d36bba3bc653e947cfa"
+   }
+  ],
+  "kver": "7.1.13-070113-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-7.2.6",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "7.2.6",
+  "upstream": "7.2",
+  "source": "https://kernel.ubuntu.com/mainline/v7.2.6/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-7.2.6-070206-generic_7.2.6-070206.202609141300_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.2.6/amd64/linux-image-unsigned-7.2.6-070206-generic_7.2.6-070206.202609141300_amd64.deb",
+    "sha256": "9d3929b017a488c8ca265ff14bb19f15217097247a709816e0875eaa7dcc4b61"
+   },
+   {
+    "file": "linux-modules-7.2.6-070206-generic_7.2.6-070206.202609141300_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.2.6/amd64/linux-modules-7.2.6-070206-generic_7.2.6-070206.202609141300_amd64.deb",
+    "sha256": "bf1689c1a32e9cc141575fb551cbec60d2e6d42762587aa9ce9194301469066d"
+   }
+  ],
+  "kver": "7.2.6-070206-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "mainline-7.3-rc3",
+  "family": "mainline",
+  "distro": "Ubuntu mainline build",
+  "version": "7.3-rc3",
+  "upstream": "7.3",
+  "source": "https://kernel.ubuntu.com/mainline/v7.3-rc3/",
+  "status": "ok",
+  "notes": [],
+  "packages": [
+   {
+    "file": "linux-image-unsigned-7.3.0-070300rc3-generic_7.3.0-070300rc3.202609132247_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.3-rc3/amd64/linux-image-unsigned-7.3.0-070300rc3-generic_7.3.0-070300rc3.202609132247_amd64.deb",
+    "sha256": "5f2788b423366969fb819827aef682854871afb4f4851ef25b8341eef90359dd"
+   },
+   {
+    "file": "linux-modules-7.3.0-070300rc3-generic_7.3.0-070300rc3.202609132247_amd64.deb",
+    "url": "https://kernel.ubuntu.com/mainline/v7.3-rc3/amd64/linux-modules-7.3.0-070300rc3-generic_7.3.0-070300rc3.202609132247_amd64.deb",
+    "sha256": "a8569d30cf9a24e38341df57b3d336e5c68121be73481aa22f068f1a21444852"
+   }
+  ],
+  "kver": "7.3.0-070300rc3-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "opensuse-leap-15.6",
+  "family": "suse",
+  "distro": "openSUSE Leap 15.6",
+  "version": "6.4.0-150600.23.103-default",
+  "upstream": "6.4",
+  "source": "zypper in opensuse/leap:15.6",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-default-6.4.0-150600.23.103.1.x86_64.rpm",
+    "url": "",
+    "sha256": "74984757a6a00588fea695831bbec1259e3bb3180994c745b8b8aac7017d55bd"
+   },
+   {
+    "file": "kernel-default-extra-6.4.0-150600.23.103.1.x86_64.rpm",
+    "url": "",
+    "sha256": "8f464306e569fa28508d02a139f4b5414913c7ba48f2a1032fef575a8ac6ce9f"
+   },
+   {
+    "file": "kernel-default-optional-6.4.0-150600.23.103.1.x86_64.rpm",
+    "url": "",
+    "sha256": "83c6f2db72d7c205a5552f3c02cbdfd401e9ac444e2e6bd41007934b0b5f096a"
+   }
+  ],
+  "kver": "6.4.0-150600.23.103-default",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "opensuse-leap-16.0",
+  "family": "suse",
+  "distro": "openSUSE Leap 16.0",
+  "version": "6.12.0-160000.38-default",
+  "upstream": "6.12",
+  "source": "zypper in opensuse/leap:16.0",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-default-6.12.0-160000.38.1.x86_64.rpm",
+    "url": "",
+    "sha256": "99511f0c556b25eab364a1167782fb6868dd4971ebf64bb28fc00b65eed9cda6"
+   },
+   {
+    "file": "kernel-default-extra-6.12.0-160000.38.1.x86_64.rpm",
+    "url": "",
+    "sha256": "03d5b446396c4eaae2010e632e96c1c94e90b6f5ae5d4d63db609d54f1d038bf"
+   },
+   {
+    "file": "kernel-default-optional-6.12.0-160000.38.1.x86_64.rpm",
+    "url": "",
+    "sha256": "0d75aacfafc30be1e8ef8be017e7ac83692f862d9696b3b7a7d5191833105099"
+   }
+  ],
+  "kver": "6.12.0-160000.38-default",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "opensuse-tumbleweed",
+  "family": "suse",
+  "distro": "openSUSE Tumbleweed",
+  "version": "7.2.8-1-default",
+  "upstream": "7.2",
+  "source": "zypper in opensuse/tumbleweed",
+  "status": "ok",
+  "notes": [
+   "not in repo: kernel-default-extra kernel-default-optional"
+  ],
+  "packages": [
+   {
+    "file": "kernel-default-7.2.8-1.1.x86_64.rpm",
+    "url": "",
+    "sha256": "47b83801216afcd17ef975a24586258ba652a17f439ac66a8cd1067a0ce0827e"
+   }
+  ],
+  "kver": "7.2.8-1-default",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "oracle-9-uek7",
+  "family": "oracle",
+  "distro": "Oracle Linux 9 UEK7",
+  "version": "5.15.0-324.217.5.3.el9uek",
+  "upstream": "5.15",
+  "source": "dnf in oraclelinux:9",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-uek-core-5.15.0-324.217.5.3.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR7/x86_64/getPackage/kernel-uek-core-5.15.0-324.217.5.3.el9uek.x86_64.rpm",
+    "sha256": "d7158980c599b1e836e7085062e1d9c7cc8ce57fa8a86a019ed2ea28630bdac5"
+   },
+   {
+    "file": "kernel-uek-modules-5.15.0-324.217.5.3.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR7/x86_64/getPackage/kernel-uek-modules-5.15.0-324.217.5.3.el9uek.x86_64.rpm",
+    "sha256": "b9986979721f7aa4ea5d49cd0c481182f9e03c4f1fcd0be37166629bf76d2fd0"
+   },
+   {
+    "file": "kernel-uek-modules-extra-5.15.0-324.217.5.3.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR7/x86_64/getPackage/kernel-uek-modules-extra-5.15.0-324.217.5.3.el9uek.x86_64.rpm",
+    "sha256": "7cc60a985a7f1bb6db4fd3d240e1d4c603595d61c5175cd8f783ed44313ec559"
+   }
+  ],
+  "kver": "5.15.0-324.217.5.3.el9uek.x86_64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "oracle-9-uek8",
+  "family": "oracle",
+  "distro": "Oracle Linux 9 UEK8",
+  "version": "6.12.0-206.104.4.4.el9uek",
+  "upstream": "6.12",
+  "source": "dnf in oraclelinux:9",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-uek-core-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR8/x86_64/getPackage/kernel-uek-core-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "sha256": "8989dc8f445b9bf351dd1f7a8fc55cabd86dff2c1b253c96057d15b530fccf54"
+   },
+   {
+    "file": "kernel-uek-modules-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR8/x86_64/getPackage/kernel-uek-modules-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "sha256": "7ab11a21d9e56bd4c041ad8900db5e9edc5d0c462103884fbbbb84f8f6be7674"
+   },
+   {
+    "file": "kernel-uek-modules-core-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR8/x86_64/getPackage/kernel-uek-modules-core-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "sha256": "8a7124b26bc63579169ed6c9d0b71418a6538eb18388f28dada6630b85c3df0e"
+   },
+   {
+    "file": "kernel-uek-modules-extra-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "url": "https://yum.oracle.com/repo/OracleLinux/OL9/UEKR8/x86_64/getPackage/kernel-uek-modules-extra-6.12.0-206.104.4.4.el9uek.x86_64.rpm",
+    "sha256": "c6148d69f3b3b6a5b5fb10ed7574bf84835a68f0a5403eb0babf879cdb68dd79"
+   }
+  ],
+  "kver": "6.12.0-206.104.4.4.el9uek.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "rocky-10",
+  "family": "rhel",
+  "distro": "Rocky Linux 10",
+  "version": "6.12.0-211.61.1.el10_2",
+  "upstream": "6.12",
+  "source": "dnf in rockylinux/rockylinux:10",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "url": "https://rocky-linux-us-east4.production.gcp.mirrors.ctrliq.cloud/pub/rocky//10.2/BaseOS/x86_64/os/Packages/k/kernel-core-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "sha256": "e3d6f7eaf4e5ea51ec588fbce1183debc11d227c48aedd013c88c84ef0f8b331"
+   },
+   {
+    "file": "kernel-modules-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "url": "https://rocky-linux-us-east4.production.gcp.mirrors.ctrliq.cloud/pub/rocky//10.2/BaseOS/x86_64/os/Packages/k/kernel-modules-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "sha256": "e9f847d5a0850247c8544ff95680f9f2354177bf8d60210239490dc804529961"
+   },
+   {
+    "file": "kernel-modules-core-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "url": "https://rocky-linux-us-east4.production.gcp.mirrors.ctrliq.cloud/pub/rocky//10.2/BaseOS/x86_64/os/Packages/k/kernel-modules-core-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "sha256": "e0d7c909368d193ffa6f9e3de244db9ae6b53268f9049e345785ae0c617be371"
+   },
+   {
+    "file": "kernel-modules-extra-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "url": "https://rocky-linux-us-east4.production.gcp.mirrors.ctrliq.cloud/pub/rocky//10.2/BaseOS/x86_64/os/Packages/k/kernel-modules-extra-6.12.0-211.61.1.el10_2.x86_64.rpm",
+    "sha256": "0814a62755ea7300a3326ce9587f608accfa04c8947a3039409ba37e1ff0a50f"
+   }
+  ],
+  "kver": "6.12.0-211.61.1.el10_2.x86_64",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "y",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "rocky-9",
+  "family": "rhel",
+  "distro": "Rocky Linux 9",
+  "version": "5.14.0-687.54.1.el9_8",
+  "upstream": "5.14",
+  "source": "dnf in rockylinux/rockylinux:9",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "kernel-core-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "url": "https://mirror.atl.adaptivedatanetworks.com/rocky/9.8/BaseOS/x86_64/os/Packages/k/kernel-core-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "sha256": "c0b08b6278c2f2d36c062bbecffb8388655045529a317a9692d55cc4133a3d40"
+   },
+   {
+    "file": "kernel-modules-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "url": "https://mirror.atl.adaptivedatanetworks.com/rocky/9.8/BaseOS/x86_64/os/Packages/k/kernel-modules-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "sha256": "7f41d162c45624d34126f40e2fe3f7ffe97813ad38924fcde66435deea6ec518"
+   },
+   {
+    "file": "kernel-modules-core-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "url": "https://mirror.atl.adaptivedatanetworks.com/rocky/9.8/BaseOS/x86_64/os/Packages/k/kernel-modules-core-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "sha256": "fceb416e7608a84a4d5d0e003bd22a1e992bc1ba857687837b05d380bad08621"
+   },
+   {
+    "file": "kernel-modules-extra-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "url": "https://mirror.atl.adaptivedatanetworks.com/rocky/9.8/BaseOS/x86_64/os/Packages/k/kernel-modules-extra-5.14.0-687.54.1.el9_8.x86_64.rpm",
+    "sha256": "aa1fb752400e9561eaead7edfaa5f7b33dc32ab538785fca18a64aafc9f5ff9d"
+   }
+  ],
+  "kver": "5.14.0-687.54.1.el9_8.x86_64",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "y",
+   "CONFIG_EXT4_FS": "m",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-22.04-ga",
+  "family": "ubuntu",
+  "distro": "Ubuntu 22.04 GA",
+  "version": "5.15.0-198-generic",
+  "upstream": "5.15",
+  "source": "apt in ubuntu:22.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-5.15.0-198-generic_5.15.0-198.208_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-5.15.0-198-generic_5.15.0-198.208_amd64.deb",
+    "sha256": "f92ba2f6e717891165a1288a0c0350d0791176b19c41c180b272b305c9704cb0"
+   },
+   {
+    "file": "linux-modules-5.15.0-198-generic_5.15.0-198.208_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-5.15.0-198-generic_5.15.0-198.208_amd64.deb",
+    "sha256": "c56ec2803fb39d34365e2874cbebd2b9bcaaa1f9adb87f22c77e93277d494bef"
+   },
+   {
+    "file": "linux-modules-extra-5.15.0-198-generic_5.15.0-198.208_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-extra-5.15.0-198-generic_5.15.0-198.208_amd64.deb",
+    "sha256": "43528923613a77891402e3b722729e7a866ac24f76b087b63a02cdd7ae56134d"
+   }
+  ],
+  "kver": "5.15.0-198-generic",
+  "ublk_drv": false,
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-22.04-hwe",
+  "family": "ubuntu",
+  "distro": "Ubuntu 22.04 HWE",
+  "version": "6.8.0-138-generic",
+  "upstream": "6.8",
+  "source": "apt in ubuntu:22.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.8.0-138-generic_6.8.0-138.138~22.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-hwe-6.8/linux-image-6.8.0-138-generic_6.8.0-138.138%7e22.04.1_amd64.deb",
+    "sha256": "4e29a160661fc933f42498742faa1f0b10bc382fce6070cc2b02709c1adda277"
+   },
+   {
+    "file": "linux-modules-6.8.0-138-generic_6.8.0-138.138~22.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.8/linux-modules-6.8.0-138-generic_6.8.0-138.138%7e22.04.1_amd64.deb",
+    "sha256": "7b580b7b810808b797a1501c5638d2fd2edfa7ec727ec5513337120b52a477a2"
+   },
+   {
+    "file": "linux-modules-extra-6.8.0-138-generic_6.8.0-138.138~22.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.8/linux-modules-extra-6.8.0-138-generic_6.8.0-138.138%7e22.04.1_amd64.deb",
+    "sha256": "58f7465e1b6f4eea292eef908e0b5966d75c8f64a8b4e2a5ec2a98df3eee8897"
+   }
+  ],
+  "kver": "6.8.0-138-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-aws",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 linux-aws",
+  "version": "7.0.0-1014-aws",
+  "upstream": "7.0",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-7.0.0-1014-aws_7.0.0-1014.14~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-aws-7.0/linux-image-7.0.0-1014-aws_7.0.0-1014.14%7e24.04.1_amd64.deb",
+    "sha256": "bb4e1aae90d41945b100459233ee440c3494e019467f9a2e60ec931f988cf00b"
+   },
+   {
+    "file": "linux-modules-7.0.0-1014-aws_7.0.0-1014.14~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws-7.0/linux-modules-7.0.0-1014-aws_7.0.0-1014.14%7e24.04.1_amd64.deb",
+    "sha256": "918e98bed5dae1ab40bfb3bc91e9456c1321435533165a9d7023ac60301c1e88"
+   }
+  ],
+  "kver": "7.0.0-1014-aws",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-azure",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 linux-azure",
+  "version": "7.0.0-1017-azure",
+  "upstream": "7.0",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-7.0.0-1017-azure_7.0.0-1017.17~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-azure-7.0/linux-image-7.0.0-1017-azure_7.0.0-1017.17%7e24.04.1_amd64.deb",
+    "sha256": "1e4472d644ee9f2322a8a24527e4d63239f7a86f711695d5397b79c4e4cb2b4a"
+   },
+   {
+    "file": "linux-modules-7.0.0-1017-azure_7.0.0-1017.17~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-azure-7.0/linux-modules-7.0.0-1017-azure_7.0.0-1017.17%7e24.04.1_amd64.deb",
+    "sha256": "19ad1d32c0138b6ef90257f211e80490d3aaf322ba5c3c2910fdfbfb1f20da6d"
+   }
+  ],
+  "kver": "7.0.0-1017-azure",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-ga",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 GA",
+  "version": "6.8.0-146-generic",
+  "upstream": "6.8",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.8.0-146-generic_6.8.0-146.146_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-6.8.0-146-generic_6.8.0-146.146_amd64.deb",
+    "sha256": "5ff8d86009ba6c30a6aacfe47a5176969bbb6591438c913d29881032d071e83f"
+   },
+   {
+    "file": "linux-modules-6.8.0-146-generic_6.8.0-146.146_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-6.8.0-146-generic_6.8.0-146.146_amd64.deb",
+    "sha256": "9287a0b722a7dd0c94a412eda8e27de4742a7925fdf2d08375b2f608516e6ab4"
+   },
+   {
+    "file": "linux-modules-extra-6.8.0-146-generic_6.8.0-146.146_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-extra-6.8.0-146-generic_6.8.0-146.146_amd64.deb",
+    "sha256": "7e6c7ffd44e4242f9dab21a64782ee63d6da601dfc53502f81a2ae19b6751138"
+   }
+  ],
+  "kver": "6.8.0-146-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-gcp",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 linux-gcp",
+  "version": "7.0.0-1014-gcp",
+  "upstream": "7.0",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-7.0.0-1014-gcp_7.0.0-1014.14~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-gcp-7.0/linux-image-7.0.0-1014-gcp_7.0.0-1014.14%7e24.04.1_amd64.deb",
+    "sha256": "4747beb586a21233e4fd5a1f95a7750764822e691bd1a0ef6b14d71a2050281c"
+   },
+   {
+    "file": "linux-modules-7.0.0-1014-gcp_7.0.0-1014.14~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-gcp-7.0/linux-modules-7.0.0-1014-gcp_7.0.0-1014.14%7e24.04.1_amd64.deb",
+    "sha256": "806afd2a8a5d336637134b519124dce6d97f9a23a421ebe8c9ac1581347786fc"
+   }
+  ],
+  "kver": "7.0.0-1014-gcp",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-hwe",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 HWE",
+  "version": "7.0.0-38-generic",
+  "upstream": "7.0",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-7.0.0-38-generic_7.0.0-38.38~24.04.4_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-hwe-7.0/linux-image-7.0.0-38-generic_7.0.0-38.38%7e24.04.4_amd64.deb",
+    "sha256": "1791405b126cb2ef8b969dc6706292a02c12da9f581bb3f8fac2d1272a419fd4"
+   },
+   {
+    "file": "linux-modules-7.0.0-38-generic_7.0.0-38.38~24.04.4_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-7.0/linux-modules-7.0.0-38-generic_7.0.0-38.38%7e24.04.4_amd64.deb",
+    "sha256": "99536f44ce1802e63ed79a90d386bb1025ec12bf7a2f5af43287dbb4af247202"
+   }
+  ],
+  "kver": "7.0.0-38-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-hwe-6.11",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 HWE 6.11",
+  "version": "6.11.0-29-generic",
+  "upstream": "6.11",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.11.0-29-generic_6.11.0-29.29~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-hwe-6.11/linux-image-6.11.0-29-generic_6.11.0-29.29%7e24.04.1_amd64.deb",
+    "sha256": "be8038e448af89495382278e9286b3be2101a1552bdf562b3a49d3c7fb4cba84"
+   },
+   {
+    "file": "linux-modules-6.11.0-29-generic_6.11.0-29.29~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.11/linux-modules-6.11.0-29-generic_6.11.0-29.29%7e24.04.1_amd64.deb",
+    "sha256": "ad9eca2fd58295f5bdff74167cd332a114ab3116147d4331391b111bfae2ad27"
+   },
+   {
+    "file": "linux-modules-extra-6.11.0-29-generic_6.11.0-29.29~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.11/linux-modules-extra-6.11.0-29-generic_6.11.0-29.29%7e24.04.1_amd64.deb",
+    "sha256": "f82f7796a6dba9b6afdb063d7d781a87a391f98b78acb180ad53c610aeb98ea1"
+   }
+  ],
+  "kver": "6.11.0-29-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-hwe-6.14",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 HWE 6.14",
+  "version": "6.14.0-37-generic",
+  "upstream": "6.14",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.14.0-37-generic_6.14.0-37.37~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-hwe-6.14/linux-image-6.14.0-37-generic_6.14.0-37.37%7e24.04.1_amd64.deb",
+    "sha256": "9c17bb3f50741bf8f21b0f8a2afd088f5d0ae5b0d1cc00b7a866a63c8492d29a"
+   },
+   {
+    "file": "linux-modules-6.14.0-37-generic_6.14.0-37.37~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.14/linux-modules-6.14.0-37-generic_6.14.0-37.37%7e24.04.1_amd64.deb",
+    "sha256": "1bb1438d7d5f266da64f9ecc18f41bf37e5b94ad8a052b5d367ae09af03352fb"
+   },
+   {
+    "file": "linux-modules-extra-6.14.0-37-generic_6.14.0-37.37~24.04.1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.14/linux-modules-extra-6.14.0-37-generic_6.14.0-37.37%7e24.04.1_amd64.deb",
+    "sha256": "e50be91ad2a10e7c2cb60254b7be098c6b402119240bb8a102737b3559c69157"
+   }
+  ],
+  "kver": "6.14.0-37-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-hwe-6.17",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 HWE 6.17",
+  "version": "6.17.0-42-generic",
+  "upstream": "6.17",
+  "source": "apt in ubuntu:24.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.17.0-42-generic_6.17.0-42.42+1_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed-hwe-6.17/linux-image-6.17.0-42-generic_6.17.0-42.42%2b1_amd64.deb",
+    "sha256": "f8d0827ec4b65c5ced46a02d13912346779744d29ff2b4d3ff7636bd7cdec717"
+   },
+   {
+    "file": "linux-modules-6.17.0-42-generic_6.17.0-42.42_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.17/linux-modules-6.17.0-42-generic_6.17.0-42.42_amd64.deb",
+    "sha256": "7a04e0295f578c191f6559ef2e36b47470e5127190abdad2164f84cbca5e677d"
+   },
+   {
+    "file": "linux-modules-extra-6.17.0-42-generic_6.17.0-42.42_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.17/linux-modules-extra-6.17.0-42-generic_6.17.0-42.42_amd64.deb",
+    "sha256": "00af4cb0f0240518c401f84dbee6f0a3135c19f56ebf7aad5833a1e5a5e3a031"
+   }
+  ],
+  "kver": "6.17.0-42-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-hwe-6.17.0-40",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 HWE 6.17.0-40 (known-bad control)",
+  "version": "6.17.0-40-generic",
+  "upstream": "6.17",
+  "source": "launchpad.net (librarian)",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-unsigned-6.17.0-40-generic_6.17.0-40.40~24.04.1_amd64.deb",
+    "url": "https://launchpad.net/ubuntu/+archive/primary/+files/linux-image-unsigned-6.17.0-40-generic_6.17.0-40.40~24.04.1_amd64.deb",
+    "sha256": "16f716b96ab958dcac3b06878a6055552754bd678380ac0c35cc3b4928e59d10"
+   },
+   {
+    "file": "linux-modules-6.17.0-40-generic_6.17.0-40.40~24.04.1_amd64.deb",
+    "url": "https://launchpad.net/ubuntu/+archive/primary/+files/linux-modules-6.17.0-40-generic_6.17.0-40.40~24.04.1_amd64.deb",
+    "sha256": "dea9da4074a6e3af5f743f223b972e8df30f69343b8711cfa0303db991e14869"
+   },
+   {
+    "file": "linux-modules-extra-6.17.0-40-generic_6.17.0-40.40~24.04.1_amd64.deb",
+    "url": "https://launchpad.net/ubuntu/+archive/primary/+files/linux-modules-extra-6.17.0-40-generic_6.17.0-40.40~24.04.1_amd64.deb",
+    "sha256": "5b2c9f03a8dcec78708da5f002e8146a94fea9ad4bdf44a97933cca4d7fafbdd"
+   }
+  ],
+  "kver": "6.17.0-40-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-24.04-hwe-7.0.0-38",
+  "family": "ubuntu",
+  "distro": "Ubuntu 24.04 HWE 7.0.0-38 (Slide-tested)",
+  "version": "7.0.0-38-generic",
+  "upstream": "7.0",
+  "source": "launchpad.net (librarian)",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-unsigned-7.0.0-38-generic_7.0.0-38.38~24.04.4_amd64.deb",
+    "url": "https://launchpad.net/ubuntu/+archive/primary/+files/linux-image-unsigned-7.0.0-38-generic_7.0.0-38.38~24.04.4_amd64.deb",
+    "sha256": "387f7fcf5f930e7916214bc54c104117e41c9595c25bf9333ab9793a4deac60d"
+   },
+   {
+    "file": "linux-modules-7.0.0-38-generic_7.0.0-38.38~24.04.4_amd64.deb",
+    "url": "https://launchpad.net/ubuntu/+archive/primary/+files/linux-modules-7.0.0-38-generic_7.0.0-38.38~24.04.4_amd64.deb",
+    "sha256": "99536f44ce1802e63ed79a90d386bb1025ec12bf7a2f5af43287dbb4af247202"
+   }
+  ],
+  "kver": "7.0.0-38-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-25.04",
+  "family": "ubuntu",
+  "distro": "Ubuntu 25.04",
+  "version": "6.14.0-37-generic",
+  "upstream": "6.14",
+  "source": "apt in ubuntu:25.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.14.0-37-generic_6.14.0-37.37_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-6.14.0-37-generic_6.14.0-37.37_amd64.deb",
+    "sha256": "ce6e72de3a5b600a245e95a47b4364643def76b8fc0218f7c14ec0879f32a234"
+   },
+   {
+    "file": "linux-modules-6.14.0-37-generic_6.14.0-37.37_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-6.14.0-37-generic_6.14.0-37.37_amd64.deb",
+    "sha256": "653364c89b5fab4e683a911ff8983c2f537206e1d31123701b2c3699c1f55063"
+   },
+   {
+    "file": "linux-modules-extra-6.14.0-37-generic_6.14.0-37.37_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-extra-6.14.0-37-generic_6.14.0-37.37_amd64.deb",
+    "sha256": "c7f0ff3f233fa82e5cb7158aeed214a19e64a3a613811ebac59361c9fbe784aa"
+   }
+  ],
+  "kver": "6.14.0-37-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-25.10",
+  "family": "ubuntu",
+  "distro": "Ubuntu 25.10",
+  "version": "6.17.0-41-generic",
+  "upstream": "6.17",
+  "source": "apt in ubuntu:25.10",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-6.17.0-41-generic_6.17.0-41.41_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-6.17.0-41-generic_6.17.0-41.41_amd64.deb",
+    "sha256": "a9e6317b3f51ae2aa2a2379a3711cbf31ac9469868470a360e93dbc938995da1"
+   },
+   {
+    "file": "linux-modules-6.17.0-41-generic_6.17.0-41.41_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-6.17.0-41-generic_6.17.0-41.41_amd64.deb",
+    "sha256": "e1ab6fe64c7f27b2b230e9c65ce2a5817f52c2c2900eae61088d2d332efef10c"
+   }
+  ],
+  "kver": "6.17.0-41-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ },
+ {
+  "id": "ubuntu-26.04",
+  "family": "ubuntu",
+  "distro": "Ubuntu 26.04",
+  "version": "7.0.0-38-generic",
+  "upstream": "7.0",
+  "source": "apt in ubuntu:26.04",
+  "status": "ok",
+  "packages": [
+   {
+    "file": "linux-image-7.0.0-38-generic_7.0.0-38.38_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-7.0.0-38-generic_7.0.0-38.38_amd64.deb",
+    "sha256": "f268d635efaa2e19a18e12813ffdbc2e32db2390cf67d4416abd59292975e7aa"
+   },
+   {
+    "file": "linux-modules-7.0.0-38-generic_7.0.0-38.38_amd64.deb",
+    "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-7.0.0-38-generic_7.0.0-38.38_amd64.deb",
+    "sha256": "ad2fed69c4430fea2d67f23bd672a4e68773049cf9984a63894f093879ec2ae0"
+   }
+  ],
+  "kver": "7.0.0-38-generic",
+  "ublk_drv": "module",
+  "config": {
+   "CONFIG_IO_URING": "y",
+   "CONFIG_MODULE_SIG_FORCE": "n",
+   "CONFIG_BLK_DEV_UBLK": "m",
+   "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES": "n",
+   "CONFIG_HW_RANDOM_VIRTIO": "m",
+   "CONFIG_EXT4_FS": "y",
+   "CONFIG_XFS_FS": "m"
+  }
+ }
+]
