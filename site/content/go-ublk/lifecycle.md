@@ -67,7 +67,7 @@ A long-running server should watch `Done` and treat a non-nil `Err` as fatal for
 
 1. Sends `STOP_DEV` while the queues are still serving. The kernel removes `/dev/ublkbN`, which drains in-flight I/O (and syncs a mounted filesystem through the device); only the running queues can complete that I/O. The wait is bounded by `Options.StopTimeout` (default one minute).
 2. Waits for every queue to finish what its backend calls hold and exit, then frees their rings, mappings and `/dev/ublkcN`.
-3. Sends `DEL_DEV`, which deletes `/dev/ublkcN` and frees the ID.
+3. Sends `DEL_DEV`, which deletes `/dev/ublkcN` and frees the ID. The kernel finishes it only when nothing holds the device any more, and an open file descriptor on `/dev/ublkbN` (even after `STOP_DEV` removed the node) keeps it alive: `Close` then waits up to `Options.StopTimeout` and returns an error, and the deletion completes when that descriptor is closed. Close your own descriptors on the block device before calling `Close`.
 
 If `STOP_DEV` fails (a timeout, or `SafeStop` with the device open), `Close` returns the error **with nothing torn down**: the device keeps serving and you can retry. If a queue does not exit, its memory is deliberately leaked rather than freed under a running backend call, `/dev/ublkcN` stays held, and `Close` returns an error instead of deleting a device it cannot safely release.
 
