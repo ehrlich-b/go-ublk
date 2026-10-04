@@ -56,7 +56,7 @@ Description=Filesystem on go-ublk device /dev/ublkb0
 Requires=ublk-loop@0.service
 After=ublk-loop@0.service
 DefaultDependencies=no
-Before=umount.target
+Before=umount.target user.slice
 Conflicts=umount.target
 
 [Mount]
@@ -72,6 +72,7 @@ WantedBy=multi-user.target
 What each part does:
 
 - **`Requires=` and `After=` on the mount** are the load-bearing lines. They make systemd unmount before it stops the service.
+- **`Before=user.slice` on the mount** makes systemd stop every login session and user service before it unmounts. Without it, a process in a session with a file open on the filesystem (an admin's shell, a job started by hand) makes the unmount fail with "target is busy"; systemd then stops the server anyway, and the filesystem's writeback fails against a device that is gone. On a VM rebooted under write load this happened in 3 of 5 reboots without the line and 0 of 5 with it. Services that use the filesystem need the same treatment from their side: give them `RequiresMountsFor=/srv/ublk0`, which orders them to stop before the unmount. At boot the line also means a login waits for the mount if both start together.
 - **`DefaultDependencies=no` with `Conflicts=`/`Before=umount.target`** keeps the service out of the ordinary early-shutdown sweep, so it stays alive until unmounting actually happens.
 - **`Type=notify`**: `ublk-loop` sends `READY=1` (a dozen lines of Go over `$NOTIFY_SOCKET`, no dependency) once `/dev/ublkbN` is serving, so the mount starts only when the device exists. Do the same in your server, or the mount may race the device.
 - **`After=local-fs.target`** is there because the backing file lives on a local filesystem. If yours lives elsewhere, order after that instead (`RequiresMountsFor=/var/lib/ublk` is the precise form). Do not put the ublk mount itself in `local-fs.target` (for example through a plain `/etc/fstab` line) while the service is ordered after `local-fs.target`; that is a dependency cycle.
@@ -79,7 +80,7 @@ What each part does:
 - **A fixed device ID** (`-id=%i`, i.e. `DeviceParams.DeviceID`) keeps `/dev/ublkbN` stable, so the mount unit can name it.
 - **`-recovery` with `Restart=always`**: see the next section. An explicit stop — shutdown, `systemctl stop` — is never restarted.
 
-If you mount from `/etc/fstab` instead, the mount option `x-systemd.requires=ublk-loop@0.service` adds the same `Requires=` and `After=`. An fstab mount is ordered before `local-fs.target`, though, so the service must not be ordered after it: replace `After=local-fs.target` with `RequiresMountsFor=` on the backing store's path. Add `nofail` so a failed device does not block boot. This variant has not been run through the storm test.
+If you mount from `/etc/fstab` instead, the mount options `x-systemd.requires=ublk-loop@0.service,x-systemd.before=user.slice` add the same `Requires=`, `After=` and `Before=user.slice`. An fstab mount is ordered before `local-fs.target`, though, so the service must not be ordered after it: replace `After=local-fs.target` with `RequiresMountsFor=` on the backing store's path. Add `nofail` so a failed device does not block boot. This variant has not been run through the storm test.
 
 ## Crashes and upgrades without downtime
 
@@ -134,7 +135,8 @@ A server created without a recovery mode takes its block device with it when it 
 
 ## Checklist
 
-- [ ] The server runs as a systemd service; every mount of its device has `Requires=` and `After=` on it.
+- [ ] The server runs as a systemd service; every mount of its device has `Requires=` and `After=` on it, and `Before=user.slice`.
+- [ ] Every service that uses the filesystem has `RequiresMountsFor=` on its mount point.
 - [ ] Fixed `DeviceID` per device; orphans with that ID are reaped at startup.
 - [ ] `VolatileCache` matches the backend: true unless every completed write is already durable.
 - [ ] SIGINT, SIGTERM and SIGHUP call `device.Close()`, then close the backend.
@@ -142,8 +144,7 @@ A server created without a recovery mode takes its block device with it when it 
 - [ ] The kernel is not one of the known-bad builds.
 - [ ] `Options.Debug` is off.
 - [ ] Memory budget includes `NumQueues × QueueDepth × MaxIOSize` of request buffers (virtual; resident as used).
-- [ ] A daemon that creates and deletes devices repeatedly accounts for the open io_uring leak (about four rings per device cycle) until it is fixed.
 
 ## What has not been tested
 
-The crash and power-fail tests cover a SIGKILLed daemon and a guest-level hard reset (`sysrq-b`) mid-write, with no lost, torn or misplaced blocks. A guest reset drops the guest's page cache but not the host's cache of the virtual disk, so a real **host power cut** remains untested. So does long-duration soak testing. See [Testing and compatibility](/go-ublk/testing/).
+The crash and power-fail tests cover a SIGKILLed daemon and a guest-level hard reset (`sysrq-b`) mid-write, with no lost, torn or misplaced blocks. A guest reset drops the guest's page cache but not the host's cache of the virtual disk, so a real **host power cut** remains untested. Soak testing has run for hours (see `make vm-soak`), not days. See [Testing and compatibility](/go-ublk/testing/).

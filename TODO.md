@@ -352,6 +352,16 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     Check by handling SIGHUP in the examples and re-running the unsupervised storm arm, and by
     capturing `/proc/<tid>/stack` of the stuck threads.
 
+    **Ordering gap found and fixed (2026-10-04):** the correctly ordered units were still not
+    enough. Rebooting a 7.0.0-38 VM under buffered fio with the shipped units lost writeback in 3
+    of 5 reboots: fio ran in an ssh login session, the unmount failed with "target is busy"
+    because that session had not been stopped yet, systemd then stopped the daemon anyway
+    (the mount's stop job had finished, by failing), and STOP_DEV removed the disk under a
+    mounted ext4 with ~290 MB dirty (I/O errors, JBD2 aborted). Adding `Before=user.slice` to
+    the mount unit stops every session and user service before the unmount: 0 of 5 after, the
+    journal showing user.slice removed, then unmount, then the daemon stopped. Services that use
+    the filesystem must likewise be ordered with `RequiresMountsFor=`.
+
 16. **[FIXED — 2026-10-03] A discard or write-zeroes of 2GiB or more failed with EIO.**
     `submitCommitAndFetch` reported `int32(NrSectors) << 9` for every op. From 4194304 sectors
     that wraps negative, and the kernel fails any negative result even though the backend had

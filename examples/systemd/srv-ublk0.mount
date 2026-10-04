@@ -13,7 +13,11 @@ Description=Filesystem on go-ublk device /dev/ublkb0
 Requires=ublk-loop@0.service
 After=ublk-loop@0.service
 DefaultDependencies=no
-Before=umount.target
+# Before=user.slice: every login session and user service has stopped, and
+# closed its files here, before the unmount. Otherwise the unmount fails
+# ("target is busy"), systemd stops the daemon anyway, and the filesystem's
+# writeback hits a device that is gone.
+Before=umount.target user.slice
 Conflicts=umount.target
 
 [Mount]

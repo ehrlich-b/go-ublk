@@ -286,7 +286,7 @@ EOF
 Description=go-ublk shutdown-storm filesystem
 Requires=ublk-storm.service
 After=ublk-storm.service
-Before=umount.target
+Before=umount.target user.slice
 Conflicts=umount.target
 DefaultDependencies=no
 
