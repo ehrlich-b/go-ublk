@@ -103,7 +103,7 @@ type DeviceParams struct {
 	Recovery RecoveryMode
 
 	// Feature flags
-	EnableZeroCopy     bool // Unsupported for now: creation returns ErrNotImplemented
+	EnableZeroCopy     bool // Serve requests zero-copy against a ZeroCopyBackend's file (kernel 6.15+)
 	EnableUnprivileged bool // Create the device as an unprivileged user (UBLK_F_UNPRIVILEGED_DEV)
 	EnableUserCopy     bool // Move data with pread/pwrite on /dev/ublkcN (UBLK_F_USER_COPY)
 	EnableZoned        bool // Unsupported for now: creation returns ErrNotImplemented
@@ -223,7 +223,21 @@ func validateParams(params *DeviceParams) error {
 		return fmt.Errorf("set Backend or Handler, not both")
 	}
 	if params.EnableZeroCopy {
-		return fmt.Errorf("%w: EnableZeroCopy", ErrNotImplemented)
+		zc, ok := params.Backend.(ZeroCopyBackend)
+		if !ok {
+			return fmt.Errorf("EnableZeroCopy needs a Backend that implements ZeroCopyBackend")
+		}
+		if params.EnableUserCopy || params.NeedGetData || params.EnableUnprivileged {
+			return fmt.Errorf("EnableZeroCopy cannot be combined with EnableUserCopy, NeedGetData or EnableUnprivileged")
+		}
+		fd, base := zc.ZeroCopyFile()
+		var st syscall.Stat_t
+		if err := syscall.Fstat(fd, &st); err != nil {
+			return fmt.Errorf("ZeroCopyFile: %w", err)
+		}
+		if st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Size < base+params.size() {
+			return fmt.Errorf("ZeroCopyFile is %d bytes; it must cover base %d + size %d", st.Size, base, params.size())
+		}
 	}
 	if params.EnableZoned {
 		return fmt.Errorf("%w: EnableZoned", ErrNotImplemented)
@@ -476,13 +490,17 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	ctrlParams := convertToCtrlParams(params)
 	// Opportunistic features: requested only when the kernel says it has
 	// them, so asking never makes creation fail. UPDATE_SIZE enables Resize;
-	// QUIESCE lets Detach drain in-flight I/O first (it needs USER_RECOVERY).
+	// QUIESCE lets Detach drain in-flight I/O first (it needs USER_RECOVERY);
+	// AUTO_BUF_REG saves zero copy two commands per request.
 	if fs, err := controller.Features(ctx); err == nil && fs.Known {
 		if fs.Has(uapi.UBLK_F_UPDATE_SIZE) {
 			ctrlParams.Flags |= uapi.UBLK_F_UPDATE_SIZE
 		}
 		if params.Recovery != RecoveryNone && fs.Has(uapi.UBLK_F_QUIESCE) {
 			ctrlParams.Flags |= uapi.UBLK_F_QUIESCE
+		}
+		if params.EnableZeroCopy && fs.Has(uapi.UBLK_F_AUTO_BUF_REG) {
+			ctrlParams.Flags |= uapi.UBLK_F_AUTO_BUF_REG
 		}
 	}
 	deviceInfo, err := controller.AddDevice(ctx, &ctrlParams)
@@ -607,17 +625,23 @@ func (d *Device) startQueues() error {
 		if n := len(d.params.CPUAffinity); n > 0 {
 			cpu = d.params.CPUAffinity[i%n]
 		}
+		zcFile, zcBase := -1, int64(0)
+		if zc, ok := d.params.Backend.(ZeroCopyBackend); ok && d.flags&uapi.UBLK_F_SUPPORT_ZERO_COPY != 0 {
+			zcFile, zcBase = zc.ZeroCopyFile()
+		}
 		q, err := queue.NewQueue(queue.QueueConfig{
-			QueueID:   uint16(i),
-			Depth:     d.depth,
-			MaxIOSize: d.maxIO,
-			CharFd:    fd,
-			Flags:     d.flags,
-			Handler:   d.handler,
-			Inline:    d.params.Inline,
-			Threads:   threads,
-			CPU:       cpu,
-			Logger:    d.options.Logger,
+			QueueID:      uint16(i),
+			Depth:        d.depth,
+			MaxIOSize:    d.maxIO,
+			CharFd:       fd,
+			Flags:        d.flags,
+			Handler:      d.handler,
+			Inline:       d.params.Inline,
+			Threads:      threads,
+			CPU:          cpu,
+			Logger:       d.options.Logger,
+			ZeroCopyFile: zcFile,
+			ZeroCopyBase: zcBase,
 		})
 		if err == nil {
 			d.runners = append(d.runners, q)
@@ -1047,6 +1071,10 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	ctrlParams.Size = params.Size
 	ctrlParams.CanDiscard = params.Handler != nil && params.HandlerDiscard
 	ctrlParams.CanWriteZeroes = params.Handler != nil && params.HandlerWriteZeroes
+	if _, ok := params.Backend.(ZeroCopyBackend); ok && params.EnableZeroCopy {
+		// Served in the kernel with fallocate, whatever the backend implements.
+		ctrlParams.CanDiscard, ctrlParams.CanWriteZeroes = true, true
+	}
 	ctrlParams.UblksrvFlags = params.Tag
 	ctrlParams.PhysicalBlockSize = params.PhysicalBlockSize
 	ctrlParams.IOMinSize = params.IOMinSize
@@ -1072,6 +1100,9 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 func fuaHonored(params DeviceParams) bool {
 	if params.Handler != nil {
 		return true
+	}
+	if _, ok := params.Backend.(ZeroCopyBackend); ok && params.EnableZeroCopy {
+		return true // zero-copy writes with FUA use RWF_DSYNC
 	}
 	_, ok := params.Backend.(FUABackend)
 	return ok

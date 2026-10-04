@@ -130,6 +130,18 @@ A panic in a backend method is recovered: the request fails with `EIO` and, with
 
 Failed operations are counted in [metrics](/go-ublk/lifecycle/#metrics) and reported to an `Observer` with `success == false`.
 
+## Zero copy
+
+A backend that stores the device linearly in a file or block device can skip the copy entirely. Implement `ZeroCopyBackend`:
+
+```go
+func (b *fileBackend) ZeroCopyFile() (fd int, base int64) { return int(b.f.Fd()), 0 }
+```
+
+and set `DeviceParams.EnableZeroCopy` (kernel 6.15+). go-ublk then serves every request without calling `ReadAt`, `WriteAt` or `Flush`: the kernel registers the request's pages in the queue's io_uring buffer table, and go-ublk submits a fixed-buffer read or write of the file at `base + offset` on the same ring. Flush becomes `fdatasync`, discard `fallocate(PUNCH_HOLE)`, write-zeroes `fallocate(ZERO_RANGE)`, and a FUA write is issued with `RWF_DSYNC` (so `EnableFUA` is honored). Every request is asynchronous in the kernel, so one queue has as many file operations in flight as its depth, and no request data passes through Go memory.
+
+The file must be at least `base + Size()` bytes long; creation checks. Zero copy cannot be combined with user copy, `NeedGetData` or unprivileged devices. The `ublk-loop` example's `-zero-copy` flag turns it on.
+
 ## The Handler interface
 
 `Backend` covers what most storage needs. For everything else, set `DeviceParams.Handler` instead: it receives each raw request and completes it whenever it likes.

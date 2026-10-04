@@ -40,7 +40,6 @@ func TestRejectUnimplementedModesBeforeControllerCreation(t *testing.T) {
 		name string
 		set  func(*DeviceParams)
 	}{
-		{"EnableZeroCopy", func(p *DeviceParams) { p.EnableZeroCopy = true }},
 		{"EnableZoned", func(p *DeviceParams) { p.EnableZoned = true }},
 	} {
 		params := base
@@ -62,6 +61,13 @@ func TestRejectUnimplementedModesBeforeControllerCreation(t *testing.T) {
 	}
 	if createCalls != 0 {
 		t.Fatalf("opened controller %d times for unsupported modes", createCalls)
+	}
+
+	// Zero copy is implemented, but only for a backend that exposes its file.
+	zc := base
+	zc.EnableZeroCopy = true
+	if err := validateParams(&zc); err == nil || !strings.Contains(err.Error(), "ZeroCopyBackend") {
+		t.Fatalf("zero copy without a ZeroCopyBackend: %v", err)
 	}
 }
 

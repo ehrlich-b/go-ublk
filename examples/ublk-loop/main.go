@@ -34,6 +34,7 @@ func main() {
 		verbose    = flag.Bool("v", false, "Verbose output")
 		delSpec    = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all'")
 		devID      = flag.Int("id", -1, "Device ID to request, giving a stable /dev/ublkbN (-1 = first free)")
+		zeroCopy   = flag.Bool("zero-copy", false, "Serve requests zero-copy: the kernel moves data between requests and the file with io_uring (kernel 6.15+)")
 		recovery   = flag.Bool("recovery", false, "Keep the block device across server restarts: requeue in-flight I/O if the server dies, take an existing device -id over on start, and Detach on SIGUSR2 for upgrades")
 	)
 	flag.Parse()
@@ -77,6 +78,7 @@ func main() {
 	params.EnableIoctlEncode = true
 	params.ReadOnly = *readOnly
 	params.DeviceID = int32(*devID)
+	params.EnableZeroCopy = *zeroCopy
 
 	// The durability contract, stated once, in the one place that knows the
 	// answer. Buffered writes to a file are in the page cache when WriteAt

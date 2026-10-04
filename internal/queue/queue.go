@@ -32,7 +32,13 @@ type QueueConfig struct {
 	Inline    bool
 	Threads   int // engines (OS threads) per queue; >1 needs UBLK_F_PER_IO_DAEMON
 	CPU       int // CPU to pin the queue's threads to, or -1
-	Logger    interfaces.Logger
+	// ZeroCopyFile, if >= 0, serves every request zero-copy against this
+	// file descriptor (device offset 0 = file offset ZeroCopyBase); Handler
+	// is then unused. Needs UBLK_F_SUPPORT_ZERO_COPY in Flags, and uses
+	// automatic buffer registration when Flags has UBLK_F_AUTO_BUF_REG.
+	ZeroCopyFile int
+	ZeroCopyBase int64
+	Logger       interfaces.Logger
 
 	newRing func(entries uint32) (ring, error) // tests substitute a fake kernel
 }
@@ -72,7 +78,8 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 	if cfg.MaxIOSize < 1 {
 		return nil, fmt.Errorf("max I/O size must be positive, got %d", cfg.MaxIOSize)
 	}
-	if cfg.Handler == nil {
+	zeroCopy := cfg.ZeroCopyFile >= 0 && cfg.Flags&uapi.UBLK_F_SUPPORT_ZERO_COPY != 0
+	if cfg.Handler == nil && !zeroCopy {
 		return nil, errors.New("nil handler")
 	}
 	if cfg.DescSize == 0 {
@@ -103,11 +110,21 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 		_ = unix.Munmap(desc)
 		return nil, fmt.Errorf("queue buffer allocation overflows: depth %d, max I/O %d", cfg.Depth, cfg.MaxIOSize)
 	}
-	bufs, err := unix.Mmap(-1, 0, cfg.Depth*cfg.MaxIOSize, unix.PROT_READ|unix.PROT_WRITE,
-		unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
-	if err != nil {
-		_ = unix.Munmap(desc)
-		return nil, fmt.Errorf("queue %d: allocate %d-byte data buffers: %w", cfg.QueueID, cfg.Depth*cfg.MaxIOSize, err)
+	// Zero copy needs no data buffers: the bytes never reach the server.
+	var bufs []byte
+	var bufPtr unsafe.Pointer
+	var zc *zeroCopyConfig
+	if zeroCopy {
+		zc = &zeroCopyConfig{fd: cfg.ZeroCopyFile, base: cfg.ZeroCopyBase,
+			auto: cfg.Flags&uapi.UBLK_F_AUTO_BUF_REG != 0}
+	} else {
+		bufs, err = unix.Mmap(-1, 0, cfg.Depth*cfg.MaxIOSize, unix.PROT_READ|unix.PROT_WRITE,
+			unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+		if err != nil {
+			_ = unix.Munmap(desc)
+			return nil, fmt.Errorf("queue %d: allocate %d-byte data buffers: %w", cfg.QueueID, cfg.Depth*cfg.MaxIOSize, err)
+		}
+		bufPtr = unsafe.Pointer(&bufs[0])
 	}
 
 	q := &Queue{cfg: cfg, desc: desc, bufs: bufs, done: make(chan struct{})}
@@ -120,9 +137,10 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 			charFd:     cfg.CharFd,
 			desc:       unsafe.Pointer(&desc[0]),
 			descStride: uintptr(cfg.DescSize),
-			bufs:       unsafe.Pointer(&bufs[0]),
+			bufs:       bufPtr,
 			bufSize:    cfg.MaxIOSize,
 			userCopy:   cfg.Flags&uapi.UBLK_F_USER_COPY != 0,
+			zeroCopy:   zc,
 			handler:    cfg.Handler,
 			inline:     cfg.Inline,
 			cpu:        cfg.CPU,
@@ -215,5 +233,9 @@ func (q *Queue) Close() error {
 		}
 	}
 	q.closed = true
-	return errors.Join(unix.Munmap(q.desc), unix.Munmap(q.bufs))
+	var bufErr error
+	if q.bufs != nil {
+		bufErr = unix.Munmap(q.bufs)
+	}
+	return errors.Join(unix.Munmap(q.desc), bufErr)
 }

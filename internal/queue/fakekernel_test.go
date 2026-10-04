@@ -41,6 +41,23 @@ type fakeKernel struct {
 	commits     []fkCommit
 	violations  []string
 	kick        chan struct{}
+
+	// zero copy
+	zcAuto      bool         // the device has UBLK_F_AUTO_BUF_REG
+	zcFallback  map[int]bool // tags whose auto registration "fails" (NEED_REG_BUF)
+	bufTable    int          // sparse buffer table size, 0 = none registered
+	registered  map[int]bool // buffer-table slots holding a request's pages
+	fileOps     []fkFileOp
+	fileShortBy int // shorten READ_FIXED results by this many bytes
+}
+
+type fkFileOp struct {
+	opcode   uint8
+	bufIndex uint16
+	off      uint64
+	length   uint64
+	mode     uint32 // fallocate mode
+	rwFlags  uint32
 }
 
 type fkTagState int
@@ -81,15 +98,28 @@ type fkCommit struct {
 
 func newFakeKernel(t testing.TB, depth, bufSize int) *fakeKernel {
 	return &fakeKernel{
-		t:      t,
-		depth:  depth,
-		desc:   make([]byte, depth*24),
-		bufs:   make([]byte, depth*bufSize),
-		ufile:  -1,
-		tags:   make([]fkTag, depth),
-		wakeFd: -1,
-		kick:   make(chan struct{}, 1),
+		t:          t,
+		depth:      depth,
+		desc:       make([]byte, depth*24),
+		bufs:       make([]byte, depth*bufSize),
+		ufile:      -1,
+		tags:       make([]fkTag, depth),
+		wakeFd:     -1,
+		kick:       make(chan struct{}, 1),
+		zcFallback: map[int]bool{},
+		registered: map[int]bool{},
 	}
+}
+
+// RegisterBuffersSparse is the bufRegistrar side of uring.IoUring.
+func (k *fakeKernel) RegisterBuffersSparse(n uint32) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.bufTable != 0 {
+		k.violate("buffer table registered twice")
+	}
+	k.bufTable = int(n)
+	return nil
 }
 
 func (k *fakeKernel) violate(format string, args ...any) {
@@ -196,6 +226,24 @@ func (k *fakeKernel) consume() int {
 			k.wakeFd, k.wakeArmed, k.wakeUD = int(sqe.Fd), true, sqe.UserData
 		case uring.IORING_OP_URING_CMD:
 			k.uringCmd(&sqe)
+		case uring.IORING_OP_READ_FIXED, uring.IORING_OP_WRITE_FIXED:
+			idx := int(sqe.BufIndex)
+			if !k.registered[idx] {
+				k.violate("fixed-buffer op on unregistered slot %d", idx)
+			}
+			k.fileOps = append(k.fileOps, fkFileOp{opcode: sqe.Opcode, bufIndex: sqe.BufIndex, off: sqe.Off,
+				length: uint64(sqe.Len), rwFlags: sqe.OpFlags})
+			res := int32(sqe.Len)
+			if sqe.Opcode == uring.IORING_OP_READ_FIXED {
+				res -= int32(k.fileShortBy)
+			}
+			k.post(sqe.UserData, res)
+		case uring.IORING_OP_FALLOCATE:
+			k.fileOps = append(k.fileOps, fkFileOp{opcode: sqe.Opcode, off: sqe.Off, length: sqe.Addr, mode: sqe.Len})
+			k.post(sqe.UserData, 0)
+		case uring.IORING_OP_FSYNC, uring.IORING_OP_NOP:
+			k.fileOps = append(k.fileOps, fkFileOp{opcode: sqe.Opcode, rwFlags: sqe.OpFlags})
+			k.post(sqe.UserData, 0)
 		default:
 			k.violate("unexpected opcode %d", sqe.Opcode)
 		}
@@ -216,7 +264,28 @@ func (k *fakeKernel) uringCmd(sqe *uring.SQE) {
 		return
 	}
 	ts := &k.tags[tag]
+	if k.zcAuto && (nr == uapi.UBLK_IO_FETCH_REQ || nr == uapi.UBLK_IO_COMMIT_AND_FETCH_REQ) {
+		want := uapi.UblkAutoBufReg{Index: uint16(tag), Flags: uapi.UBLK_AUTO_BUF_REG_FALLBACK}.SQEAddr()
+		if sqe.Addr != want {
+			k.violate("tag %d: sqe->addr %#x, want auto-buf-reg %#x", tag, sqe.Addr, want)
+		}
+	}
 	switch nr {
+	case uapi.UBLK_IO_REGISTER_IO_BUF:
+		if ts.state != fkOwned || k.registered[int(cmd.Addr)] || int(cmd.Addr) >= k.bufTable {
+			k.violate("tag %d: REGISTER_IO_BUF slot %d (state %d, registered %v, table %d)",
+				tag, cmd.Addr, ts.state, k.registered[int(cmd.Addr)], k.bufTable)
+		}
+		k.registered[int(cmd.Addr)] = true
+		k.post(sqe.UserData, 0)
+		return
+	case uapi.UBLK_IO_UNREGISTER_IO_BUF:
+		if !k.registered[int(cmd.Addr)] {
+			k.violate("UNREGISTER_IO_BUF of empty slot %d", cmd.Addr)
+		}
+		delete(k.registered, int(cmd.Addr))
+		k.post(sqe.UserData, 0)
+		return
 	case uapi.UBLK_IO_FETCH_REQ:
 		if ts.state != fkIdle {
 			k.violate("tag %d fetched twice", tag)
@@ -233,7 +302,7 @@ func (k *fakeKernel) uringCmd(sqe *uring.SQE) {
 			return
 		}
 		c := fkCommit{tag: uint16(tag), id: ts.cur.id, op: ts.cur.op, result: cmd.Result, addr: cmd.Addr}
-		if ts.cur.op == uapi.UBLK_IO_OP_READ && cmd.Result > 0 {
+		if ts.cur.op == uapi.UBLK_IO_OP_READ && cmd.Result > 0 && k.bufTable == 0 {
 			c.data = make([]byte, cmd.Result)
 			if k.ufile >= 0 {
 				_, _ = unix.Pread(k.ufile, c.data, userCopyPos(0, uint16(tag), 0))
@@ -242,6 +311,13 @@ func (k *fakeKernel) uringCmd(sqe *uring.SQE) {
 			}
 		}
 		k.commits = append(k.commits, c)
+		if k.bufTable > 0 {
+			if k.zcAuto && !k.zcFallback[tag] {
+				delete(k.registered, tag) // COMMIT unregisters the auto-registered buffer
+			} else if k.registered[tag] {
+				k.violate("tag %d committed with its buffer still registered", tag)
+			}
+		}
 		ts.state, ts.addr, ts.ud = fkWaiting, cmd.Addr, sqe.UserData
 		k.deliver(tag)
 	case uapi.UBLK_IO_NEED_GET_DATA:
@@ -294,6 +370,16 @@ func (k *fakeKernel) deliver(tag int) {
 	if r.op == uapi.UBLK_IO_OP_WRITE && k.needGetData {
 		ts.state = fkGetData
 		k.post(ts.ud, uapi.UBLK_IO_RES_NEED_GET_DATA)
+		return
+	}
+	if k.bufTable > 0 && (r.op == uapi.UBLK_IO_OP_READ || r.op == uapi.UBLK_IO_OP_WRITE) {
+		if k.zcAuto && !k.zcFallback[tag] {
+			k.registered[tag] = true // auto registration on delivery
+		} else if k.zcAuto {
+			atomic.StoreUint32((*uint32)(base), uint32(r.op)|r.flags|uint32(FlagNeedRegBuf))
+		}
+		ts.state = fkOwned
+		k.post(ts.ud, uapi.UBLK_IO_RES_OK)
 		return
 	}
 	if r.op == uapi.UBLK_IO_OP_WRITE {

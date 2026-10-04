@@ -44,6 +44,7 @@ func init() {
 			return integrity(t, params, b, true, t.Duration(2*time.Second))
 		})
 	}
+	register("features/zero-copy", 3*time.Minute, testZeroCopy)
 	register("features/handler-async", 3*time.Minute, testHandlerAsync)
 	register("features/fua", time.Minute, testFUA)
 	register("features/tag-find", time.Minute, testTagFind)
@@ -618,5 +619,113 @@ func testDetachHandoff(t *T) error {
 	if p := kernelProblems(mark); p != "" {
 		return fmt.Errorf("kernel log: %s", p)
 	}
+	return nil
+}
+
+// zcFile is a file backend that exposes its descriptor for zero copy.
+type zcFile struct{ *fileBackend }
+
+func (z zcFile) ZeroCopyFile() (int, int64) { return int(z.f.Fd()), 0 }
+
+// testZeroCopy serves a file-backed device zero-copy and checks data,
+// discard, write-zeroes and FUA against the file itself, which the kernel
+// reads and writes directly.
+func testZeroCopy(t *T) error {
+	if err := needFeatures(ublk.FeatureZeroCopy); err != nil {
+		return err
+	}
+	const size = 64 << 20
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-zc-%d", os.Getpid()))
+	t.Cleanup(func() { _ = os.Remove(path) })
+	fb, err := openFileBackend(path, size)
+	if err != nil {
+		return err
+	}
+	t.Cleanup(func() { _ = fb.Close() })
+	params := ublk.DefaultParams(zcFile{fb})
+	params.EnableZeroCopy = true
+	params.EnableFUA = true
+	params.NumQueues, params.QueueDepth = 2, 64
+	dev, err := newDevice(t, params)
+	if err != nil {
+		return err
+	}
+	if !dev.Features().Has(ublk.FeatureZeroCopy) {
+		return fmt.Errorf("device did not negotiate zero copy: %s", dev.Features())
+	}
+	t.Logf("features %s", dev.Features())
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fd := int(f.Fd())
+
+	// Random writes and reads through the device, verified against the file.
+	r := newRNG(77)
+	shadow := make([]byte, size)
+	buf := alignedBuf(512 << 10)
+	deadline := time.Now().Add(t.Duration(2 * time.Second))
+	ops := 0
+	for ; time.Now().Before(deadline) || ops < 64; ops++ {
+		n := (1 + r.intn(128)) * 4096
+		off := int64(r.intn((size-n)/4096)) * 4096
+		p := buf[:n]
+		if r.intn(3) > 0 {
+			r.fill(p)
+			if err := pwriteFull(fd, p, off); err != nil {
+				return fmt.Errorf("write %d@%d: %w", n, off, err)
+			}
+			copy(shadow[off:], p)
+		} else {
+			if err := preadFull(fd, p, off); err != nil {
+				return fmt.Errorf("read %d@%d: %w", n, off, err)
+			}
+			if i := firstDiff(p, shadow[off:off+int64(n)]); i >= 0 {
+				return fmt.Errorf("read %d@%d differs at %d", n, off, i)
+			}
+		}
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("fsync: %w", err)
+	}
+	got := make([]byte, size)
+	if _, err := fb.f.ReadAt(got, 0); err != nil {
+		return err
+	}
+	if i := firstDiff(got, shadow); i >= 0 {
+		return fmt.Errorf("backing file differs from what was written at byte %d", i)
+	}
+
+	// Discard and write-zeroes become fallocate on the file.
+	if err := blkRange(fd, blkDiscard, 4<<20, 8<<20); err != nil {
+		return fmt.Errorf("discard: %w", err)
+	}
+	if err := blkRange(fd, blkZeroOut, 16<<20, 4<<20); err != nil {
+		return fmt.Errorf("zeroout: %w", err)
+	}
+	zero := make([]byte, 4<<20)
+	for _, off := range []int64{4 << 20, 16 << 20} {
+		if _, err := fb.f.ReadAt(got[:4<<20], off); err != nil {
+			return err
+		}
+		if !bytes.Equal(got[:4<<20], zero) {
+			return fmt.Errorf("backing file not zeroed at %d after discard/zeroout", off)
+		}
+	}
+
+	// FUA writes are advertised and accepted.
+	if v, err := sysfsQueue(dev.Path, "fua"); err != nil || v != "1" {
+		return fmt.Errorf("queue/fua = %q (%v), want 1", v, err)
+	}
+	g, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT|syscall.O_DSYNC, 0)
+	if err != nil {
+		return err
+	}
+	defer g.Close()
+	if err := pwriteFull(int(g.Fd()), alignedBuf(4096), 0); err != nil {
+		return fmt.Errorf("O_DSYNC write: %w", err)
+	}
+	t.Logf("%d zero-copy ops verified against the backing file", ops)
 	return nil
 }

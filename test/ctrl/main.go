@@ -565,7 +565,7 @@ func startPlane(id uint32, queues uint16, depth int, be *memBackend) (*plane, er
 	p := &plane{fd: fd}
 	for q := uint16(0); q < queues; q++ {
 		qu, err := queue.NewQueue(queue.QueueConfig{QueueID: q, Depth: depth, MaxIOSize: 1 << 20,
-			CharFd: fd, Handler: queue.BackendHandler(be, nil), CPU: -1})
+			CharFd: fd, Handler: queue.BackendHandler(be, nil), CPU: -1, ZeroCopyFile: -1})
 		if err != nil {
 			p.close()
 			return nil, err

@@ -82,3 +82,16 @@ type FUABackend interface {
 	Backend
 	WriteAtFUA(p []byte, off int64) (n int, err error)
 }
+
+// ZeroCopyBackend is an optional Backend interface for backends that store
+// the device linearly in a file or block device. With DeviceParams.EnableZeroCopy
+// (kernel 6.15+) go-ublk then serves every request in the kernel: data moves
+// between the request's pages and the file with io_uring fixed-buffer reads
+// and writes, flush is fdatasync, discard punches holes and write-zeroes
+// zeroes the range. ReadAt, WriteAt and Flush are never called; the file is
+// used directly. Device offset 0 is file offset base, and the file must be at
+// least base + Size() bytes long.
+type ZeroCopyBackend interface {
+	Backend
+	ZeroCopyFile() (fd int, base int64)
+}

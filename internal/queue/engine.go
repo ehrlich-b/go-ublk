@@ -30,19 +30,39 @@ type ring interface {
 
 // user_data layout: kind in the top byte, tag in the low 16 bits.
 const (
-	kindIO   uint64 = 1 << 56 // FETCH, COMMIT_AND_FETCH or NEED_GET_DATA for a tag
-	kindWake uint64 = 2 << 56 // the eventfd read that wakes the engine
-	kindMask uint64 = 0xff << 56
+	kindIO    uint64 = 1 << 56 // FETCH, COMMIT_AND_FETCH or NEED_GET_DATA for a tag
+	kindWake  uint64 = 2 << 56 // the eventfd read that wakes the engine
+	kindReg   uint64 = 3 << 56 // zero copy: REGISTER_IO_BUF for a tag
+	kindZC    uint64 = 4 << 56 // zero copy: the backing-file operation for a tag
+	kindUnreg uint64 = 5 << 56 // zero copy: UNREGISTER_IO_BUF for a tag
+	kindMask  uint64 = 0xff << 56
 )
 
 // Per-tag states, owned by the engine thread.
 const (
-	tagFetching uint8 = iota // FETCH or COMMIT_AND_FETCH in flight: the kernel owns the tag
-	tagGetData               // NEED_GET_DATA in flight
-	tagHandling              // the handler owns the request
-	tagAborted               // the kernel aborted the tag: never fetch it again
-	tagOrphaned              // a request arrived while abandoning: left for the kernel to requeue or fail
+	tagFetching    uint8 = iota // FETCH or COMMIT_AND_FETCH in flight: the kernel owns the tag
+	tagGetData                  // NEED_GET_DATA in flight
+	tagHandling                 // the handler owns the request
+	tagAborted                  // the kernel aborted the tag: never fetch it again
+	tagOrphaned                 // a request arrived while abandoning: left for the kernel to requeue or fail
+	tagRegistering              // zero copy: REGISTER_IO_BUF in flight
+	tagFileIO                   // zero copy: the backing-file operation in flight
 )
+
+// zeroCopyConfig is the backing file a zero-copy engine moves request data
+// to and from with io_uring fixed-buffer operations; the server never sees
+// the bytes.
+type zeroCopyConfig struct {
+	fd   int
+	base int64 // device offset 0 is file offset base
+	auto bool  // UBLK_F_AUTO_BUF_REG: the kernel registers each request's buffer itself
+}
+
+// bufRegistrar is implemented by uring.IoUring; zero copy needs a sparse
+// buffer table on the engine's ring.
+type bufRegistrar interface {
+	RegisterBuffersSparse(n uint32) error
+}
 
 // engineConfig describes the tags one engine serves: [tagLo, tagHi) of one
 // queue. Without UBLK_F_PER_IO_DAEMON an engine serves its whole queue.
@@ -55,6 +75,7 @@ type engineConfig struct {
 	bufs         unsafe.Pointer // the queue's data buffers, bufSize bytes per tag
 	bufSize      int
 	userCopy     bool // UBLK_F_USER_COPY: data moves by pread/pwrite on charFd
+	zeroCopy     *zeroCopyConfig
 	handler      Handler
 	inline       bool
 	cpu          int // -1: no affinity
@@ -154,6 +175,18 @@ func (e *engine) setup() error {
 		return fmt.Errorf("queue %d: io_uring setup: %w", e.cfg.queueID, err)
 	}
 	e.ring = r
+
+	if e.cfg.zeroCopy != nil {
+		br, ok := e.ring.(bufRegistrar)
+		if !ok {
+			return fmt.Errorf("queue %d: zero copy needs a ring with a buffer table", e.cfg.queueID)
+		}
+		// One slot per tag, indexed by tag; the kernel installs each request's
+		// pages there (UBLK_F_AUTO_BUF_REG or REGISTER_IO_BUF).
+		if err := br.RegisterBuffersSparse(uint32(e.cfg.tagHi)); err != nil {
+			return fmt.Errorf("queue %d: register sparse buffer table: %w", e.cfg.queueID, err)
+		}
+	}
 
 	efd, err := unix.Eventfd(0, unix.EFD_CLOEXEC)
 	if err != nil {
@@ -283,6 +316,14 @@ func (e *engine) handleCQE(ud uint64, res int32) {
 		}
 	case kindIO:
 		e.handleIO(int(ud&0xffff)-e.cfg.tagLo, res)
+	case kindReg:
+		e.registered(int(ud&0xffff)-e.cfg.tagLo, res)
+	case kindZC:
+		e.fileIODone(int(ud&0xffff)-e.cfg.tagLo, res)
+	case kindUnreg:
+		if res < 0 {
+			e.fail(fmt.Errorf("queue %d tag %d: UNREGISTER_IO_BUF failed: %w", e.cfg.queueID, ud&0xffff, syscall.Errno(-res)))
+		}
 	default:
 		e.fail(fmt.Errorf("queue %d: completion with unknown user_data %#x", e.cfg.queueID, ud))
 	}
@@ -363,6 +404,10 @@ func (e *engine) dispatch(i int) {
 	e.tags[i] = tagHandling
 	e.handlers.Add(1)
 
+	if e.cfg.zeroCopy != nil {
+		e.dispatchZeroCopy(i, r)
+		return
+	}
 	if r.Op == OpReportZones {
 		r.NrZones = d.NrSectors
 		r.Length = int64(e.cfg.bufSize)
@@ -456,6 +501,11 @@ func (e *engine) beforeCommit(r *Request) {
 	}
 }
 
+// partialReadsOK reports whether the kernel honors a short read result by
+// resubmitting the remainder, which it does only when it copies the data
+// itself (neither user copy nor zero copy).
+func (e *engine) partialReadsOK() bool { return !e.cfg.userCopy && e.cfg.zeroCopy == nil }
+
 // push hands a completed request to the engine from any goroutine.
 func (e *engine) push(r *Request) {
 	for {
@@ -494,7 +544,19 @@ func (e *engine) drainCompletions() {
 func (e *engine) commit(r *Request) {
 	i := int(r.Tag) - e.cfg.tagLo
 	addr := uint64(0)
-	if !e.cfg.userCopy {
+	if e.cfg.zeroCopy != nil {
+		// The commit itself unregisters a buffer the kernel registered
+		// (AUTO_BUF_REG); one we registered — including after an automatic
+		// registration fell back — must be unregistered first, linked so it
+		// runs before the commit.
+		if r.zcManual {
+			if err := e.prepBufCmd(uapi.UBLK_IO_UNREGISTER_IO_BUF, kindUnreg, i, uring.IOSQE_IO_LINK); err != nil {
+				e.fail(err)
+				return
+			}
+		}
+		r.zcManual = false
+	} else if !e.cfg.userCopy {
 		addr = uint64(uintptr(e.buffer(int(r.Tag))))
 	} else if r.Op == OpZoneAppend && r.result >= 0 {
 		addr = r.lba
@@ -517,7 +579,7 @@ func (e *engine) prepCommit(i int, result int32, addr uint64) error {
 // address in copy mode and none in user-copy mode.
 func (e *engine) prepIO(nr uint32, i int, result int32) error {
 	addr := uint64(0)
-	if !e.cfg.userCopy {
+	if !e.cfg.userCopy && e.cfg.zeroCopy == nil {
 		addr = uint64(uintptr(e.buffer(i + e.cfg.tagLo)))
 	}
 	return e.prepCmd(nr, i, result, addr)
@@ -536,7 +598,126 @@ func (e *engine) prepCmd(nr uint32, i int, result int32, addr uint64) error {
 	cmd.Result = result
 	cmd.Addr = addr
 	sqe.UserData = kindIO | uint64(tag)
+	if zc := e.cfg.zeroCopy; zc != nil && zc.auto && nr != uapi.UBLK_IO_NEED_GET_DATA {
+		// FETCH and COMMIT_AND_FETCH carry the auto-registration slot in
+		// sqe->addr: the tag's slot, falling back to a manual registration
+		// (UBLK_IO_F_NEED_REG_BUF) rather than failing the request.
+		sqe.Addr = uapi.UblkAutoBufReg{Index: tag, Flags: uapi.UBLK_AUTO_BUF_REG_FALLBACK}.SQEAddr()
+	}
 	return nil
+}
+
+// prepBufCmd prepares REGISTER_IO_BUF or UNREGISTER_IO_BUF for a tag, with
+// the tag's buffer-table slot in addr.
+func (e *engine) prepBufCmd(nr uint32, kind uint64, i int, flags uint8) error {
+	sqe, err := e.getSQE()
+	if err != nil {
+		return err
+	}
+	tag := uint16(i + e.cfg.tagLo)
+	uring.PrepUringCmd(sqe, int32(e.cfg.charFd), uapi.UblkIOCmd(nr), nil)
+	cmd := (*uapi.UblksrvIOCmd)(unsafe.Pointer(sqe.Cmd()))
+	cmd.QID = e.cfg.queueID
+	cmd.Tag = tag
+	cmd.Addr = uint64(tag)
+	sqe.UserData = kind | uint64(tag)
+	sqe.Flags |= flags
+	return nil
+}
+
+// dispatchZeroCopy serves a request entirely in the kernel: the request's
+// pages are (or get) registered in the ring's buffer table, and a fixed-buffer
+// operation on the backing file moves the data. No goroutine, no copy.
+func (e *engine) dispatchZeroCopy(i int, r *Request) {
+	r.zcManual = false
+	if r.Op != OpRead && r.Op != OpWrite {
+		e.startFileIO(i, r)
+		return
+	}
+	if e.cfg.zeroCopy.auto && r.Flags&FlagNeedRegBuf == 0 {
+		e.startFileIO(i, r) // the kernel registered it on delivery
+		return
+	}
+	if err := e.prepBufCmd(uapi.UBLK_IO_REGISTER_IO_BUF, kindReg, i, 0); err != nil {
+		e.fail(err)
+		return
+	}
+	e.tags[i] = tagRegistering
+}
+
+func (e *engine) registered(i int, res int32) {
+	if i < 0 || i >= len(e.tags) || e.tags[i] != tagRegistering {
+		e.fail(fmt.Errorf("queue %d: unexpected REGISTER_IO_BUF completion for tag %d", e.cfg.queueID, i+e.cfg.tagLo))
+		return
+	}
+	r := &e.reqs[i]
+	if res < 0 {
+		e.tags[i] = tagHandling
+		r.state.Store(reqAsync)
+		r.finish(res)
+		return
+	}
+	r.zcManual = true
+	e.startFileIO(i, r)
+}
+
+// startFileIO submits the backing-file operation for a zero-copy request.
+func (e *engine) startFileIO(i int, r *Request) {
+	zc := e.cfg.zeroCopy
+	sqe, err := e.getSQE()
+	if err != nil {
+		e.fail(err)
+		return
+	}
+	fd := int32(zc.fd)
+	off := uint64(zc.base + r.Offset)
+	n := uint64(r.Length)
+	switch r.Op {
+	case OpRead:
+		uring.PrepReadFixed(sqe, fd, 0, uint32(n), off, r.Tag)
+	case OpWrite:
+		uring.PrepWriteFixed(sqe, fd, 0, uint32(n), off, r.Tag)
+		if r.Flags&FlagFUA != 0 {
+			sqe.OpFlags |= unix.RWF_DSYNC
+		}
+	case OpFlush:
+		uring.PrepFsync(sqe, fd, uring.IORING_FSYNC_DATASYNC)
+	case OpDiscard:
+		uring.PrepFallocate(sqe, fd, unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE, off, n)
+	case OpWriteZeroes:
+		uring.PrepFallocate(sqe, fd, unix.FALLOC_FL_ZERO_RANGE|unix.FALLOC_FL_KEEP_SIZE, off, n)
+	default:
+		uring.PrepNop(sqe)
+		sqe.UserData = kindZC | uint64(r.Tag)
+		e.tags[i] = tagFileIO
+		r.zcUnsupported = true
+		return
+	}
+	sqe.UserData = kindZC | uint64(r.Tag)
+	e.tags[i] = tagFileIO
+}
+
+func (e *engine) fileIODone(i int, res int32) {
+	if i < 0 || i >= len(e.tags) || e.tags[i] != tagFileIO {
+		e.fail(fmt.Errorf("queue %d: unexpected file I/O completion for tag %d", e.cfg.queueID, i+e.cfg.tagLo))
+		return
+	}
+	r := &e.reqs[i]
+	e.tags[i] = tagHandling
+	r.state.Store(reqAsync)
+	switch {
+	case r.zcUnsupported:
+		r.zcUnsupported = false
+		r.finish(-int32(syscall.EOPNOTSUPP))
+	case res < 0:
+		r.finish(res)
+	case r.Op == OpRead || r.Op == OpWrite:
+		// A short transfer means the file ended early: a read may complete
+		// partially (the kernel resubmits the rest), a write may not.
+		r.CompleteN(int(res), nil)
+	default:
+		r.finish(0)
+	}
 }
 
 func (e *engine) armWake() error {

@@ -102,6 +102,9 @@ type Request struct {
 	result int32
 	lba    uint64 // zone append result, in sectors
 	next   *Request
+
+	zcManual      bool // zero copy: we registered the request's buffer and must unregister it
+	zcUnsupported bool // zero copy: the op has no file equivalent
 }
 
 // Request completion states. A request is handed to the handler in
@@ -131,19 +134,20 @@ func (r *Request) Complete(err error) {
 	r.finish(0)
 }
 
-// CompleteN finishes a request that transferred only n bytes. Only a read
-// can complete partially: the kernel ends those n bytes and resubmits the
-// rest as a new request. Any other operation that did not transfer its full
-// Length fails with EIO, because the kernel treats every non-negative result
-// for it as complete success (__ublk_complete_rq) and a short write reported
-// as success would silently lose data.
+// CompleteN finishes a request that transferred only n bytes. Only a read in
+// the default copy mode can complete partially: the kernel ends those n bytes
+// and resubmits the rest as a new request. Anything else that did not
+// transfer its full Length fails with EIO, because the kernel treats every
+// non-negative result for it as complete success (__ublk_complete_rq) — a
+// short write, or a short read in user-copy or zero-copy mode, reported as
+// success would silently lose or invent data.
 func (r *Request) CompleteN(n int, err error) {
 	switch {
 	case err != nil:
 		r.finish(-Errno(err))
 	case n < 0 || int64(n) > r.Length:
 		r.finish(-int32(syscall.EIO))
-	case r.Op == OpRead && n > 0:
+	case r.Op == OpRead && n > 0 && r.e.partialReadsOK():
 		r.finish(int32(n))
 	case int64(n) == r.Length:
 		r.Complete(nil)

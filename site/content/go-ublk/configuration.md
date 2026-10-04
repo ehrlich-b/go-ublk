@@ -83,12 +83,12 @@ How request data moves between the kernel and the server. The default copies it 
 | `EnableUserCopy` | 6.5+ | `UBLK_F_USER_COPY`: data moves with `pread`/`pwrite` on `/dev/ublkcN` instead of the kernel copying into a buffer address. Required by zoned and integrity devices; otherwise slower |
 | `NeedGetData` | 6.0+ | `UBLK_F_NEED_GET_DATA`: the kernel asks for a write's buffer before copying its data. Supported for completeness; with go-ublk's fixed buffers it only adds a round trip |
 | `EnableUnprivileged` | 6.3+ | `UBLK_F_UNPRIVILEGED_DEV`: a non-root user creates and owns the device. Needs udev rules granting access to `/dev/ublk-control` and the device nodes; see [Unprivileged devices](/guide/unprivileged/). Excludes recovery and user copy. The control commands are verified on 7.0.0-38; serving I/O as a non-root user is not yet covered by the conformance suite |
-| `EnableZeroCopy` | | **Not implemented yet**: creation fails with `ErrNotImplemented` |
+| `EnableZeroCopy` | 6.15+ | Serve every request in the kernel against a `ZeroCopyBackend`'s file: data moves between the request's pages and the file with io_uring fixed-buffer reads and writes, flush is `fdatasync`, discard punches holes, write-zeroes zeroes the range, FUA writes use `RWF_DSYNC`. Uses automatic buffer registration (`UBLK_F_AUTO_BUF_REG`, 6.16+) when available, manual `REGISTER_IO_BUF` otherwise. The backend's `ReadAt`/`WriteAt` are never called. See [zero copy](/go-ublk/backends/#zero-copy) |
 | `EnableZoned` | | **Not implemented yet**: creation fails with `ErrNotImplemented` |
 | `EnableIoctlEncode` | | Deprecated, no effect: ioctl-encoded commands are always used |
 | `DeviceName` | | Deprecated, no effect: ublk devices have no name |
 
-Features requested automatically when the kernel has them, because they cost nothing: `UPDATE_SIZE` (6.16+, for `Device.Resize`) and, with a recovery mode, `QUIESCE` (6.16+, so `Detach` drains in-flight I/O first).
+Features requested automatically when the kernel has them, because they cost nothing: `UPDATE_SIZE` (6.16+, for `Device.Resize`), with a recovery mode `QUIESCE` (6.16+, so `Detach` drains in-flight I/O first), and with zero copy `AUTO_BUF_REG` (6.16+).
 
 ## What reaches the kernel
 

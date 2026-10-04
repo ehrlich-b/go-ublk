@@ -15,13 +15,13 @@ The October 2026 overhaul (see the [changelog](/go-ublk/releases/)) closed what 
 - **Asynchronous backends**: a goroutine per request by default, and a raw `Handler` that can complete from anywhere.
 - **Full control-plane coverage** of the 7.3-rc5 UAPI: every command typed and tested, `GET_FEATURES` negotiation that refuses rather than silently degrades, unprivileged devices, every parameter block.
 - **Lifecycle defects** #17–#23: the ring leak, `STOP_DEV` failures, use-after-unmap, silent queue death, unpinned control buffers, the context-cancel wedge, and the restart crash.
+- **Zero copy** for file-backed devices (`REGISTER_IO_BUF`, `AUTO_BUF_REG`): fixed-buffer file I/O on the queue's ring, no copy through Go memory.
 - Per-write FUA, `UPDATE_SIZE`, errno pass-through, `TRY_STOP_DEV`, `NO_AUTO_PART_SCAN`, user copy, `NEED_GET_DATA`, per-I/O threads, a public `GET_DEV_INFO`, the shipped systemd units with SIGHUP handling.
 
 ## Kernel features not yet implemented
 
 In priority order:
 
-- **Zero copy** — `UBLK_U_IO_REGISTER_IO_BUF` (6.15) and `UBLK_F_AUTO_BUF_REG` (6.16): a backend that is a file or block device moves data between the request's pages and its fd with io_uring fixed buffers, never copying through Go memory. The io_uring layer has everything this needs (sparse buffer tables, `READ_FIXED`/`WRITE_FIXED`); the engine does not use it yet. `EnableZeroCopy` returns `ErrNotImplemented` until it does.
 - **Shared-memory zero copy** — `UBLK_F_SHMEM_ZC` and `REG_BUF` (7.1): requests whose pages live in memory the server registered arrive without a copy. The control commands exist; the data path does not use them.
 - **Batch I/O** — `UBLK_F_BATCH_IO` (7.0): fetch and commit many requests per command with multishot `FETCH_IO_CMDS`.
 - **Zoned devices** — `UBLK_F_ZONED` (6.6): the zone operations reach a `Handler` today, but the zoned parameters and zone-report path are not wired up; `EnableZoned` returns `ErrNotImplemented`.
@@ -45,4 +45,4 @@ In priority order:
 
 ## Performance
 
-Only after the above. Candidates: zero copy (above), io_uring `SQPOLL`, measuring and tuning the goroutine-per-request dispatch against `Inline`, and batch I/O.
+Only after the above. Candidates: io_uring `SQPOLL`, measuring and tuning the goroutine-per-request dispatch against `Inline`, and batch I/O.

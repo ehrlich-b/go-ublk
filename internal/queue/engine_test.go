@@ -12,7 +12,10 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
+	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
 
 const testBufSize = 64 << 10
@@ -411,5 +414,86 @@ func TestEngineNoLostWakeup(t *testing.T) {
 	c := k.waitCommits(1, 5*time.Second)
 	if c[0].result != 0 {
 		t.Fatalf("commits=%+v", c)
+	}
+}
+
+func startZeroCopyEngine(t *testing.T, k *fakeKernel, auto bool) *engine {
+	t.Helper()
+	k.zcAuto = auto
+	e := newEngine(engineConfig{
+		tagLo: 0, tagHi: k.depth, charFd: 99,
+		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
+		bufSize:  testBufSize,
+		zeroCopy: &zeroCopyConfig{fd: 77, base: 1 << 20, auto: auto},
+		cpu:      -1, waitInterval: 20 * time.Millisecond,
+		newRing: func(uint32) (ring, error) { return k, nil },
+	})
+	if err := e.start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { e.abandon(); <-e.done })
+	return e
+}
+
+func testZeroCopy(t *testing.T, auto, fallback bool) {
+	k := newFakeKernel(t, 4, testBufSize)
+	if fallback {
+		k.zcFallback[2] = true
+	}
+	startZeroCopyEngine(t, k, auto)
+	if k.bufTable != 4 {
+		t.Fatalf("buffer table of %d slots, want 4", k.bufTable)
+	}
+	k.inject(2, fkReq{op: uapi.UBLK_IO_OP_WRITE, sector: 8, nr: 16, flags: uint32(FlagFUA), id: 1})
+	k.inject(2, fkReq{op: uapi.UBLK_IO_OP_READ, sector: 8, nr: 16, id: 2})
+	k.inject(3, fkReq{op: uapi.UBLK_IO_OP_FLUSH, id: 3})
+	k.inject(3, fkReq{op: uapi.UBLK_IO_OP_DISCARD, sector: 64, nr: 1 << 23, id: 4})
+	k.inject(3, fkReq{op: uapi.UBLK_IO_OP_WRITE_ZEROES, sector: 64, nr: 8, id: 5})
+	c := k.waitCommits(5, 5*time.Second)
+	want := map[int]int32{1: 8192, 2: 8192, 3: 0, 4: 0, 5: 0}
+	for _, x := range c {
+		if x.result != want[x.id] {
+			t.Errorf("request %d result %d, want %d", x.id, x.result, want[x.id])
+		}
+		if x.addr != 0 {
+			t.Errorf("request %d committed buffer address %#x; zero copy has none", x.id, x.addr)
+		}
+	}
+	k.mu.Lock()
+	ops := append([]fkFileOp(nil), k.fileOps...)
+	k.mu.Unlock()
+	var sawFUA, sawRead, sawPunch, sawZero bool
+	for _, op := range ops {
+		switch op.opcode {
+		case uring.IORING_OP_WRITE_FIXED:
+			if op.off != 1<<20+8*512 || op.length != 8192 || op.bufIndex != 2 {
+				t.Errorf("WRITE_FIXED %+v", op)
+			}
+			sawFUA = op.rwFlags&unix.RWF_DSYNC != 0
+		case uring.IORING_OP_READ_FIXED:
+			sawRead = true
+		case uring.IORING_OP_FALLOCATE:
+			sawPunch = sawPunch || (op.length == 1<<32 && op.mode&unix.FALLOC_FL_PUNCH_HOLE != 0)
+			sawZero = sawZero || (op.length == 4096 && op.mode&unix.FALLOC_FL_ZERO_RANGE != 0)
+		}
+	}
+	if !sawFUA || !sawRead || !sawPunch || !sawZero {
+		t.Errorf("file ops %+v: fua=%v read=%v punch=%v zero=%v", ops, sawFUA, sawRead, sawPunch, sawZero)
+	}
+}
+
+func TestEngineZeroCopyAuto(t *testing.T)         { testZeroCopy(t, true, false) }
+func TestEngineZeroCopyAutoFallback(t *testing.T) { testZeroCopy(t, true, true) }
+func TestEngineZeroCopyManual(t *testing.T)       { testZeroCopy(t, false, false) }
+
+// TestEngineZeroCopyShortReadFails: outside copy mode the kernel completes the
+// whole request on any non-negative result, so a short read must fail.
+func TestEngineZeroCopyShortReadFails(t *testing.T) {
+	k := newFakeKernel(t, 1, testBufSize)
+	k.fileShortBy = 512
+	startZeroCopyEngine(t, k, true)
+	k.inject(0, fkReq{op: uapi.UBLK_IO_OP_READ, nr: 8, id: 1})
+	if c := k.waitCommits(1, 5*time.Second); c[0].result != -int32(syscall.EIO) {
+		t.Fatalf("short zero-copy read committed %d, want -EIO", c[0].result)
 	}
 }
