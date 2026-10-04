@@ -9,17 +9,41 @@ go-ublk is pre-1.0. Releases are git tags on [GitHub](https://github.com/ehrlich
 
 ## Versioning
 
-Until 1.0 the public API can change between minor versions, and the project deliberately carries no compatibility shims: when something is wrong it is fixed, not deprecated. Each release notes what changed. Bug fixes that affect data integrity or teardown are called out explicitly, because they are the reason to upgrade.
+Until 1.0 the public API can change between minor versions. Code written against the previous minor version keeps compiling where that costs little (fields that no longer do anything are kept as documented no-ops for a release); behavior that was wrong is fixed, not preserved. Each release notes what changed. Bug fixes that affect data integrity or teardown are called out explicitly, because they are the reason to upgrade.
 
-## Unreleased
+## v0.2.0 (unreleased)
 
-Changes on `main` since v0.1.0:
+A rebuild of everything under the public API, aimed at production use: a new I/O engine, user recovery, the whole kernel control surface, and a conformance suite that runs under dozens of kernels. Code written for v0.1.0 compiles unchanged; the behavior changes below are the ones to read.
 
-- **Fixed: discards and write-zeroes of 2 GiB or more failed with `EIO`.** Completions reported the request length as a signed 32-bit byte count, which wraps negative at 2 GiB, and the kernel failed the request after the backend had done the work. `mkfs.ext4` on any device over 2 GiB hit it through its whole-device discard. Range operations now complete with 0. Verified on arm64 7.0.0-30 and x86_64 7.0.0-38.
-- `EnableUserCopy` is now rejected at creation with an error matching `ErrNotImplemented`, instead of producing a device that could not serve I/O.
-- Control-plane hardening: the `SET_PARAMS` buffer is kept reachable for the duration of the command; `GET_PARAMS` responses are decoded using the length the kernel actually returned; kernel errnos are preserved through the error chain so `errors.Is(err, syscall.EPERM)` and friends work.
-- A large set of unit tests: the queue state machine, request dispatch, the mmap stride, the runner lifecycle, ring index wraparound, real io_uring round trips, ABI layout of 128-byte SQEs and 32-byte CQEs, metrics percentiles, and both example backends.
-- Documentation of the open lifecycle defects found by the 2026-10-03 audit (see [Roadmap](/go-ublk/roadmap/)).
+**Behavior changes**
+
+- **Backends run concurrently within a queue.** Each request runs on its own goroutine, so up to `QueueDepth` calls per queue are in flight (v0.1.0 called the backend one request at a time per queue). Backends already had to be safe for concurrent use across queues; now latency-bound backends scale. `DeviceParams.Inline` restores the old inline behavior for RAM-speed backends.
+- **Cancelling the serving context stops the device gracefully** (like `Stop`). In v0.1.0 it killed the queues under in-flight I/O, which could wedge the kernel's control plane (Critical Bug #22, deterministic on Ubuntu 7.0.0-38).
+- **`Start` after `Stop` returns `ErrStopped`.** The kernel cannot reliably restart a stopped device; it oopsed Arch's 7.2.8 and wedged 6.10–6.12 in testing (#23).
+- **The library is silent by default.** With no `Options.Logger` nothing is written; v0.1.0 logged at INFO to stderr.
+- **Errnos pass through.** A backend error that is a `syscall.Errno` reaches the application as that errno (on kernels that translate them) instead of always `EIO`. A panicking backend fails the request with `EIO` instead of crashing the server.
+- **`Stop`/`Close` keep serving if `STOP_DEV` fails** and return the error (#18); the wait is `Options.StopTimeout` (default one minute) instead of a fixed 10 s.
+- **Missing kernel features fail creation** with an error listing them, instead of being silently dropped.
+- `EnableUserCopy` works (it was rejected in v0.1.0's last commits); `EnableFUA` works with a `FUABackend` or `Handler`; `EnableIoctlEncode` and `DeviceName` are documented no-ops.
+
+**New**
+
+- **User recovery**: `DeviceParams.Recovery` (`RecoveryReissue`, `RecoveryQueue`, `RecoveryFailIO`), `Device.Detach` (drains with `QUIESCE_DEV` on 6.16+), `ublk.Recover`, and `DeviceParams.Tag` with `FindDevices`. The conformance suite SIGKILLs a server mid-write and recovers it from another process, and hands a device off live between processes; the writer sees no error and every block verifies. Under systemd with ext4 mounted and a verifying fio running, crash and upgrade handoffs complete in about 1–2.5 s with zero I/O errors. `ublk-loop -recovery` and its shipped systemd unit (`Restart=always`, SIGUSR2 upgrade) demonstrate it.
+- **`Handler` and `Request`**: a raw request interface exposing every operation and flag, completable from any goroutine; `HandlerDiscard`/`HandlerWriteZeroes`.
+- `Device.Done`, `Err`, `Wait` and a `failed` state: a queue that hits something unexpected now fails the device visibly instead of dying silently (#20).
+- `Device.Resize` (`UPDATE_SIZE`, 6.16+), `SafeStop` (`TRY_STOP_DEV`, 7.0+), `NoPartitionScan` (7.0+), `ThreadsPerQueue` (`PER_IO_DAEMON`, 6.16+), `NeedGetData`, `EnableUnprivileged`, geometry hints (`PhysicalBlockSize`, `IOMinSize`, `IOOptSize`, `DMAAlignment`).
+- `ublk.Probe`, `GetDeviceInfo`, `Device.KernelInfo`, `Device.Features`, `ublk.Errno`, `FUABackend`.
+- Internally: a general allocation-free io_uring core, an I/O engine with a fake-kernel test suite (including a deterministic lost-wakeup test proven to fail without its fix), every control command of the 7.3-rc5 UAPI with C-fixture layout parity, and off-heap control buffers.
+
+**Fixed**
+
+- **The ring leak (#17)**: every io_uring the library created stayed mapped until exit — four per device lifecycle, one per `ListDevices`.
+- **Use-after-unmap at teardown (#19)**: memory is freed only after every queue has exited and no backend call holds a request; otherwise it is deliberately leaked.
+- **Unpinned control buffers (#21)**: some control replies were written into goroutine stacks that could move.
+- **Discards and write-zeroes of 2 GiB or more failed with `EIO`** (#16): range operations now complete with 0.
+- The examples handle SIGHUP and ignore SIGPIPE (the likely trigger of the shutdown wedge in #15).
+
+**Verification**: the [compatibility matrix](/reference/matrix/) lists the kernels and distributions this release was run on.
 
 ## v0.1.0 (2026-09-30)
 

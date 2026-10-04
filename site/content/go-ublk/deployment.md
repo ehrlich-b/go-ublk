@@ -25,42 +25,43 @@ The I/O-error result is deterministic (10 against 0 on every cycle). The wedge r
 
 ## Units
 
-These are the units the storm test uses for its passing configuration (`scripts/vm-shutdown-storm.sh`), with paths made generic.
+The repository ships units for the `ublk-loop` example in [`examples/systemd/`](https://github.com/ehrlich-b/go-ublk/tree/main/examples/systemd); adapt them for your server. They are the configuration the shutdown-storm test validated, plus recovery.
 
 ```ini
-# /etc/systemd/system/ublk-data.service
+# /etc/systemd/system/ublk-loop@.service — instance = device ID
 [Unit]
-Description=go-ublk server for /dev/ublkb0
+Description=go-ublk loop device /dev/ublkb%i
 DefaultDependencies=no
-After=local-fs.target
+After=local-fs.target systemd-modules-load.service
 Before=umount.target
 Conflicts=umount.target
 
 [Service]
-Type=simple
+Type=notify
 ExecStartPre=/sbin/modprobe ublk_drv
-ExecStart=/usr/local/bin/my-ublk-server --device-id=0 --file=/var/lib/ublk/data.img
+ExecStart=/usr/local/bin/ublk-loop -id=%i -file=/var/lib/ublk/%i.img -recovery
 KillMode=mixed
 TimeoutStopSec=90
-Restart=no
+Restart=always
+RestartSec=200ms
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```ini
-# /etc/systemd/system/mnt-data.mount  (the file name must match Where=)
+# /etc/systemd/system/srv-ublk0.mount  (the file name must match Where=)
 [Unit]
-Description=Filesystem on /dev/ublkb0
-Requires=ublk-data.service
-After=ublk-data.service
+Description=Filesystem on go-ublk device /dev/ublkb0
+Requires=ublk-loop@0.service
+After=ublk-loop@0.service
 DefaultDependencies=no
 Before=umount.target
 Conflicts=umount.target
 
 [Mount]
 What=/dev/ublkb0
-Where=/mnt/data
+Where=/srv/ublk0
 Type=ext4
 Options=defaults
 
@@ -72,56 +73,51 @@ What each part does:
 
 - **`Requires=` and `After=` on the mount** are the load-bearing lines. They make systemd unmount before it stops the service.
 - **`DefaultDependencies=no` with `Conflicts=`/`Before=umount.target`** keeps the service out of the ordinary early-shutdown sweep, so it stays alive until unmounting actually happens.
-- **`After=local-fs.target`** is there because the test's backing file lives on a local filesystem. If yours lives elsewhere, order after that instead (`RequiresMountsFor=/var/lib/ublk` is the precise form). Do not put the ublk mount itself in `local-fs.target` (for example through a plain `/etc/fstab` line) while the service is ordered after `local-fs.target`; that is a dependency cycle.
+- **`Type=notify`**: `ublk-loop` sends `READY=1` (a dozen lines of Go over `$NOTIFY_SOCKET`, no dependency) once `/dev/ublkbN` is serving, so the mount starts only when the device exists. Do the same in your server, or the mount may race the device.
+- **`After=local-fs.target`** is there because the backing file lives on a local filesystem. If yours lives elsewhere, order after that instead (`RequiresMountsFor=/var/lib/ublk` is the precise form). Do not put the ublk mount itself in `local-fs.target` (for example through a plain `/etc/fstab` line) while the service is ordered after `local-fs.target`; that is a dependency cycle.
 - **`KillMode=mixed`** sends SIGTERM to the main process only, so the server can tear down its own device, and SIGKILL to everything after `TimeoutStopSec`.
-- **A fixed device ID** (`DeviceParams.DeviceID = 0` behind `--device-id=0` here) keeps `/dev/ublkb0` stable, so the mount unit can name it. systemd makes a mount of a device path wait for the device to appear.
-- The `[Install]` sections enable boot-time start. The storm test starts the units by hand, so they are not part of what was measured, but they do not affect stop order.
+- **A fixed device ID** (`-id=%i`, i.e. `DeviceParams.DeviceID`) keeps `/dev/ublkbN` stable, so the mount unit can name it.
+- **`-recovery` with `Restart=always`**: see the next section. An explicit stop — shutdown, `systemctl stop` — is never restarted.
 
-If you mount from `/etc/fstab` instead, the mount option `x-systemd.requires=ublk-data.service` adds the same `Requires=` and `After=`. An fstab mount is ordered before `local-fs.target`, though, so the service must not be ordered after it: replace `After=local-fs.target` with `RequiresMountsFor=` on the backing store's path. Add `nofail` so a failed device does not block boot. This variant has not been run through the storm test.
+If you mount from `/etc/fstab` instead, the mount option `x-systemd.requires=ublk-loop@0.service` adds the same `Requires=` and `After=`. An fstab mount is ordered before `local-fs.target`, though, so the service must not be ordered after it: replace `After=local-fs.target` with `RequiresMountsFor=` on the backing store's path. Add `nofail` so a failed device does not block boot. This variant has not been run through the storm test.
+
+## Crashes and upgrades without downtime
+
+With [user recovery](/go-ublk/lifecycle/#detach-and-recover) (`DeviceParams.Recovery = RecoveryReissue`, which `ublk-loop -recovery` sets), the block device — and the filesystem mounted on it — outlives the server process:
+
+- **Crash.** If the server dies, the kernel holds new I/O and requeues what was in flight. systemd restarts the service (`Restart=always`); the new process finds the device (`GetDeviceInfo`, or `FindDevices` by tag) and takes it over with `Recover`, and the held I/O completes. Applications see a pause, not an error.
+- **Upgrade.** Install the new binary, then `systemctl kill -s SIGUSR2 ublk-loop@0`. The running server calls `Detach` — which drains in-flight I/O with `QUIESCE_DEV` on 6.16+ — and exits; systemd starts the new binary, which recovers the device.
+
+Measured on Ubuntu 24.04 with kernel 7.0.0-38 (emulated x86_64), with ext4 mounted on the device and `fio --verify=crc32c` writing through it: two upgrade handoffs (2.2 s and 2.4 s, including systemd's 200 ms restart delay) and one SIGKILL crash (1.1 s) in a single run, **zero I/O errors**, fio's verification clean, and the mount active throughout.
+
+The startup logic in `ublk-loop` is the pattern to copy:
+
+```go
+info, err := ublk.GetDeviceInfo(id)
+switch {
+case err != nil: // no such device: first start
+	dev, err = ublk.CreateAndServe(ctx, params, opts)
+case info.Features.Has(ublk.FeatureUserRecovery):
+	dev, err = ublk.Recover(ctx, id, params, opts) // crashed or detached predecessor
+default: // leftover from a server without recovery: cannot be taken over
+	_ = ublk.DeleteDevice(id)
+	dev, err = ublk.CreateAndServe(ctx, params, opts)
+}
+```
+
+`Recover` waits (up to 30 seconds) for the kernel to finish releasing the previous process, so it can run the moment systemd restarts the service. A reissued write may reach the backend twice, which block semantics allow; a backend must not depend on seeing each write exactly once.
 
 ## Signal handling in the server
 
-systemd stops the service with SIGTERM. The server's handler must:
+systemd stops the service with SIGTERM. Either cancel the serving context — wire `signal.NotifyContext` into `CreateAndServe`, and cancellation stops the device gracefully — or call `device.Close()` from the handler. Then close the backend (for a buffered file backend, the final `fsync`) and exit.
 
-1. Call `device.Close()`, which stops the device while the queues are still serving, drains, and deletes it. **Do not cancel the device's context first**; see [Device lifecycle](/go-ublk/lifecycle/#do-not-cancel-the-context-first).
-2. Close the backend (for a buffered file backend, this is the final `fsync`).
-3. Exit.
+Handle **SIGINT, SIGTERM and SIGHUP**. A Go program with no SIGHUP handler is killed by it, and logind sends SIGHUP to processes in a closing session — a server killed while `STOP_DEV` is draining strands that I/O. Ignore SIGPIPE too, so a vanished log pipe cannot kill the server. The examples do all of this.
 
-Handle **SIGINT, SIGTERM and SIGHUP** the same way. A Go program with no SIGHUP handler is killed by it, and logind sends SIGHUP to processes in a closing session; a server killed in the middle of `STOP_DEV` is the scenario under investigation for the wedge above. The examples do not handle SIGHUP yet.
+`Stop` and `Close` are bounded by `Options.StopTimeout` (default one minute). If the bound is hit the call returns an error and the device keeps serving; decide whether to retry or exit and leave the device for `Recover` or `DeleteDevice`.
 
-Bound the wait. `Close` is normally fast, but a wedged backend can hold it up. The examples give it 15 seconds and then exit anyway, leaving a registered device to be reaped:
+## Restarts without recovery
 
-```go
-sig := make(chan os.Signal, 1)
-signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-<-sig
-
-done := make(chan error, 1)
-go func() { done <- device.Close() }()
-select {
-case err := <-done:
-	if err != nil {
-		log.Printf("close: %v", err)
-	}
-case <-time.After(15 * time.Second):
-	log.Printf("close timed out; device %d left registered", device.ID)
-}
-backend.Close()
-```
-
-## Restarts and orphans
-
-Without [user recovery](/guide/recovery/) (not implemented in go-ublk yet), a server that dies takes its block device with it: in-flight I/O fails, the filesystem on it sees errors, and the kernel removes `/dev/ublkbN`. Restarting the server creates a new device; it cannot rescue the old filesystem mount. That is why the unit above uses `Restart=no`: an automatic restart would bring up a fresh device under a mount that has already failed.
-
-A crashed server also leaves its device registered. With a fixed ID, the next start's `ADD_DEV` fails with `EEXIST` until it is deleted. Reap it at startup, before creating the device:
-
-```go
-if ids, err := ublk.ListDevices(); err == nil && slices.Contains(ids, uint32(myID)) {
-	_ = ublk.DeleteDevice(uint32(myID)) // left over from a previous crash
-}
-```
-
-Only do this when nothing else can be serving that ID, which a single systemd unit per device guarantees.
+A server created without a recovery mode takes its block device with it when it dies: in-flight I/O fails, the filesystem on it sees errors, and the kernel removes `/dev/ublkbN`. The device stays registered until it is deleted, and with a fixed ID the next start's `ADD_DEV` fails with `EEXIST` until then. Reap it at startup, as the `default:` branch above does. Use `Restart=no` for such a server: an automatic restart would bring up a fresh device under a mount that has already failed.
 
 ## Choosing a kernel
 

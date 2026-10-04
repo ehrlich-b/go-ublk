@@ -1,59 +1,48 @@
 ---
 title: "Roadmap"
 linkTitle: "Roadmap"
-description: "What go-ublk does not do yet, what is being built, and the open defects, in priority order."
+description: "What go-ublk does not do yet, what is next, and the open defects, in priority order."
 weight: 100
 ---
 
-The ordering principle is the one a backup and disaster-recovery product needs: **correctness and recoverability first, performance last.** Nothing on this page is implemented unless it says so. The [UAPI reference](/reference/uapi/) tracks go-ublk's status for every kernel item individually.
+The ordering principle is the one a backup and disaster-recovery product needs: **correctness and recoverability first, performance last.** The [UAPI reference](/reference/uapi/) tracks go-ublk's status for every kernel item individually.
 
-## Open defects
+## Done in v0.2.0
 
-Found by a code audit on 2026-10-03 unless noted. These come before new features.
+The October 2026 overhaul (see the [changelog](/go-ublk/releases/)) closed what this page used to list as the priorities:
 
-| # | Defect | Impact |
-|---|---|---|
-| 17 | Every io_uring the library creates stays mapped until process exit (the ring fd is closed but its mappings are not) | About four rings leak per device create/close cycle and three per `ListDevices` call; a daemon that creates devices on demand grows without bound. Measured |
-| 18 | `Device.Close` ignores a failed `STOP_DEV` and tears the queues down anyway | `STOP_DEV` on a mounted, dirty device can outlast the 10-second control timeout; tearing down then strands in-flight I/O |
-| 19 | A queue's memory is released after a 2-second join timeout even if its goroutine is still running | A backend call slower than 2 s at teardown can fault or corrupt memory. Leaking is the safe failure |
-| 20 | A queue goroutine can exit on an unexpected completion while the device stays live, and nothing notices | I/O on that queue hangs until `STOP_DEV` |
-| 21 | Buffers passed to asynchronous control commands are not pinned for the whole time the kernel may use them | A timed-out `ADD_DEV` can let a late kernel write land in freed memory |
-| 15 | The shutdown-ordering wedge is solved by deployment (a systemd unit), but its trigger is unexplained: the daemon is reported "blocked by coredump" | Hypothesis to test: an unhandled SIGHUP from logind kills the daemon mid-`STOP_DEV`. The examples do not handle SIGHUP yet |
-| 4 | Debug logging holds one lock across a blocking write | Only with `Options.Debug`; can stall queues under load |
-| 5 | All memory fences share one global variable | Correct; a possible contention point, to change only if profiling shows it |
+- **User recovery**: `RecoveryReissue`/`RecoveryQueue`/`RecoveryFailIO`, `Detach` (with `QUIESCE_DEV`), `Recover`, device tags. Tested against SIGKILL and live upgrade handoffs under load.
+- **Asynchronous backends**: a goroutine per request by default, and a raw `Handler` that can complete from anywhere.
+- **Full control-plane coverage** of the 7.3-rc5 UAPI: every command typed and tested, `GET_FEATURES` negotiation that refuses rather than silently degrades, unprivileged devices, every parameter block.
+- **Lifecycle defects** #17–#23: the ring leak, `STOP_DEV` failures, use-after-unmap, silent queue death, unpinned control buffers, the context-cancel wedge, and the restart crash.
+- Per-write FUA, `UPDATE_SIZE`, errno pass-through, `TRY_STOP_DEV`, `NO_AUTO_PART_SCAN`, user copy, `NEED_GET_DATA`, per-I/O threads, a public `GET_DEV_INFO`, the shipped systemd units with SIGHUP handling.
 
-## Kernel features
+## Kernel features not yet implemented
 
-Being built now, by parallel work streams:
+In priority order:
 
-- **User recovery** (`UBLK_F_USER_RECOVERY`, with reissue and fail-fast variants, and `QUIESCE_DEV`): restart or upgrade the server without removing `/dev/ublkbN` or the filesystem on it. This is the most important missing feature for production use; today a server crash takes the device with it. See [User recovery and quiesce](/guide/recovery/) for how the kernel side works.
-- **Asynchronous backends**: let one queue have many backend operations in flight, so latency-bound backends are not limited to one request per queue at a time.
-- **Zero copy**: `UBLK_U_IO_REGISTER_IO_BUF` and `UBLK_F_AUTO_BUF_REG`, so backend I/O can use the request's pages directly.
-- **Batch I/O** (`UBLK_F_BATCH_IO`, Linux 7.0).
-- **Full UAPI coverage** as of Linux 7.3-rc5: every command, flag and parameter block marshaled and tested, with runtime feature detection through `GET_FEATURES`.
-
-Not yet started, roughly in priority order:
-
-- Per-write FUA (`UBLK_ATTR_FUA` and `UBLK_IO_F_FUA`), so a backend that can make one write durable cheaply does not need a full flush.
-- Online resize (`UPDATE_SIZE`).
-- Passing errnos from the backend to the block layer instead of always `EIO`.
-- Unprivileged devices, user copy, zoned devices, integrity metadata, shared-memory zero copy, and `NEED_GET_DATA` for older kernels. The corresponding `DeviceParams` switches are placeholders today; see [Configuration](/go-ublk/configuration/#kernel-feature-switches).
-- `TRY_STOP_DEV`, `DEL_DEV_ASYNC`, `NO_AUTO_PART_SCAN`, and a public `GET_DEV_INFO`.
+- **Zero copy** — `UBLK_U_IO_REGISTER_IO_BUF` (6.15) and `UBLK_F_AUTO_BUF_REG` (6.16): a backend that is a file or block device moves data between the request's pages and its fd with io_uring fixed buffers, never copying through Go memory. The io_uring layer has everything this needs (sparse buffer tables, `READ_FIXED`/`WRITE_FIXED`); the engine does not use it yet. `EnableZeroCopy` returns `ErrNotImplemented` until it does.
+- **Shared-memory zero copy** — `UBLK_F_SHMEM_ZC` and `REG_BUF` (7.1): requests whose pages live in memory the server registered arrive without a copy. The control commands exist; the data path does not use them.
+- **Batch I/O** — `UBLK_F_BATCH_IO` (7.0): fetch and commit many requests per command with multishot `FETCH_IO_CMDS`.
+- **Zoned devices** — `UBLK_F_ZONED` (6.6): the zone operations reach a `Handler` today, but the zoned parameters and zone-report path are not wired up; `EnableZoned` returns `ErrNotImplemented`.
+- **Integrity metadata** — `UBLK_F_INTEGRITY` (7.0): protection-information buffers, through user copy.
+- **`UBLK_F_IO_DESC_SIZE`** (7.3): larger descriptors. The engine already honors a descriptor stride; nothing requests the feature yet.
 
 ## Testing and releases
 
-- **A kernel and distribution matrix**: the test suite run against every kernel family that can be booted, with results published on the [compatibility matrix](/reference/matrix/). In progress.
-- **Fuzzing** beyond the UAPI decoders: the data path and control-plane error handling. In progress.
-- **Well-tested releases**: tagged versions with the verification behind each one recorded in the [changelog](/go-ublk/releases/).
-- Real-kernel tests in CI, not only unit tests.
+- **The kernel and distribution matrix** runs the conformance suite under every bootable kernel; results are on the [compatibility matrix](/reference/matrix/). Next: run it in CI on every release tag (a workflow with KVM exists and is untested).
+- An unprivileged end-to-end test (serving I/O as a non-root user with the udev rules in place).
 - A real host power cut, as opposed to a guest reset, in the power-fail test.
-- Soak tests, and fault injection under memory and GC pressure.
+- Soak tests over days, and fault injection under memory and GC pressure.
+- Longer fuzzing runs of the engine state machine and the UAPI decoders.
 
-## Deployment
+## Open defects
 
-- Ship the systemd service and mount units with the examples, and make the examples handle SIGHUP. See [Deployment](/go-ublk/deployment/).
-- Daemon supervision: detect and clean up stuck devices so that a wedged server never requires a host reboot.
+| # | Defect | Impact |
+|---|---|---|
+| 15 | The shutdown-ordering wedge is solved by deployment (a systemd unit), and the examples now handle SIGHUP — the likeliest trigger — but the fix has not been re-run through the shutdown-storm test | Run the server as a systemd unit as documented |
+| 4 | Debug logging holds one lock across a blocking write | Only with `Options.Debug` |
 
 ## Performance
 
-Only after the above. Candidates: io_uring `SQPOLL`, registered buffers, hot-path profiling, and an NBD backend example.
+Only after the above. Candidates: zero copy (above), io_uring `SQPOLL`, measuring and tuning the goroutine-per-request dispatch against `Inline`, and batch I/O.
