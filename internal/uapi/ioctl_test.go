@@ -118,125 +118,124 @@ func TestUnitIoctlEncode(t *testing.T) {
 	}
 }
 
-// TestUnitUblkCtrlCmd checks every UBLK_CMD_* constant.
-// dir=3, typ=117 ('u'=0x75), size=32, nr = the command literal.
-// Encoding: (3<<30) | (32<<16) | (0x75<<8) | nr
+// TestUnitUblkCtrlCmd checks every control command number against the
+// header's encoding. typ=117 ('u'=0x75), size=32, nr = the command literal,
+// and dir = 2 (_IOR) for the read-only commands, 3 (_IOWR) for the rest:
 //
-//	= 0xC0000000 | 0x00200000 | 0x00007500 | nr = 0xC0207500 | nr
+//	_IOR:  (2<<30) | (32<<16) | (0x75<<8) | nr = 0x80207500 | nr
+//	_IOWR: (3<<30) | (32<<16) | (0x75<<8) | nr = 0xC0207500 | nr
+//
+// The direction matters for GET_FEATURES, which the driver compares in full.
 func TestUnitUblkCtrlCmd(t *testing.T) {
 	cases := []struct {
-		name string
-		cmd  uint32
-		nr   uint32
-		want uint32
+		name    string
+		cmd     uint32
+		encoded uint32 // the UBLK_U_CMD_* constant
+		want    uint32
 	}{
-		// (3<<30)|(32<<16)|(117<<8)|0x01 = 0xC0207500 | 0x01 = 0xC0207501
-		{"GET_QUEUE_AFFINITY", UBLK_CMD_GET_QUEUE_AFFINITY, 0x01, 0xC0207501},
-		// ... | 0x02 = 0xC0207502
-		{"GET_DEV_INFO", UBLK_CMD_GET_DEV_INFO, 0x02, 0xC0207502},
-		// ... | 0x04 = 0xC0207504
-		{"ADD_DEV", UBLK_CMD_ADD_DEV, 0x04, 0xC0207504},
-		// ... | 0x05 = 0xC0207505
-		{"DEL_DEV", UBLK_CMD_DEL_DEV, 0x05, 0xC0207505},
-		// ... | 0x06 = 0xC0207506
-		{"START_DEV", UBLK_CMD_START_DEV, 0x06, 0xC0207506},
-		// ... | 0x07 = 0xC0207507
-		{"STOP_DEV", UBLK_CMD_STOP_DEV, 0x07, 0xC0207507},
-		// ... | 0x08 = 0xC0207508
-		{"SET_PARAMS", UBLK_CMD_SET_PARAMS, 0x08, 0xC0207508},
-		// ... | 0x09 = 0xC0207509
-		{"GET_PARAMS", UBLK_CMD_GET_PARAMS, 0x09, 0xC0207509},
-		// ... | 0x10 = 0xC0207510
-		{"START_USER_RECOVERY", UBLK_CMD_START_USER_RECOVERY, 0x10, 0xC0207510},
-		// ... | 0x11 = 0xC0207511
-		{"END_USER_RECOVERY", UBLK_CMD_END_USER_RECOVERY, 0x11, 0xC0207511},
-		// ... | 0x12 = 0xC0207512
-		{"GET_DEV_INFO2", UBLK_CMD_GET_DEV_INFO2, 0x12, 0xC0207512},
+		{"GET_QUEUE_AFFINITY", UBLK_CMD_GET_QUEUE_AFFINITY, UBLK_U_CMD_GET_QUEUE_AFFINITY, 0x80207501},
+		{"GET_DEV_INFO", UBLK_CMD_GET_DEV_INFO, UBLK_U_CMD_GET_DEV_INFO, 0x80207502},
+		{"ADD_DEV", UBLK_CMD_ADD_DEV, UBLK_U_CMD_ADD_DEV, 0xC0207504},
+		{"DEL_DEV", UBLK_CMD_DEL_DEV, UBLK_U_CMD_DEL_DEV, 0xC0207505},
+		{"START_DEV", UBLK_CMD_START_DEV, UBLK_U_CMD_START_DEV, 0xC0207506},
+		{"STOP_DEV", UBLK_CMD_STOP_DEV, UBLK_U_CMD_STOP_DEV, 0xC0207507},
+		{"SET_PARAMS", UBLK_CMD_SET_PARAMS, UBLK_U_CMD_SET_PARAMS, 0xC0207508},
+		{"GET_PARAMS", UBLK_CMD_GET_PARAMS, UBLK_U_CMD_GET_PARAMS, 0x80207509},
+		{"START_USER_RECOVERY", UBLK_CMD_START_USER_RECOVERY, UBLK_U_CMD_START_USER_RECOVERY, 0xC0207510},
+		{"END_USER_RECOVERY", UBLK_CMD_END_USER_RECOVERY, UBLK_U_CMD_END_USER_RECOVERY, 0xC0207511},
+		{"GET_DEV_INFO2", UBLK_CMD_GET_DEV_INFO2, UBLK_U_CMD_GET_DEV_INFO2, 0x80207512},
+		{"GET_FEATURES", UBLK_CMD_GET_FEATURES, UBLK_U_CMD_GET_FEATURES, 0x80207513},
+		{"DEL_DEV_ASYNC", UBLK_CMD_DEL_DEV_ASYNC, UBLK_U_CMD_DEL_DEV_ASYNC, 0x80207514},
+		{"UPDATE_SIZE", UBLK_CMD_UPDATE_SIZE, UBLK_U_CMD_UPDATE_SIZE, 0xC0207515},
+		{"QUIESCE_DEV", UBLK_CMD_QUIESCE_DEV, UBLK_U_CMD_QUIESCE_DEV, 0xC0207516},
+		{"TRY_STOP_DEV", UBLK_CMD_TRY_STOP_DEV, UBLK_U_CMD_TRY_STOP_DEV, 0xC0207517},
+		{"REG_BUF", UBLK_CMD_REG_BUF, UBLK_U_CMD_REG_BUF, 0xC0207518},
+		{"UNREG_BUF", UBLK_CMD_UNREG_BUF, UBLK_U_CMD_UNREG_BUF, 0xC0207519},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := UblkCtrlCmd(c.cmd); got != c.want {
-				t.Errorf("UblkCtrlCmd(%#x) = %#x, want %#x (nr=%#x)", c.cmd, got, c.want, c.nr)
+				t.Errorf("UblkCtrlCmd(%#x) = %#x, want %#x", c.cmd, got, c.want)
+			}
+			if c.encoded != c.want {
+				t.Errorf("UBLK_U_CMD_%s = %#x, want %#x", c.name, c.encoded, c.want)
 			}
 		})
 	}
 }
 
-// TestUnitUblkIOCmd checks every UBLK_IO_* constant.
-// dir=3, typ=117 ('u'=0x75), size=16, nr = the command literal.
-// Encoding: (3<<30) | (16<<16) | (0x75<<8) | nr
+// TestUnitUblkIOCmd checks every I/O command number. All are _IOWR with
+// size 16 (sizeof ublksrv_io_cmd == sizeof ublk_batch_io):
 //
-//	= 0xC0000000 | 0x00100000 | 0x00007500 | nr = 0xC0107500 | nr
+//	(3<<30) | (16<<16) | (0x75<<8) | nr = 0xC0107500 | nr
 func TestUnitUblkIOCmd(t *testing.T) {
 	cases := []struct {
-		name string
-		cmd  uint32
-		nr   uint32
-		want uint32
+		name    string
+		cmd     uint32
+		encoded uint32 // the UBLK_U_IO_* constant
+		want    uint32
 	}{
-		// (3<<30)|(16<<16)|(117<<8)|0x20 = 0xC0107500 | 0x20 = 0xC0107520
-		{"FETCH_REQ", UBLK_IO_FETCH_REQ, 0x20, 0xC0107520},
-		// ... | 0x21 = 0xC0107521
-		{"COMMIT_AND_FETCH_REQ", UBLK_IO_COMMIT_AND_FETCH_REQ, 0x21, 0xC0107521},
-		// ... | 0x22 = 0xC0107522
-		{"NEED_GET_DATA", UBLK_IO_NEED_GET_DATA, 0x22, 0xC0107522},
+		{"FETCH_REQ", UBLK_IO_FETCH_REQ, UBLK_U_IO_FETCH_REQ, 0xC0107520},
+		{"COMMIT_AND_FETCH_REQ", UBLK_IO_COMMIT_AND_FETCH_REQ, UBLK_U_IO_COMMIT_AND_FETCH_REQ, 0xC0107521},
+		{"NEED_GET_DATA", UBLK_IO_NEED_GET_DATA, UBLK_U_IO_NEED_GET_DATA, 0xC0107522},
+		{"REGISTER_IO_BUF", UBLK_IO_REGISTER_IO_BUF, UBLK_U_IO_REGISTER_IO_BUF, 0xC0107523},
+		{"UNREGISTER_IO_BUF", UBLK_IO_UNREGISTER_IO_BUF, UBLK_U_IO_UNREGISTER_IO_BUF, 0xC0107524},
+		{"PREP_IO_CMDS", UBLK_IO_PREP_IO_CMDS, UBLK_U_IO_PREP_IO_CMDS, 0xC0107525},
+		{"COMMIT_IO_CMDS", UBLK_IO_COMMIT_IO_CMDS, UBLK_U_IO_COMMIT_IO_CMDS, 0xC0107526},
+		{"FETCH_IO_CMDS", UBLK_IO_FETCH_IO_CMDS, UBLK_U_IO_FETCH_IO_CMDS, 0xC0107527},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := UblkIOCmd(c.cmd); got != c.want {
-				t.Errorf("UblkIOCmd(%#x) = %#x, want %#x (nr=%#x)", c.cmd, got, c.want, c.nr)
+				t.Errorf("UblkIOCmd(%#x) = %#x, want %#x", c.cmd, got, c.want)
+			}
+			if c.encoded != c.want {
+				t.Errorf("UBLK_U_IO_%s = %#x, want %#x", c.name, c.encoded, c.want)
 			}
 		})
 	}
 }
 
 // TestUnitUblkIoctlDistinctness asserts that no two encoded values collide.
-// Ctrl values carry size=32 (bit 0x00200000) in the size field while IO values
-// carry size=16 (bit 0x00100000); those bits can never overlap, and within
-// each group nr occupies a distinct distinct low byte. Still, the cross-check
-// is asserted explicitly rather than assumed.
 func TestUnitUblkIoctlDistinctness(t *testing.T) {
 	seen := make(map[uint32]string)
-
-	ctrlCmds := []struct {
+	all := []struct {
 		name string
-		cmd  uint32
+		v    uint32
 	}{
-		{"UBLK_CMD_GET_QUEUE_AFFINITY", UBLK_CMD_GET_QUEUE_AFFINITY},
-		{"UBLK_CMD_GET_DEV_INFO", UBLK_CMD_GET_DEV_INFO},
-		{"UBLK_CMD_ADD_DEV", UBLK_CMD_ADD_DEV},
-		{"UBLK_CMD_DEL_DEV", UBLK_CMD_DEL_DEV},
-		{"UBLK_CMD_START_DEV", UBLK_CMD_START_DEV},
-		{"UBLK_CMD_STOP_DEV", UBLK_CMD_STOP_DEV},
-		{"UBLK_CMD_SET_PARAMS", UBLK_CMD_SET_PARAMS},
-		{"UBLK_CMD_GET_PARAMS", UBLK_CMD_GET_PARAMS},
-		{"UBLK_CMD_START_USER_RECOVERY", UBLK_CMD_START_USER_RECOVERY},
-		{"UBLK_CMD_END_USER_RECOVERY", UBLK_CMD_END_USER_RECOVERY},
-		{"UBLK_CMD_GET_DEV_INFO2", UBLK_CMD_GET_DEV_INFO2},
+		{"UBLK_U_CMD_GET_QUEUE_AFFINITY", UBLK_U_CMD_GET_QUEUE_AFFINITY},
+		{"UBLK_U_CMD_GET_DEV_INFO", UBLK_U_CMD_GET_DEV_INFO},
+		{"UBLK_U_CMD_ADD_DEV", UBLK_U_CMD_ADD_DEV},
+		{"UBLK_U_CMD_DEL_DEV", UBLK_U_CMD_DEL_DEV},
+		{"UBLK_U_CMD_START_DEV", UBLK_U_CMD_START_DEV},
+		{"UBLK_U_CMD_STOP_DEV", UBLK_U_CMD_STOP_DEV},
+		{"UBLK_U_CMD_SET_PARAMS", UBLK_U_CMD_SET_PARAMS},
+		{"UBLK_U_CMD_GET_PARAMS", UBLK_U_CMD_GET_PARAMS},
+		{"UBLK_U_CMD_START_USER_RECOVERY", UBLK_U_CMD_START_USER_RECOVERY},
+		{"UBLK_U_CMD_END_USER_RECOVERY", UBLK_U_CMD_END_USER_RECOVERY},
+		{"UBLK_U_CMD_GET_DEV_INFO2", UBLK_U_CMD_GET_DEV_INFO2},
+		{"UBLK_U_CMD_GET_FEATURES", UBLK_U_CMD_GET_FEATURES},
+		{"UBLK_U_CMD_DEL_DEV_ASYNC", UBLK_U_CMD_DEL_DEV_ASYNC},
+		{"UBLK_U_CMD_UPDATE_SIZE", UBLK_U_CMD_UPDATE_SIZE},
+		{"UBLK_U_CMD_QUIESCE_DEV", UBLK_U_CMD_QUIESCE_DEV},
+		{"UBLK_U_CMD_TRY_STOP_DEV", UBLK_U_CMD_TRY_STOP_DEV},
+		{"UBLK_U_CMD_REG_BUF", UBLK_U_CMD_REG_BUF},
+		{"UBLK_U_CMD_UNREG_BUF", UBLK_U_CMD_UNREG_BUF},
+		{"UBLK_U_IO_FETCH_REQ", UBLK_U_IO_FETCH_REQ},
+		{"UBLK_U_IO_COMMIT_AND_FETCH_REQ", UBLK_U_IO_COMMIT_AND_FETCH_REQ},
+		{"UBLK_U_IO_NEED_GET_DATA", UBLK_U_IO_NEED_GET_DATA},
+		{"UBLK_U_IO_REGISTER_IO_BUF", UBLK_U_IO_REGISTER_IO_BUF},
+		{"UBLK_U_IO_UNREGISTER_IO_BUF", UBLK_U_IO_UNREGISTER_IO_BUF},
+		{"UBLK_U_IO_PREP_IO_CMDS", UBLK_U_IO_PREP_IO_CMDS},
+		{"UBLK_U_IO_COMMIT_IO_CMDS", UBLK_U_IO_COMMIT_IO_CMDS},
+		{"UBLK_U_IO_FETCH_IO_CMDS", UBLK_U_IO_FETCH_IO_CMDS},
 	}
-	for _, c := range ctrlCmds {
-		v := UblkCtrlCmd(c.cmd)
-		if prev, ok := seen[v]; ok {
-			t.Errorf("UblkCtrlCmd(%s) = %#x collides with %s", c.name, v, prev)
+	for _, c := range all {
+		if prev, ok := seen[c.v]; ok {
+			t.Errorf("%s = %#x collides with %s", c.name, c.v, prev)
 		}
-		seen[v] = "UblkCtrlCmd(" + c.name + ")"
-	}
-
-	ioCmds := []struct {
-		name string
-		cmd  uint32
-	}{
-		{"UBLK_IO_FETCH_REQ", UBLK_IO_FETCH_REQ},
-		{"UBLK_IO_COMMIT_AND_FETCH_REQ", UBLK_IO_COMMIT_AND_FETCH_REQ},
-		{"UBLK_IO_NEED_GET_DATA", UBLK_IO_NEED_GET_DATA},
-	}
-	for _, c := range ioCmds {
-		v := UblkIOCmd(c.cmd)
-		if prev, ok := seen[v]; ok {
-			t.Errorf("UblkIOCmd(%s) = %#x collides with %s", c.name, v, prev)
-		}
-		seen[v] = "UblkIOCmd(" + c.name + ")"
+		seen[c.v] = c.name
 	}
 }

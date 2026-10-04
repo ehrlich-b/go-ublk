@@ -123,6 +123,9 @@ func TestUnitUblkParamsHasAllFalseWhenZero(t *testing.T) {
 	if p.HasZoned() {
 		t.Error("HasZoned() = true for zero UblkParams")
 	}
+	if p.HasDMAAlign() || p.HasSegment() || p.HasIntegrity() {
+		t.Error("HasDMAAlign/HasSegment/HasIntegrity true for zero UblkParams")
+	}
 }
 
 // TestUnitUblkParamsHasSetIsolation exercises each Has*/Set* pair in isolation.
@@ -142,6 +145,9 @@ func TestUnitUblkParamsHasSetIsolation(t *testing.T) {
 		{"Discard", UBLK_PARAM_TYPE_DISCARD, (*UblkParams).SetDiscard, (*UblkParams).HasDiscard},
 		{"Devt", UBLK_PARAM_TYPE_DEVT, (*UblkParams).SetDevt, (*UblkParams).HasDevt},
 		{"Zoned", UBLK_PARAM_TYPE_ZONED, (*UblkParams).SetZoned, (*UblkParams).HasZoned},
+		{"DMAAlign", UBLK_PARAM_TYPE_DMA_ALIGN, (*UblkParams).SetDMAAlign, (*UblkParams).HasDMAAlign},
+		{"Segment", UBLK_PARAM_TYPE_SEGMENT, (*UblkParams).SetSegment, (*UblkParams).HasSegment},
+		{"Integrity", UBLK_PARAM_TYPE_INTEGRITY, (*UblkParams).SetIntegrity, (*UblkParams).HasIntegrity},
 	}
 	hasMethods := []struct {
 		name string
@@ -152,6 +158,9 @@ func TestUnitUblkParamsHasSetIsolation(t *testing.T) {
 		{"HasDiscard", UBLK_PARAM_TYPE_DISCARD, (*UblkParams).HasDiscard},
 		{"HasDevt", UBLK_PARAM_TYPE_DEVT, (*UblkParams).HasDevt},
 		{"HasZoned", UBLK_PARAM_TYPE_ZONED, (*UblkParams).HasZoned},
+		{"HasDMAAlign", UBLK_PARAM_TYPE_DMA_ALIGN, (*UblkParams).HasDMAAlign},
+		{"HasSegment", UBLK_PARAM_TYPE_SEGMENT, (*UblkParams).HasSegment},
+		{"HasIntegrity", UBLK_PARAM_TYPE_INTEGRITY, (*UblkParams).HasIntegrity},
 	}
 
 	for _, pair := range pairs {
@@ -190,6 +199,13 @@ func TestUnitUblkParamsSetAllTypes(t *testing.T) {
 	if p.Types != 0xF {
 		t.Errorf("Types = 0x%x, want 0xf (all four UBLK_PARAM_TYPE_* bits)", p.Types)
 	}
+	p.SetDMAAlign()
+	p.SetSegment()
+	p.SetIntegrity()
+	// ... | DMA_ALIGN(0x10) | SEGMENT(0x20) | INTEGRITY(0x40) = 0x7F
+	if p.Types != 0x7F || !p.HasDMAAlign() || !p.HasSegment() || !p.HasIntegrity() {
+		t.Errorf("Types = 0x%x, want 0x7f (all seven UBLK_PARAM_TYPE_* bits)", p.Types)
+	}
 }
 
 // TestUnitUblkParamsSetIdempotent asserts the Set* accessors are idempotent:
@@ -204,6 +220,9 @@ func TestUnitUblkParamsSetIdempotent(t *testing.T) {
 		{"Discard", UBLK_PARAM_TYPE_DISCARD, (*UblkParams).SetDiscard},
 		{"Devt", UBLK_PARAM_TYPE_DEVT, (*UblkParams).SetDevt},
 		{"Zoned", UBLK_PARAM_TYPE_ZONED, (*UblkParams).SetZoned},
+		{"DMAAlign", UBLK_PARAM_TYPE_DMA_ALIGN, (*UblkParams).SetDMAAlign},
+		{"Segment", UBLK_PARAM_TYPE_SEGMENT, (*UblkParams).SetSegment},
+		{"Integrity", UBLK_PARAM_TYPE_INTEGRITY, (*UblkParams).SetIntegrity},
 	}
 	for _, s := range sets {
 		once := UblkParams{}

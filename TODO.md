@@ -6,6 +6,17 @@ go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
 
 **Works (single- AND multi-queue):**
 - Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
+- **Every control command in the v7.3-rc5 UAPI** (2026-10-04): `internal/ctrl` has one typed
+  method each — ADD_DEV, DEL_DEV, DEL_DEV_ASYNC, START_DEV, STOP_DEV, TRY_STOP_DEV, SET_PARAMS
+  and GET_PARAMS (all seven param types), GET_DEV_INFO, GET_DEV_INFO2, GET_QUEUE_AFFINITY,
+  GET_FEATURES, START/END_USER_RECOVERY, UPDATE_SIZE, QUIESCE_DEV, REG_BUF, UNREG_BUF — with
+  unprivileged-device dev-path support, feature negotiation against GET_FEATURES and ADD_DEV's
+  answer, context-aware calls, and safe concurrent use. `internal/uapi` models the whole header
+  and is checked field by field against a C build of it (`scripts/uapi-fixtures.sh`).
+  `make ctrltest` (test/ctrl) on x86_64 `7.0.0-38`: every command the kernel has, as root and as
+  an unprivileged user, plus a full QUIESCE -> QUIESCED -> START/END_USER_RECOVERY -> LIVE cycle
+  on the existing queue engine with data intact — 0 failures. REG_BUF/UNREG_BUF (v7.1) and
+  IO_DESC_SIZE (v7.3) are only checked to report unsupported there.
 - Block I/O: Read, Write, Flush, Discard, Write-Zeroes. Read/Write are verified byte-exact.
   The kernel only delivers Flush when the device advertises a volatile write cache
   (`VolatileCache`, now the fail-safe default — see #13), Discard when the backend implements
@@ -127,6 +138,8 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
 (RAM backend, Q=4) — the old "~100k IOPS" figures were buffered and are superseded.
 
 **Minimum kernel:** 6.8+ (IOCTL encoding required). Fixes verified on arm64, kernel 6.17.
+Per the driver sources, ioctl-encoded control opcodes exist from v6.4 and GET_FEATURES from v6.5;
+on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unverified.
 
 ---
 
@@ -374,17 +387,23 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
     prepared for I/O the backend completed. Nothing supervises the loop or tells `Device`, so I/O
     on that queue hangs until STOP_DEV.
 
-21. **[OPEN — uring side FIXED 2026-10-04] Buffers handed to asynchronous control commands are not
+21. **[FIXED — 2026-10-04, both sides] Buffers handed to asynchronous control commands were not
     pinned for the kernel's use.** SET_PARAMS' buffer was only reachable via a uintptr (fixed in
-    the 2026-10-02 hardening merge); ADD_DEV returns before its KeepAlive on the 10s timeout, so a
-    late kernel write lands in freed memory; GET_DEV_INFO's buffer may be stack-allocated and move.
-    `Ring.SubmitCtrlCmd` no longer hands the kernel the caller's buffer: it copies `Len` bytes at
-    `Addr` into ring-owned off-heap (mmap'd) memory, points the SQE there and copies back after the
-    CQE. On timeout (now `ErrCtrlTimeout`; `Config.CtrlTimeout` < 0 waits without one) that staging
-    buffer is abandoned, never reused or unmapped, so a late write cannot reach the Go heap, and the
-    late CQE is told apart by an internal user_data tag instead of being taken for the next
-    command's. Left for the ctrl side: callers' buffers must be heap or off-heap, not stack, and
-    reachable until `SubmitCtrlCmd` returns, because the address still arrives as an integer.
+    the 2026-10-02 hardening merge); ADD_DEV returned before its KeepAlive on the 10s timeout, so a
+    late kernel write landed in freed memory; GET_DEV_INFO's and GET_PARAMS' buffers were
+    stack-allocated (`go build -gcflags=-m`: "does not escape") and moved with the goroutine stack.
+    Control side: every control buffer now lives in an mmap'd scratch page owned by the command's
+    ring slot; it never moves and is never unmapped while a command may be in flight — a transport
+    error or timeout retires the slot and leaks the page. `TestControlBufferSurvivesStackMove`
+    forces a stack copy between building the command and the "kernel" write; it fails against the
+    old code (reply reads back as zeros) and passes now. io_uring side: `Ring.SubmitCtrlCmd` copies
+    the payload into ring-owned off-heap memory, and a late CQE is told apart by an internal
+    user_data tag. A command whose context ends returns `*ctrl.InFlightError`;
+    `Ring.SubmitCtrlCmdContext` cancels it with IORING_OP_ASYNC_CANCEL, so an abandoned command that
+    sleeps interruptibly in the kernel (END_USER_RECOVERY or START_DEV waiting for FETCHes, DEL_DEV
+    waiting for the last reference, QUIESCE_DEV) gets EINTR and releases its device instead of
+    lingering until process exit (measured on 7.0.0-38). ctrl's rings therefore run with
+    `CtrlTimeout: -1` and rely on the caller's context for bounds.
 
 ---
 

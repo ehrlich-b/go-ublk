@@ -301,20 +301,20 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	ctrlParams := convertToCtrlParams(params)
 
 	// Create device using control plane
-	deviceInfo, err := ctrl.AddDevice(&ctrlParams)
+	deviceInfo, err := ctrl.AddDevice(context.Background(), &ctrlParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add device: %w", err)
 	}
 	deviceID := deviceInfo.DevID
 	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, deviceInfo); err != nil {
-		_ = ctrl.DeleteDevice(deviceID)
+		_ = ctrl.DelDev(context.Background(), deviceID)
 		return nil, err
 	}
 
 	// Set parameters
-	err = ctrl.SetParams(deviceID, &ctrlParams)
+	err = ctrl.SetDeviceParams(context.Background(), deviceID, &ctrlParams)
 	if err != nil {
-		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
+		_ = ctrl.DelDev(context.Background(), deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("failed to set parameters: %w", err)
 	}
 
@@ -370,7 +370,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		time.Sleep(100 * time.Millisecond)
 	}
 	if charDeviceFd < 0 {
-		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
+		_ = ctrl.DelDev(context.Background(), deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("character device did not appear: %s", charPath)
 	}
 
@@ -400,7 +400,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		if device.cancel != nil {
 			device.cancel()
 		}
-		_ = ctrl.StopDevice(deviceID)
+		_ = ctrl.StopDev(context.Background(), deviceID)
 		for _, r := range device.runners {
 			if r != nil {
 				r.Close()
@@ -410,7 +410,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			syscall.Close(charDeviceFd)
 			charDeviceFd = -1
 		}
-		_ = ctrl.DeleteDevice(deviceID)
+		_ = ctrl.DelDev(context.Background(), deviceID)
 	}
 
 	device.runners = make([]*queue.Runner, numQueues)
@@ -446,7 +446,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	time.Sleep(constants.QueueInitDelay)
 
 	// Submit START_DEV after FETCH_REQs are in place
-	err = ctrl.StartDevice(deviceID)
+	err = ctrl.StartDev(context.Background(), deviceID, os.Getpid())
 	if err != nil {
 		teardownPartial()
 		return nil, fmt.Errorf("failed to START_DEV: %w", err)
@@ -504,20 +504,20 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	ctrlParams := convertToCtrlParams(params)
 
 	// Create device using control plane
-	deviceInfo, err := controller.AddDevice(&ctrlParams)
+	deviceInfo, err := controller.AddDevice(context.Background(), &ctrlParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add device: %w", err)
 	}
 	deviceID := deviceInfo.DevID
 	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, deviceInfo); err != nil {
-		_ = controller.DeleteDevice(deviceID)
+		_ = controller.DelDev(context.Background(), deviceID)
 		return nil, err
 	}
 
 	// Set parameters
-	err = controller.SetParams(deviceID, &ctrlParams)
+	err = controller.SetDeviceParams(context.Background(), deviceID, &ctrlParams)
 	if err != nil {
-		_ = controller.DeleteDevice(deviceID) // Cleanup, ignore error
+		_ = controller.DelDev(context.Background(), deviceID) // Cleanup, ignore error
 		return nil, fmt.Errorf("failed to set parameters: %w", err)
 	}
 
@@ -662,7 +662,7 @@ func (d *Device) Start(ctx context.Context) error {
 	defer controller.Close()
 
 	// Submit START_DEV after FETCH_REQs are in place
-	err = controller.StartDevice(d.ID)
+	err = controller.StartDev(context.Background(), d.ID, os.Getpid())
 	if err != nil {
 		for j := 0; j < len(d.runners); j++ {
 			if d.runners[j] != nil {
@@ -716,7 +716,7 @@ func (d *Device) Stop() error {
 	// (del_gendisk) drains in-flight requests before STOP_DEV returns, and those
 	// requests can only be completed by the still-running ioLoops. Cancelling
 	// first strands the in-flight I/O and STOP_DEV blocks (Critical Bug #8).
-	err = controller.StopDevice(d.ID)
+	err = controller.StopDev(context.Background(), d.ID)
 	if err != nil {
 		return fmt.Errorf("failed to stop device: %w", err)
 	}
@@ -774,7 +774,7 @@ func (d *Device) Close() error {
 		// I/O, so del_gendisk never drains and STOP_DEV blocks: graceful stop of a
 		// BUSY device (Critical Bug #8). With the ioLoops alive the drain finishes
 		// in milliseconds.
-		_ = controller.StopDevice(d.ID)
+		_ = controller.StopDev(context.Background(), d.ID)
 
 		// Device is now DEAD and drained. Cancel the ioLoop contexts and join the
 		// goroutines, freeing their rings/mmaps (runner.Close waits). STOP_DEV
@@ -792,12 +792,12 @@ func (d *Device) Close() error {
 		d.started = false
 	} else {
 		// Created but never started: make sure the kernel side is stopped.
-		_ = controller.StopDevice(d.ID)
+		_ = controller.StopDev(context.Background(), d.ID)
 	}
 
 	// Delete device last. With the queues fully torn down, the char-device
 	// references are released, so DEL_DEV no longer blocks on the refcount.
-	err = controller.DeleteDevice(d.ID)
+	err = controller.DelDev(context.Background(), d.ID)
 	if err != nil {
 		return fmt.Errorf("failed to delete device: %w", err)
 	}
