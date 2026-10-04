@@ -1,0 +1,43 @@
+<svg viewBox="0 0 780 480" role="img" aria-labelledby="rec-title rec-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="rec-title">User recovery sequence</title>
+<desc id="rec-desc">The old server exits. ublk_drv releases /dev/ublkcN, requeues or fails in-flight I/O and moves the device to QUIESCED or FAIL_IO. Application I/O waits or fails. A new server reads the device info and parameters, sends START_USER_RECOVERY, opens /dev/ublkcN, maps the descriptors and fetches every tag, then sends END_USER_RECOVERY with its PID. The kernel returns once every tag is fetched, marks the device LIVE and delivers the requeued I/O.</desc>
+<defs>
+<marker id="ah-rec" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+<marker id="ah-rec-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-accent"/></marker>
+</defs>
+<rect x="30" y="16" width="120" height="34" rx="7" class="box"/>
+<text x="90" y="38" text-anchor="middle" class="t-title">Application</text>
+<rect x="200" y="16" width="120" height="34" rx="7" class="box"/>
+<text x="260" y="38" text-anchor="middle" class="t-title">Old server</text>
+<rect x="390" y="16" width="120" height="34" rx="7" class="box-alt"/>
+<text x="450" y="38" text-anchor="middle" class="t-title">ublk_drv</text>
+<rect x="590" y="16" width="120" height="34" rx="7" class="box"/>
+<text x="650" y="38" text-anchor="middle" class="t-title">New server</text>
+<line x1="90" y1="50" x2="90" y2="466" class="lifeline"/>
+<line x1="260" y1="50" x2="260" y2="112" class="lifeline"/>
+<line x1="450" y1="50" x2="450" y2="466" class="lifeline"/>
+<line x1="650" y1="214" x2="650" y2="466" class="lifeline"/>
+<line x1="260" y1="78" x2="446" y2="78" class="line" marker-end="url(#ah-rec)"/>
+<text x="353" y="71" text-anchor="middle" class="t-small">serving: COMMIT_AND_FETCH_REQ</text>
+<path d="M252,106 l16,16 m0,-16 l-16,16" class="line"/>
+<text x="276" y="119" class="t-small">crashes, is killed, or exits</text>
+<rect x="330" y="134" width="300" height="48" rx="6" class="box"/>
+<text x="480" y="154" text-anchor="middle" class="t-small">/dev/ublkcN released: in-flight I/O requeued</text>
+<text x="480" y="170" text-anchor="middle" class="t-small">(REISSUE) or failed; state QUIESCED or FAIL_IO</text>
+<line x1="90" y1="200" x2="446" y2="200" class="line-dashed" marker-end="url(#ah-rec)"/>
+<text x="268" y="193" text-anchor="middle" class="t-small">new I/O waits (QUIESCED) or fails (FAIL_IO)</text>
+<line x1="650" y1="240" x2="454" y2="240" class="line" marker-end="url(#ah-rec)"/>
+<text x="552" y="233" text-anchor="middle" class="t-mono t-small">GET_DEV_INFO, GET_PARAMS</text>
+<line x1="650" y1="274" x2="454" y2="274" class="line-accent" marker-end="url(#ah-rec-a)"/>
+<text x="552" y="267" text-anchor="middle" class="t-mono t-small">START_USER_RECOVERY</text>
+<line x1="650" y1="308" x2="454" y2="308" class="line" marker-end="url(#ah-rec)"/>
+<text x="552" y="301" text-anchor="middle" class="t-small">open /dev/ublkcN, mmap, FETCH_REQ per tag</text>
+<line x1="650" y1="342" x2="454" y2="342" class="line-accent" marker-end="url(#ah-rec-a)"/>
+<text x="552" y="335" text-anchor="middle" class="t-mono t-small">END_USER_RECOVERY (pid)</text>
+<line x1="454" y1="380" x2="646" y2="380" class="line-dashed" marker-end="url(#ah-rec)"/>
+<text x="552" y="373" text-anchor="middle" class="t-small">returns when every tag is fetched: LIVE</text>
+<line x1="454" y1="414" x2="646" y2="414" class="line" marker-end="url(#ah-rec)"/>
+<text x="552" y="407" text-anchor="middle" class="t-small">requeued I/O delivered as CQEs</text>
+<line x1="446" y1="448" x2="94" y2="448" class="line" marker-end="url(#ah-rec)"/>
+<text x="268" y="441" text-anchor="middle" class="t-small">waiting I/O completes</text>
+</svg>

@@ -1,0 +1,39 @@
+<svg viewBox="0 0 800 340" role="img" aria-labelledby="tag-title tag-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="tag-title">Per-tag I/O command state machine</title>
+<desc id="tag-desc">A tag starts unarmed. FETCH_REQ arms it and the kernel owns it. A completion with result 0 hands it to the server with a valid descriptor. COMMIT_AND_FETCH_REQ commits the result and re-arms the tag. A completion with result 1 means NEED_GET_DATA: the server sends a buffer with NEED_GET_DATA and receives result 0. A completion with -ENODEV means the tag is aborted and must not be fetched again.</desc>
+<defs>
+<marker id="ah-tag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+<marker id="ah-tag-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-accent"/></marker>
+</defs>
+<rect x="20" y="120" width="130" height="56" rx="8" class="box"/>
+<text x="85" y="143" text-anchor="middle" class="t-title">Unarmed</text>
+<text x="85" y="161" text-anchor="middle" class="t-small">before startup</text>
+<rect x="240" y="120" width="210" height="56" rx="8" class="box-alt"/>
+<text x="345" y="143" text-anchor="middle" class="t-title">Kernel owns the tag</text>
+<text x="345" y="161" text-anchor="middle" class="t-small">command waiting in io_uring</text>
+<rect x="560" y="120" width="200" height="56" rx="8" class="box-alt"/>
+<text x="660" y="143" text-anchor="middle" class="t-title">Server owns the tag</text>
+<text x="660" y="161" text-anchor="middle" class="t-small">descriptor valid: do the I/O</text>
+<rect x="560" y="14" width="200" height="50" rx="8" class="box-dashed"/>
+<text x="660" y="35" text-anchor="middle" class="t-title">Waiting for a buffer</text>
+<text x="660" y="52" text-anchor="middle" class="t-small">NEED_GET_DATA mode only</text>
+<rect x="240" y="276" width="210" height="50" rx="8" class="box"/>
+<text x="345" y="297" text-anchor="middle" class="t-title">Aborted</text>
+<text x="345" y="314" text-anchor="middle" class="t-small">do not fetch again</text>
+<line x1="150" y1="148" x2="236" y2="148" class="line" marker-end="url(#ah-tag)"/>
+<text x="193" y="140" text-anchor="middle" class="t-mono">FETCH_REQ</text>
+<line x1="450" y1="136" x2="556" y2="136" class="line-accent" marker-end="url(#ah-tag-a)"/>
+<text x="503" y="128" text-anchor="middle" class="t-small">CQE, res = 0</text>
+<line x1="560" y1="164" x2="454" y2="164" class="line-accent" marker-end="url(#ah-tag-a)"/>
+<text x="503" y="192" text-anchor="middle" class="t-mono">COMMIT_AND_FETCH_REQ</text>
+<text x="503" y="208" text-anchor="middle" class="t-small">commits the result, re-arms the tag</text>
+<polyline points="400,120 400,39 556,39" class="line-dashed" marker-end="url(#ah-tag)"/>
+<text x="410" y="80" class="t-small">CQE, res = 1</text>
+<text x="410" y="95" class="t-small">(UBLK_IO_RES_NEED_GET_DATA)</text>
+<line x1="660" y1="64" x2="660" y2="116" class="line-dashed" marker-end="url(#ah-tag)"/>
+<text x="670" y="86" class="t-mono">NEED_GET_DATA</text>
+<text x="670" y="102" class="t-small">then CQE, res = 0</text>
+<line x1="345" y1="176" x2="345" y2="272" class="line" marker-end="url(#ah-tag)"/>
+<text x="355" y="236" class="t-small">CQE, res = -ENODEV (UBLK_IO_RES_ABORT)</text>
+<text x="355" y="251" class="t-small">STOP_DEV, quiesce, or the ring is exiting</text>
+</svg>

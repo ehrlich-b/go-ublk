@@ -1,0 +1,11 @@
+{{- $current := . -}}
+{{- range site.Home.Sections.ByWeight }}
+<div class="nav-section">
+  <a class="nav-section-title{{ if eq $current.RelPermalink .RelPermalink }} current{{ end }}" href="{{ .RelPermalink }}"{{ if eq $current.RelPermalink .RelPermalink }} aria-current="page"{{ end }}>{{ .Params.navTitle | default .LinkTitle }}</a>
+  <ul>
+    {{- range .Pages.ByWeight }}
+    <li><a href="{{ .RelPermalink }}"{{ if eq $current.RelPermalink .RelPermalink }} class="current" aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+    {{- end }}
+  </ul>
+</div>
+{{- end }}

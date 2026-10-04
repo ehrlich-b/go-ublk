@@ -1,0 +1,10 @@
+{{- /* Badge for a go-ublk support status or a test/run status. */ -}}
+{{- $s := . | default "unknown" -}}
+{{- $class := index (dict
+  "supported" "ok" "pass" "ok"
+  "partial" "warn" "skip" "na" "timeout" "bad" "boot-failed" "warn" "fetch-failed" "warn"
+  "missing" "bad" "fail" "bad" "error" "bad"
+  "not-applicable" "na" "no-ublk" "na") $s | default "na" -}}
+{{- $label := index (dict "not-applicable" "n/a" "no-ublk" "no ublk_drv") $s | default $s -}}
+<span class="badge badge-{{ $class }}">{{ $label }}</span>
+{{- /* chomp */ -}}

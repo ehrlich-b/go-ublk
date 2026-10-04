@@ -1,0 +1,18 @@
+{{ define "bodyclass" }}home{{ end }}
+{{ define "main" }}
+<main id="main" class="home-main">
+  <section class="hero">
+    <p class="eyebrow">Linux userspace block devices</p>
+    <h1>{{ .Params.heroTitle | default site.Title }}</h1>
+    <p class="hero-lede">{{ .Params.heroLede | markdownify }}</p>
+    <p class="hero-actions">
+      {{- range .Params.heroLinks }}
+      <a class="button{{ if .primary }} primary{{ end }}" href="{{ .url | relURL }}">{{ .label }}</a>
+      {{- end }}
+    </p>
+  </section>
+  <div class="home-body prose">
+    {{ .Content }}
+  </div>
+</main>
+{{ end }}

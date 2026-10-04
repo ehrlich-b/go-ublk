@@ -1,0 +1,47 @@
+baseURL = "https://ublk.ehrlich.dev/"
+languageCode = "en-us"
+title = "ublk"
+disableKinds = ["taxonomy", "term", "rss"]
+enableRobotsTXT = true
+refLinksErrorLevel = "ERROR"
+timeout = "60s"
+
+[module.hugoVersion]
+  min = "0.134.0"
+
+[params]
+  tagline = "The ublk guide and go-ublk"
+  description = "How Linux ublk userspace block devices work, from the control plane to zero copy, and the documentation for go-ublk, a pure-Go ublk library."
+  author = "Bryan Ehrlich"
+  authorURL = "https://github.com/ehrlich-b"
+  repo = "https://github.com/ehrlich-b/go-ublk"
+  pkg = "https://pkg.go.dev/github.com/ehrlich-b/go-ublk"
+  editBase = "https://github.com/ehrlich-b/go-ublk/blob/main/site/content/"
+  # The upstream UAPI header the guide is written against.
+  kernelHeader = "7.3-rc5"
+
+[markup]
+  [markup.goldmark.renderer]
+    # Inline SVG diagrams and <!-- VERIFY --> review markers live in the
+    # Markdown; both need raw HTML. Minification strips the comments.
+    unsafe = true
+  [markup.goldmark.parser]
+    autoHeadingIDType = "github"
+  [markup.highlight]
+    noClasses = false
+    codeFences = true
+    guessSyntax = false
+    lineNos = false
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 3
+    ordered = false
+
+[sitemap]
+  changeFreq = "weekly"
+  priority = 0.5
+
+[outputs]
+  home = ["HTML"]
+  section = ["HTML"]
+  page = ["HTML"]
