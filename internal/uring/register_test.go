@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 	"unsafe"
 
+	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"golang.org/x/sys/unix"
 )
 
@@ -196,4 +198,49 @@ func TestProvidedBufferRing(t *testing.T) {
 	if _, err := r.RegisterBufRing(group, 3); !errors.Is(err, unix.EINVAL) {
 		t.Errorf("RegisterBufRing(3 entries): %v, want EINVAL", err)
 	}
+}
+
+// Close must release everything an IoUring registered or mapped, including
+// buffer-ring memory, and a Ring its control staging buffer.
+func TestIoUringCloseReleasesRegistrations(t *testing.T) {
+	quietLogs(t)
+	_, fd := tempFileFd(t)
+	assertNoLeak(t, func() error {
+		r, err := NewIoUring(SetupOptions{Entries: 8, Flags: IORING_SETUP_SQE128 | IORING_SETUP_CQE32})
+		if err != nil {
+			return err
+		}
+		if err := r.RegisterFilesSparse(4); err != nil {
+			return err
+		}
+		if _, err := r.UpdateFiles(0, []int32{fd}); err != nil {
+			return err
+		}
+		if err := r.RegisterBuffersSparse(8); err != nil {
+			return err
+		}
+		if _, err := r.RegisterBufRing(1, 8); err != nil {
+			return err
+		}
+		PrepNop(r.GetSQE())
+		if _, err := r.SubmitAndWait(1, time.Second); err != nil {
+			return err
+		}
+		return r.Close()
+	})
+	rfd, _ := pipeFds(t)
+	assertNoLeak(t, func() error {
+		ring, err := newMinimalRing(Config{Entries: 4, FD: rfd})
+		if err != nil {
+			return err
+		}
+		buf := make([]byte, 64)
+		if _, err := ring.SubmitCtrlCmd(0, &uapi.UblksrvCtrlCmd{Len: 64, Addr: AddrOf(buf)}, 1); err != nil {
+			return err
+		}
+		if ring.ctrlScratch == nil {
+			return errors.New("control command with a buffer was not staged")
+		}
+		return ring.Close()
+	})
 }

@@ -1,11 +1,11 @@
-// Package uring provides minimal URING_CMD implementation for ublk control operations
+// Package uring is a pure-Go io_uring core (IoUring) and the ublk command
+// ring (Ring) built on it.
 package uring
 
 import (
 	"fmt"
-	"runtime"
+	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -14,52 +14,28 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Minimal io_uring structures for URING_CMD operations only
-// Based on kernel include/uapi/linux/io_uring.h
+// The ublk command payloads are copied into the SQE command area verbatim.
+var (
+	_ [32]byte = [unsafe.Sizeof(uapi.UblksrvCtrlCmd{})]byte{}
+	_ [16]byte = [unsafe.Sizeof(uapi.UblksrvIOCmd{})]byte{}
+)
 
-// SQE128 structure for URING_CMD
-// With SQE128 enabled, the cmd area for URING_CMD is 80 bytes starting at byte 48
-// The kernel UAPI says: "If IORING_SETUP_SQE128, this field is 80 bytes" for io_uring_sqe.cmd
-// Layout:
-//   - Bytes 0-47: Standard SQE fields
-//   - Bytes 48-127: cmd area (80 bytes) for URING_CMD operations
-type sqe128 struct {
-	// 0..31: common header
-	opcode      uint8   // 0
-	flags       uint8   // 1
-	ioprio      uint16  // 2
-	fd          int32   // 4
-	union0      [8]byte // 8  (overlays: off/addr2/cmd_op+__pad1)
-	addr        uint64  // 16
-	len         uint32  // 24
-	opcodeFlags uint32  // 28 (aka rw_flags/uring_cmd_flags)
-
-	// 32..47: rest of base SQE fields
-	userData    uint64 // 32..39
-	bufIndex    uint16 // 40..41
-	personality uint16 // 42..43
-	spliceFdIn  int32  // 44..47
-
-	// 48..127: cmd area for URING_CMD (80 bytes with SQE128)
-	// This is where ublksrv_io_cmd (16 bytes) goes for FETCH_REQ/COMMIT_AND_FETCH_REQ
-	cmd [80]byte // 48..127
-}
-
-// setCmdOp sets the cmd_op field in the union AND ensures the adjacent pad is zero
-func (sqe *sqe128) setCmdOp(cmdOp uint32) {
-	// cmd_op is at bytes 8-11
-	*(*uint32)(unsafe.Pointer(&sqe.union0[0])) = cmdOp
-	// __pad1 is at bytes 12-15 and MUST be zero
-	*(*uint32)(unsafe.Pointer(&sqe.union0[4])) = 0
-}
-
-// Minimal CQE (32-byte version)
-type cqe32 struct {
-	userData uint64
-	res      int32
-	flags    uint32
-	bigCQE   [16]uint8 // Extra data for CQE32
-}
+const (
+	// defaultCtrlTimeout bounds one synchronous control command (Critical Bug #8).
+	defaultCtrlTimeout = 10 * time.Second
+	// ctrlWaitSlice bounds each io_uring_enter of a control or I/O wait, so a
+	// waiter notices a deadline, Close or context cancellation promptly.
+	ctrlWaitSlice = 100 * time.Millisecond
+	// ctrlTagBase marks the internal user_data of a synchronous control
+	// command, so its CQE can be told apart from a straggler's.
+	ctrlTagBase = uint64(0xC7) << 56
+	// ctrlScratchSize holds the largest buffer a ublksrv_ctrl_cmd can describe
+	// (len is a u16).
+	ctrlScratchSize = 64 << 10
+	// ctrlCmd field offsets in struct ublksrv_ctrl_cmd.
+	ctrlCmdLenOffset  = 6
+	ctrlCmdAddrOffset = 8
+)
 
 // AsyncHandle represents a pending io_uring operation
 type AsyncHandle struct {
@@ -72,466 +48,313 @@ func (h *AsyncHandle) Wait(timeout time.Duration) (Result, error) {
 	logger := logging.Default()
 	logger.Debug("waiting for completion", "userData", h.userData, "timeout", timeout)
 	deadline := time.Now().Add(timeout)
-
 	attempts := 0
 	for time.Now().Before(deadline) {
 		attempts++
-		// Try to get completion without blocking
 		result, err := h.ring.tryGetCompletion(h.userData)
 		if err == nil {
 			logger.Debug("found completion", "attempts", attempts, "result", result.Value())
 			return result, nil
 		}
-
-		// Log every 100 attempts (1 second)
 		if attempts%100 == 0 {
 			logger.Debug("still waiting for completion", "attempts", attempts, "error", err.Error())
 		}
-
-		// Not ready yet, sleep briefly.
 		// 10ms balances responsiveness with CPU overhead for async polling.
 		time.Sleep(10 * time.Millisecond)
 	}
-
 	logger.Debug("timeout waiting for completion", "attempts", attempts)
 	return nil, fmt.Errorf("timeout waiting for completion after %d attempts", attempts)
 }
 
-// Minimal ring structures
-type io_uring_params struct {
-	sqEntries    uint32
-	cqEntries    uint32
-	flags        uint32
-	sqThreadCpu  uint32
-	sqThreadIdle uint32
-	features     uint32
-	wqFd         uint32
-	resv         [3]uint32
-	sqOff        struct {
-		head        uint32
-		tail        uint32
-		ringMask    uint32
-		ringEntries uint32
-		flags       uint32
-		dropped     uint32
-		array       uint32
-		resv1       uint32
-		userAddr    uint64
-	}
-	cqOff struct {
-		head        uint32
-		tail        uint32
-		ringMask    uint32
-		ringEntries uint32
-		overflow    uint32
-		cqes        uint32
-		flags       uint32
-		resv1       uint32
-		userAddr    uint64
-	}
-}
-
-// minimalRing implements just URING_CMD for ublk operations
+// minimalRing implements Ring for ublk on an IoUring with 128-byte SQEs
+// (ublk_ctrl_uring_cmd rejects control commands in smaller ones with EINVAL)
+// and 32-byte CQEs.
 type minimalRing struct {
-	ringFd   int // io_uring file descriptor
-	targetFd int // target fd (/dev/ublk-control for control ops, /dev/ublkcN for I/O ops)
-	params   io_uring_params
-	sqAddr   unsafe.Pointer // SQ ring mapping base
-	cqAddr   unsafe.Pointer // CQ ring mapping base
-	sqesAddr unsafe.Pointer // SQEs mapping base
-
-	// Pre-allocated fields to avoid hot path allocations
-	sqePool      sqe128          // Reusable SQE (submissions are sequential per ring)
-	resultsPool  []Result        // Reusable results slice
-	cqePoolSize  int             // Size of CQE result pool
-	cqePool      []minimalResult // Pool of result structs to avoid allocation
-	cqePoolIndex int             // Next available result in pool
-
-	// Batching state: local tail tracks prepared-but-not-submitted SQEs.
-	// The kernel only sees submissions when we store sqTailLocal to the shared tail.
-	// This enables batching multiple SQEs into a single io_uring_enter syscall.
-	sqTailLocal uint32
+	core        *IoUring
+	targetFd    int
+	ctrlTimeout time.Duration
+	// Pre-allocated so the I/O hot path does not allocate.
+	resultsPool []Result
+	cqePool     []minimalResult
+	// Control path: ring-owned off-heap staging for ctrl_cmd.addr (see
+	// SubmitCtrlCmd) and the sequence behind the internal user_data tags.
+	ctrlScratch []byte
+	ctrlSeq     uint64
+	// Lifetime. Close can race a goroutine still inside a method: the queue
+	// runner closes after a bounded join. Methods hold active; teardown runs
+	// in Close if nothing is active, else in the last method to return, so
+	// the rings are never unmapped under a live caller and a recycled fd
+	// number is never entered. closing is set before Close touches the core
+	// and closed after, which publishes those writes to that last method.
+	active   atomic.Int32
+	closing  atomic.Bool
+	closed   atomic.Bool
+	teardown sync.Once
+	closeErr error
 }
 
-// kernelUringCmdOpcode returns the runtime kernel's IORING_OP_URING_CMD
-// value when built with cgo on Linux. On non-cgo builds, a reasonable
-// fallback is used. See kernelopcode_linux.go and kernelopcode_stub.go.
-// kernelUringCmdOpcode provided by platform-specific files
-
-// NewMinimalRing creates a minimal io_uring for ublk control operations
+// NewMinimalRing creates the ublk command ring for ctrlFd (/dev/ublk-control
+// or /dev/ublkcN), or with no target if ctrlFd is negative.
 func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
+	return newMinimalRing(Config{Entries: entries, FD: ctrlFd})
+}
+
+func newMinimalRing(config Config) (*minimalRing, error) {
 	logger := logging.Default()
-	logger.Debug("creating minimal io_uring", "entries", entries, "ctrl_fd", ctrlFd)
-
-	// Verify SQE structure size is exactly 128 bytes
-	sqeSize := unsafe.Sizeof(sqe128{})
-	if sqeSize != 128 {
-		return nil, fmt.Errorf("sqe128 size is %d bytes, expected 128", sqeSize)
-	}
-	logger.Debug("SQE128 size verified", "size", sqeSize)
-
-	// Set up ring parameters with SQE128/CQE32 for URING_CMD
-	// Note: Some kernels may require both flags for URING_CMD operations
-	params := io_uring_params{
-		sqEntries: entries,
-		cqEntries: entries * 2, // Usually CQ is 2x SQ size
-		flags:     IORING_SETUP_SQE128 | IORING_SETUP_CQE32,
-	}
-
-	logger.Debug("calling io_uring_setup", "flags", fmt.Sprintf("0x%x", params.flags))
-
-	// Create io_uring
-	ringFd, _, errno := syscall.Syscall(unix.SYS_IO_URING_SETUP,
-		uintptr(entries),
-		uintptr(unsafe.Pointer(&params)),
-		0)
-	if errno != 0 {
-		logger.Error("io_uring_setup failed", "errno", errno)
-		return nil, fmt.Errorf("io_uring_setup failed: %w", errno)
-	}
-
-	logger.Debug("io_uring_setup succeeded", "ring_fd", ringFd)
-
-	// Verify the kernel accepted our flags
-	if (params.flags & IORING_SETUP_SQE128) == 0 {
-		logger.Error("kernel did not accept IORING_SETUP_SQE128 flag")
-		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("kernel rejected IORING_SETUP_SQE128 flag")
-	}
-	logger.Debug("Kernel accepted SQE128 flag", "params.flags", fmt.Sprintf("0x%x", params.flags))
-
-	// Map SQ ring
-	sqSize := params.sqOff.array + params.sqEntries*4
-	sqAddr, err := unix.Mmap(int(ringFd), IORING_OFF_SQ_RING, int(sqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	core, err := NewIoUring(SetupOptions{
+		Entries: config.Entries,
+		Flags:   IORING_SETUP_SQE128 | IORING_SETUP_CQE32 | config.Flags,
+	})
 	if err != nil {
-		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap SQ: %w", err)
+		return nil, err
 	}
-	// Map CQ ring
-	cqSize := params.cqOff.cqes + params.cqEntries*uint32(unsafe.Sizeof(cqe32{}))
-	cqAddr, err := unix.Mmap(int(ringFd), IORING_OFF_CQ_RING, int(cqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		_ = unix.Munmap(sqAddr) // Cleanup, ignore error
-		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap CQ: %w", err)
-	}
-	// Map SQEs array
-	sqesSize := int(params.sqEntries) * int(unsafe.Sizeof(sqe128{}))
-	sqesAddr, err := unix.Mmap(int(ringFd), IORING_OFF_SQES, sqesSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		_ = unix.Munmap(cqAddr) // Cleanup, ignore error
-		_ = unix.Munmap(sqAddr) // Cleanup, ignore error
-		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap SQEs: %w", err)
-	}
-
-	// Pre-allocate pool sizes based on queue depth
-	// CQE pool needs to be larger since multiple completions can arrive at once
-	cqePoolSize := int(params.cqEntries)
-	if cqePoolSize < 64 {
-		cqePoolSize = 64 // Minimum pool size
-	}
-
+	poolSize := max(int(core.CQEntries()), 64)
 	r := &minimalRing{
-		ringFd:      int(ringFd),
-		targetFd:    int(ctrlFd),
-		params:      params,
-		sqAddr:      unsafe.Pointer(&sqAddr[0]),
-		cqAddr:      unsafe.Pointer(&cqAddr[0]),
-		sqesAddr:    unsafe.Pointer(&sqesAddr[0]),
-		resultsPool: make([]Result, 0, cqePoolSize),
-		cqePoolSize: cqePoolSize,
-		cqePool:     make([]minimalResult, cqePoolSize),
+		core:        core,
+		targetFd:    int(config.FD),
+		ctrlTimeout: config.CtrlTimeout,
+		resultsPool: make([]Result, 0, poolSize),
+		cqePool:     make([]minimalResult, poolSize),
 	}
-
-	// Initialize sqTailLocal from the shared tail pointer.
-	// At ring creation, shared tail is 0, so sqTailLocal starts at 0.
-	sqTail := (*uint32)(unsafe.Add(r.sqAddr, params.sqOff.tail))
-	r.sqTailLocal = atomic.LoadUint32(sqTail)
-
-	// Register the char device FD with io_uring (like C code does)
-	// Required for queue operations
-	if ctrlFd >= 0 {
-		fds := []int32{ctrlFd}
-		if err := r.RegisterFiles(fds); err != nil {
+	if r.ctrlTimeout == 0 {
+		r.ctrlTimeout = defaultCtrlTimeout
+	}
+	// Register the target fd as fixed file 0, as ublksrv does. This pins the
+	// file; Close drops the registration synchronously (see Close).
+	if config.FD >= 0 {
+		if err := core.RegisterFiles([]int32{config.FD}); err != nil {
 			logger.Warn("failed to register files with io_uring", "error", err)
-			// Continue anyway - might not be required on all kernels
 		} else {
-			logger.Info("registered char device with io_uring", "fd", ctrlFd)
+			logger.Info("registered char device with io_uring", "fd", config.FD)
 		}
 	}
-
 	return r, nil
 }
 
-// SubmitCtrlCmdAsync submits command without waiting
-func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error) {
-	logger := logging.Default()
-	logger.Debug("submitting async ctrl command", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
-
-	// Create URING_CMD SQE for control operations (same as synchronous version)
-	sqe := &sqe128{}
-
-	// Zero all fields first
-	for i := range sqe.union0 {
-		sqe.union0[i] = 0
+func (r *minimalRing) acquire() bool {
+	r.active.Add(1)
+	if r.closing.Load() {
+		r.release()
+		return false
 	}
-	// No _pad64 field anymore - cmd area starts at byte 48
-	for i := range sqe.cmd {
-		sqe.cmd[i] = 0
+	return true
+}
+
+func (r *minimalRing) release() {
+	if r.active.Add(-1) == 0 && r.closed.Load() {
+		r.teardown.Do(r.closeCore)
 	}
+}
 
-	// Set the base SQE fields
-	sqe.opcode = kernelUringCmdOpcode()
-	sqe.flags = 0
-	sqe.ioprio = 0
-	sqe.fd = int32(r.targetFd)
-	sqe.addr = 0
-	sqe.len = uint32(ctrlCmd.Len)
-	sqe.opcodeFlags = 0
-	sqe.bufIndex = 0
-	sqe.personality = 0
-	sqe.spliceFdIn = 0
-	// fileIndex removed - part of cmd area now
-	sqe.userData = userData
-
-	// Marshal and place control command
-	ctrlCmdBytes := uapi.Marshal(ctrlCmd)
-	if len(ctrlCmdBytes) != 32 {
-		return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
+// closeCore unmaps the rings and closes the fd. The control staging buffer
+// is unmapped only if no abandoned command can still write to it (an
+// abandoned one is dropped from ctrlScratch and deliberately leaked).
+func (r *minimalRing) closeCore() {
+	r.closeErr = r.core.Close()
+	if r.ctrlScratch != nil {
+		if err := FreeOffHeap(r.ctrlScratch); err != nil && r.closeErr == nil {
+			r.closeErr = err
+		}
+		r.ctrlScratch = nil
 	}
+}
 
-	sqe.setCmdOp(cmd)
+// Close releases the ring: every mapping, the staging buffer and the fd
+// (Critical Bug #17). It is idempotent and safe to call while another
+// goroutine is still inside a method; teardown is then deferred until that
+// call returns, which a blocked wait does within 100ms, and later calls fail
+// with ErrRingClosed.
+func (r *minimalRing) Close() error {
+	if !r.closing.CompareAndSwap(false, true) {
+		return nil
+	}
+	// Drop the fixed-file registration now, even if teardown is deferred.
+	// It pins the ublk char device open; io_uring otherwise releases fixed
+	// files only in its asynchronous exit work, which can stall long enough
+	// to block DEL_DEV on the device refcount.
+	if r.core.filesRegistered {
+		_ = r.core.UnregisterFiles()
+	}
+	r.closed.Store(true)
+	if r.active.Load() == 0 {
+		r.teardown.Do(r.closeCore)
+		return r.closeErr
+	}
+	return nil
+}
 
-	// Place control command at byte 48
-	controlCmdArea := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
-	copy(controlCmdArea[:], ctrlCmdBytes)
-
-	// Submit without waiting
-	if err := r.submitToRing(sqe); err != nil {
+// SubmitCtrlCmd submits one ublk control command and waits for its CQE.
+//
+// Buffer contract: ctrlCmd.Addr and ctrlCmd.Len describe the command's data
+// buffer (input, output or both; Len includes any dev_path prefix). ublk
+// runs most control commands on an io-wq worker that reads and writes that
+// buffer asynchronously, so SubmitCtrlCmd never hands the kernel the
+// caller's memory (Critical Bug #21): it copies the Len bytes at Addr into
+// ring-owned off-heap memory, points the SQE at the copy, and copies it back
+// to Addr once the CQE has been reaped, whatever its result. The caller's
+// buffer must be heap or off-heap memory, not a stack variable (its address
+// travels as an integer, which the runtime does not update when it moves a
+// stack), and must stay reachable (runtime.KeepAlive) until SubmitCtrlCmd
+// returns. Addr 0 or Len 0 means no buffer. *ctrlCmd itself is copied into
+// the SQE before submission and may live anywhere.
+//
+// The wait is bounded by Config.CtrlTimeout: 10s by default (Critical Bug
+// #8), unbounded if negative. If SubmitCtrlCmd stops waiting after the
+// command was submitted (deadline, Close, or a failed wait) the error wraps
+// ErrCtrlTimeout: the command may still execute. Its staging buffer is then
+// abandoned, never reused or unmapped, so a late kernel write lands nowhere
+// live, and its eventual CQE is recognised by an internal user_data tag and
+// discarded by the next command. Errors before submission never wrap
+// ErrCtrlTimeout.
+//
+// Not safe for concurrent use: one command at a time per ring.
+// Result.UserData returns userData.
+func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
+	if !r.acquire() {
+		return nil, ErrRingClosed
+	}
+	defer r.release()
+	// An 8-aligned copy of the 32-byte command, so its u64 addr can be read
+	// and rewritten in place.
+	var words [4]uint64
+	payload := unsafe.Slice((*byte)(unsafe.Pointer(&words)), len(words)*8)
+	copy(payload, (*[32]byte)(unsafe.Pointer(ctrlCmd))[:])
+	length := int(*(*uint16)(unsafe.Pointer(&payload[ctrlCmdLenOffset])))
+	addr := &words[ctrlCmdAddrOffset/8]
+	var user []byte
+	if *addr != 0 && length != 0 {
+		if r.ctrlScratch == nil {
+			scratch, err := AllocOffHeap(ctrlScratchSize)
+			if err != nil {
+				return nil, fmt.Errorf("control command staging buffer: %w", err)
+			}
+			r.ctrlScratch = scratch
+		}
+		// The caller's address arrives as an integer; reinterpret it rather
+		// than convert, which go vet rightly flags in general.
+		user = unsafe.Slice((*byte)(*(*unsafe.Pointer)(unsafe.Pointer(addr))), length)
+		copy(r.ctrlScratch, user)
+		*addr = uint64(uintptr(unsafe.Pointer(&r.ctrlScratch[0])))
+	}
+	r.ctrlSeq++
+	tag := ctrlTagBase | r.ctrlSeq&(1<<56-1)
+	sqe := r.core.GetSQE128()
+	if sqe == nil {
+		return nil, fmt.Errorf("submit control command %#x: %w", cmd, ErrRingFull)
+	}
+	PrepUringCmd128(sqe, int32(r.targetFd), cmd, payload)
+	sqe.Len = uint32(length) // ignored by the kernel; kept from earlier versions
+	sqe.UserData = tag
+	if _, err := r.core.Submit(); err != nil {
+		r.core.withdrawUnsubmitted()
+		return nil, fmt.Errorf("io_uring_enter submit failed: %w", err)
+	}
+	res, err := r.waitCtrlCompletion(tag)
+	if err != nil {
+		if user != nil {
+			r.ctrlScratch = nil // abandoned to the in-flight command; leaked on purpose
+		}
 		return nil, err
 	}
-
-	// Call io_uring_enter to submit but don't wait
-	submitted, errno := r.submitOnly(1)
-	if errno != 0 || submitted != 1 {
-		return nil, fmt.Errorf("failed to submit: %w", errno)
+	if user != nil {
+		copy(user, r.ctrlScratch[:length])
 	}
-
-	logger.Debug("command submitted without waiting", "userData", userData)
-
-	// Return handle for later polling
-	return &AsyncHandle{
-		userData: userData,
-		ring:     r,
-	}, nil
+	result := &minimalResult{userData: userData, value: res}
+	if res < 0 {
+		result.err = fmt.Errorf("operation failed with result: %d", res)
+	}
+	return result, nil
 }
 
-// submitToRing prepares and submits an SQE to the ring without calling io_uring_enter
-func (r *minimalRing) submitToRing(sqe *sqe128) error {
-	logger := logging.Default()
-
-	// Get SQ head and tail
-	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
-	sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
-	sqMask := r.params.sqEntries - 1
-
-	// Check if queue is full
-	if (*sqTail - *sqHead) >= r.params.sqEntries {
-		return fmt.Errorf("submission queue full")
+// waitCtrlCompletion waits for the CQE tagged tag, discarding any other
+// (a straggler from an abandoned command). It re-waits across EINTR and
+// empty bounded wakeups until the CQE arrives, the deadline passes or the
+// ring is closed. UBLK_F_URING_CMD_COMP_IN_TASK defers control completions
+// to task work, so one io_uring_enter can return before the CQE is posted.
+func (r *minimalRing) waitCtrlCompletion(tag uint64) (int32, error) {
+	var deadline time.Time
+	if r.ctrlTimeout > 0 {
+		deadline = time.Now().Add(r.ctrlTimeout)
 	}
-
-	// Get SQE slot and copy our prepared SQE
-	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
-	sqIndex := *sqTail & sqMask
-	sqeSlot := unsafe.Add(r.sqesAddr, 128*uintptr(sqIndex))
-	*(*sqe128)(sqeSlot) = *sqe
-
-	// Copy control command to correct offset if URING_CMD
-	if sqe.opcode == kernelUringCmdOpcode() {
-		srcCmd := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
-		dstCmd := (*[32]byte)(unsafe.Pointer(uintptr(sqeSlot) + 48))
-		copy(dstCmd[:], srcCmd[:])
+	for {
+		for cqe := r.core.PeekCQE(); cqe != nil; cqe = r.core.PeekCQE() {
+			userData, res := cqe.UserData, cqe.Res
+			r.core.CQESeen()
+			if userData == tag {
+				return res, nil
+			}
+			logging.Default().Warn("discarded stale control completion", "user_data", userData, "res", res)
+		}
+		if r.closing.Load() {
+			return 0, fmt.Errorf("ring closed while waiting for control command completion: %w", ErrCtrlTimeout)
+		}
+		wait := ctrlWaitSlice
+		if !deadline.IsZero() {
+			left := time.Until(deadline)
+			if left <= 0 {
+				return 0, fmt.Errorf("no control command completion after %s: %w", r.ctrlTimeout, ErrCtrlTimeout)
+			}
+			wait = min(wait, left)
+		}
+		if err := r.core.WaitCQEs(1, wait); err != nil && err != unix.ETIME {
+			return 0, fmt.Errorf("io_uring_enter wait failed: %w (%w)", err, ErrCtrlTimeout)
+		}
 	}
-
-	// Update array entry
-	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
-
-	// CRITICAL: Store fence before tail update to ensure SQE is visible to kernel
-	Sfence()
-
-	// Update tail atomically
-	atomic.StoreUint32(sqTail, *sqTail+1)
-
-	logger.Debug("SQE prepared in ring", "index", sqIndex, "tail", *sqTail)
-	return nil
 }
 
-// tryGetCompletion checks CQ for a specific completion
+// SubmitCtrlCmdAsync submits a control command without waiting; reap it with
+// AsyncHandle.Wait or WaitForCompletion. Unlike SubmitCtrlCmd it hands the
+// kernel ctrlCmd.Addr directly, so that buffer must stay valid, unmoved and
+// reachable until the completion is reaped.
+func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error) {
+	if !r.acquire() {
+		return nil, ErrRingClosed
+	}
+	defer r.release()
+	logging.Default().Debug("submitting async ctrl command",
+		"cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
+	sqe := r.core.GetSQE128()
+	if sqe == nil {
+		return nil, fmt.Errorf("submit async control command %#x: %w", cmd, ErrRingFull)
+	}
+	PrepUringCmd128(sqe, int32(r.targetFd), cmd, (*[32]byte)(unsafe.Pointer(ctrlCmd))[:])
+	sqe.Len = uint32(ctrlCmd.Len)
+	sqe.UserData = userData
+	submitted, err := r.core.Submit()
+	if err != nil || submitted != 1 {
+		r.core.withdrawUnsubmitted()
+		return nil, fmt.Errorf("failed to submit: %w", err)
+	}
+	return &AsyncHandle{userData: userData, ring: r}, nil
+}
+
+// tryGetCompletion looks for the CQE carrying userData without blocking. If
+// found it is consumed along with every CQE ahead of it; otherwise the CQ is
+// left alone.
 func (r *minimalRing) tryGetCompletion(userData uint64) (Result, error) {
-	logger := logging.Default()
-
-	// First, call io_uring_enter to force kernel to process any pending completions
-	// This is critical for async operations as the kernel might not have pushed completions yet
-	_, _, errno := r.submitAndWaitRing(0, 0) // submit=0, wait=0 but with GETEVENTS
-	if errno != 0 {
-		logger.Debug("io_uring_enter for completion processing failed", "errno", errno)
+	if !r.acquire() {
+		return nil, ErrRingClosed
 	}
-
-	// Check CQ head/tail with proper atomic acquire semantics
-	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
-	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
-
-	// Load tail with acquire semantics (kernel publishes with release)
-	currentTail := atomic.LoadUint32(cqTail)
-	currentHead := atomic.LoadUint32(cqHead)
-
-	logger.Debug("checking completions", "cqHead", currentHead, "cqTail", currentTail, "looking_for", userData)
-
-	if currentHead == currentTail {
+	defer r.release()
+	_ = r.core.GetEvents()
+	core := r.core
+	tail := atomic.LoadUint32(core.cqTail)
+	if core.cqHeadLocal == tail {
 		return nil, fmt.Errorf("no completions available")
 	}
-
-	// Process completions looking for our userData
-	cqMask := r.params.cqEntries - 1
-
-	for currentHead != currentTail {
-		index := currentHead & cqMask
-		cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{})*uintptr(index)))
-		cqe := (*cqe32)(cqeSlot)
-
-		logger.Debug("found completion", "index", index, "userData", cqe.userData, "res", cqe.res)
-
-		if cqe.userData == userData {
-			// Found our completion - advance head with release semantics
-			atomic.StoreUint32(cqHead, currentHead+1)
-
-			result := &minimalResult{
-				userData: cqe.userData,
-				value:    cqe.res,
-				err:      nil,
-			}
-
-			if cqe.res < 0 {
-				result.err = fmt.Errorf("operation failed with result: %d", cqe.res)
-			}
-
-			logger.Debug("found matching completion", "userData", userData, "result", cqe.res)
-			return result, nil
+	for head := core.cqHeadLocal; head != tail; head++ {
+		cqe := core.cqeAt(head)
+		if cqe.UserData != userData {
+			continue
 		}
-
-		currentHead++
+		result := &minimalResult{userData: cqe.UserData, value: cqe.Res}
+		if cqe.Res < 0 {
+			result.err = fmt.Errorf("operation failed with result: %d", cqe.Res)
+		}
+		core.CQAdvance(head + 1 - core.cqHeadLocal)
+		return result, nil
 	}
-
-	// Didn't find our completion - don't modify head
 	return nil, fmt.Errorf("completion not found")
-}
-
-func (r *minimalRing) Close() error {
-	// Drop the fixed-file registration synchronously before closing the ring.
-	// NewRing registers the (char device) fd as an io_uring fixed file, which
-	// pins the ublk char device open. io_uring otherwise only releases fixed
-	// files during its asynchronous exit work, which can stall long enough to
-	// block DEL_DEV on the device refcount. Unregistering here drops that
-	// reference immediately. Errors are ignored: nothing may be registered.
-	const IORING_UNREGISTER_FILES = 3
-	_, _, _ = syscall.Syscall6(unix.SYS_IO_URING_REGISTER,
-		uintptr(r.ringFd), IORING_UNREGISTER_FILES, 0, 0, 0, 0)
-
-	// This is a minimal implementation - full cleanup would unmap regions
-	return syscall.Close(r.ringFd)
-}
-
-// RegisterFiles registers file descriptors with io_uring for IOSQE_FIXED_FILE operations
-func (r *minimalRing) RegisterFiles(fds []int32) error {
-	const IORING_REGISTER_FILES = 2
-
-	// Convert []int32 to unsafe pointer
-	var ptr unsafe.Pointer
-	if len(fds) > 0 {
-		ptr = unsafe.Pointer(&fds[0])
-	}
-
-	_, _, errno := syscall.Syscall6(
-		unix.SYS_IO_URING_REGISTER,
-		uintptr(r.ringFd),
-		IORING_REGISTER_FILES,
-		uintptr(ptr),
-		uintptr(len(fds)),
-		0, 0)
-
-	if errno != 0 {
-		return fmt.Errorf("io_uring_register files failed: %w", errno)
-	}
-	return nil
-}
-
-func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error) {
-	logger := logging.Default()
-
-	logger.Debug("submitting ctrl command", "cmd_hex", fmt.Sprintf("0x%08x", cmd), "dev_id", ctrlCmd.DevID)
-	logger.Debug("preparing URING_CMD", "cmd", cmd, "dev_id", ctrlCmd.DevID)
-
-	// Log the actual command being used
-	logger.Debug("using command", "cmd", cmd)
-
-	// Create URING_CMD SQE for control operations
-	// The 32-byte ublksrv_ctrl_cmd is placed in the SQE cmd area
-	sqe := &sqe128{}
-
-	// Zero all fields first to ensure clean state
-	for i := range sqe.union0 {
-		sqe.union0[i] = 0
-	}
-	// No _pad64 field anymore - cmd area starts at byte 48
-	for i := range sqe.cmd {
-		sqe.cmd[i] = 0
-	}
-
-	// Set the base SQE fields
-	sqe.opcode = kernelUringCmdOpcode()
-	sqe.flags = 0
-	sqe.ioprio = 0
-	sqe.fd = int32(r.targetFd)
-
-	// addr field is 0 for URING_CMD operations
-	sqe.addr = 0
-	sqe.len = uint32(ctrlCmd.Len)
-	sqe.opcodeFlags = 0
-	sqe.bufIndex = 0
-	sqe.personality = 0
-	sqe.spliceFdIn = 0
-	// fileIndex removed - part of cmd area now
-
-	// Set userData from caller
-	sqe.userData = userData
-
-	// Marshal the 32-byte control command
-	ctrlCmdBytes := uapi.Marshal(ctrlCmd)
-	if len(ctrlCmdBytes) != 32 {
-		return nil, fmt.Errorf("control command marshal returned %d bytes, expected 32", len(ctrlCmdBytes))
-	}
-
-	// Set cmd_op field to ioctl-encoded value (like working C implementation)
-	sqe.setCmdOp(cmd)
-
-	// With sqe128 layout, sqe.cmd starts at byte 48
-	// Copy the 32-byte control command to the cmd area
-	copy(sqe.cmd[:32], ctrlCmdBytes)
-
-	logger.Debug("SQE prepared", "fd", sqe.fd, "cmd", cmd, "addr", sqe.addr)
-
-	// START_DEV must wait for completion
-
-	// Submit the command and wait for completion using real io_uring
-	result, err := r.submitAndWait(sqe)
-	if err != nil {
-		logger.Error("submitAndWait failed", "error", err)
-		return nil, fmt.Errorf("failed to submit control command: %w", err)
-	}
-
-	logger.Debug("URING_CMD completed", "result", result.Value(), "error", result.Error())
-	return result, nil
 }
 
 // minimalResult implements the Result interface
@@ -548,54 +371,32 @@ func (r *minimalResult) Error() error     { return r.err }
 // PrepareIOCmd prepares an I/O command SQE without submitting to the kernel.
 // Call FlushSubmissions() to submit all prepared commands in a single syscall.
 func (r *minimalRing) PrepareIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData uint64) error {
-	// Hot path optimization: Use pre-allocated sqePool instead of heap allocation
-	// Reuse the same sqe128 struct for all submissions (sequential per ring)
-	sqe := &r.sqePool
-
-	// Set minimal SQE fields (kernel expects these)
-	sqe.opcode = kernelUringCmdOpcode()
-	sqe.flags = 0
-	sqe.ioprio = 0
-	sqe.fd = int32(r.targetFd)
-	sqe.setCmdOp(cmd)
-	sqe.userData = userData
-	sqe.len = 16 // 16-byte ublksrv_io_cmd payload
-	sqe.opcodeFlags = 0
-	sqe.bufIndex = 0
-	sqe.personality = 0
-	sqe.spliceFdIn = 0
-	sqe.addr = 0
-
-	// Copy the ublksrv_io_cmd (16 bytes) to cmd area
-	// Using direct assignment is faster than copy() for small fixed sizes
-	*(*[16]byte)(unsafe.Pointer(&sqe.cmd[0])) = *(*[16]byte)(unsafe.Pointer(ioCmd))
-
-	// Zero remaining cmd area (bytes 16-79) - required for kernel
-	// Use 64-bit writes for efficiency
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[16])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[24])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[32])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[40])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[48])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[56])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[64])) = 0
-	*(*uint64)(unsafe.Pointer(&sqe.cmd[72])) = 0
-
-	// Prepare SQE in ring buffer (no syscall)
-	if err := r.prepareSQE(sqe); err != nil {
-		return fmt.Errorf("failed to prepare I/O command: %w", err)
+	if !r.acquire() {
+		return ErrRingClosed
 	}
-
-	// Make sure the payload stays alive until after preparation
-	runtime.KeepAlive(ioCmd)
-
+	defer r.release()
+	sqe := r.core.GetSQE128()
+	if sqe == nil {
+		return fmt.Errorf("failed to prepare I/O command: %w", ErrRingFull)
+	}
+	PrepUringCmd128(sqe, int32(r.targetFd), cmd, (*[16]byte)(unsafe.Pointer(ioCmd))[:])
+	sqe.Len = 16 // 16-byte ublksrv_io_cmd; ignored by the kernel
+	sqe.UserData = userData
 	return nil
 }
 
 // FlushSubmissions submits all prepared SQEs with a single io_uring_enter syscall.
 // Returns the number of SQEs submitted.
 func (r *minimalRing) FlushSubmissions() (uint32, error) {
-	return r.flushSubmissions()
+	if !r.acquire() {
+		return 0, ErrRingClosed
+	}
+	defer r.release()
+	submitted, err := r.core.Submit()
+	if err != nil {
+		return 0, fmt.Errorf("io_uring_enter failed: %w", err)
+	}
+	return uint32(submitted), nil
 }
 
 // SubmitIOCmd submits an I/O command and returns the result.
@@ -605,105 +406,51 @@ func (r *minimalRing) SubmitIOCmd(cmd uint32, ioCmd *uapi.UblksrvIOCmd, userData
 	if err := r.PrepareIOCmd(cmd, ioCmd, userData); err != nil {
 		return nil, err
 	}
-
 	if _, err := r.FlushSubmissions(); err != nil {
 		return nil, err
 	}
-
 	return &minimalResult{userData: userData, value: 0, err: nil}, nil
 }
 
+// WaitForCompletion returns the completions that are ready. With timeout > 0
+// it does not block; with timeout 0 it blocks for at least one, but only for
+// up to 100ms per call so the caller's ioLoop can observe context
+// cancellation and exit even when no I/O and no STOP_DEV ever wake it
+// (tearing down a device that was primed but never started). The results
+// are pooled and overwritten by the next call.
 func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
-	// Hot path optimization: Reuse pre-allocated results slice
-	// Reset length to 0 but keep capacity
-	r.resultsPool = r.resultsPool[:0]
-	r.cqePoolIndex = 0 // Reset pool index for this batch
-
-	drain := func() {
-		cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
-		cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
-
-		// Load tail with acquire semantics (kernel publishes with release)
-		currentTail := atomic.LoadUint32(cqTail)
-
-		// CRITICAL: Full memory barrier to ensure CQE data is visible
-		// after we see the updated tail from the kernel. The kernel does
-		// a release store to tail after writing CQE data, so we need an
-		// acquire barrier here to ensure we see that data.
-		Mfence()
-
-		currentHead := atomic.LoadUint32(cqHead)
-
-		// Pre-calculate constant offset for cqe slot computation
-		cqMask := r.params.cqEntries - 1
-		cqeBase := uintptr(r.params.cqOff.cqes)
-		cqeSize := uintptr(unsafe.Sizeof(cqe32{}))
-
-		for currentHead != currentTail {
-			cqIndex := currentHead & cqMask
-			cqeSlot := unsafe.Add(r.cqAddr, cqeBase+cqeSize*uintptr(cqIndex))
-			cqe := (*cqe32)(cqeSlot)
-
-			// Use pre-allocated result struct from pool
-			var res *minimalResult
-			if r.cqePoolIndex < r.cqePoolSize {
-				res = &r.cqePool[r.cqePoolIndex]
-				r.cqePoolIndex++
-			} else {
-				// Pool exhausted - fall back to allocation (rare)
-				res = &minimalResult{}
-			}
-
-			res.userData = cqe.userData
-			res.value = cqe.res
-			res.err = nil // Don't allocate error string - caller checks Value()
-
-			r.resultsPool = append(r.resultsPool, res)
-			currentHead++
-		}
-
-		// Update head with release semantics only if we consumed completions
-		if currentHead != atomic.LoadUint32(cqHead) {
-			atomic.StoreUint32(cqHead, currentHead)
-		}
+	if !r.acquire() {
+		return nil, ErrRingClosed
 	}
-
-	// First, non-blocking drain
-	drain()
-	if len(r.resultsPool) > 0 {
+	defer r.release()
+	r.resultsPool = r.resultsPool[:0]
+	if r.drain(); len(r.resultsPool) > 0 {
 		return r.resultsPool, nil
 	}
-
-	// If timeout is specified, don't block forever
 	if timeout > 0 {
-		// Don't wait for any completions, just check if there are any
-		_, _, _ = r.submitAndWaitRing(0, 0)
-		drain()
-		return r.resultsPool, nil // Return empty slice if no work - NOT an error
+		_ = r.core.GetEvents()
+		r.drain()
+		return r.resultsPool, nil
 	}
-
-	// Block for at least one completion, but bounded so the caller's ioLoop can
-	// periodically observe context cancellation and exit — even when there is no
-	// I/O and no STOP_DEV to abort the outstanding FETCH_REQs (e.g. tearing down
-	// a device that was primed but never started). An unbounded wait here parks
-	// in the kernel forever and wedges shutdown. Retry on EINTR; treat ETIME
-	// (timed out with nothing ready) like an empty wakeup.
-	const waitTimeoutNs = 100 * 1000 * 1000 // 100ms
-	for {
-		errno := r.enterBoundedWait(1, waitTimeoutNs)
-		if errno == 0 || errno == syscall.ETIME {
-			break
-		}
-		if errno == syscall.EINTR {
-			// Signal interrupted us, retry
-			continue
-		}
-		return nil, fmt.Errorf("io_uring_enter wait failed: %w", errno)
+	if err := r.core.WaitCQEs(1, ctrlWaitSlice); err != nil && err != unix.ETIME {
+		return nil, fmt.Errorf("io_uring_enter wait failed: %w", err)
 	}
+	r.drain()
+	return r.resultsPool, nil
+}
 
-	// Drain whatever arrived
-	drain()
-	return r.resultsPool, nil // Always return slice, even if empty
+// drain moves ready CQEs into the result pool, at most one pool's worth.
+func (r *minimalRing) drain() {
+	for len(r.resultsPool) < len(r.cqePool) {
+		cqe := r.core.PeekCQE()
+		if cqe == nil {
+			return
+		}
+		res := &r.cqePool[len(r.resultsPool)]
+		*res = minimalResult{userData: cqe.UserData, value: cqe.Res}
+		r.resultsPool = append(r.resultsPool, res)
+		r.core.CQESeen()
+	}
 }
 
 func (r *minimalRing) NewBatch() Batch {
@@ -727,349 +474,4 @@ func (b *minimalBatch) Submit() ([]Result, error) {
 
 func (b *minimalBatch) Len() int {
 	return 0
-}
-
-// submitAndWait submits an SQE and waits for completion using real io_uring
-func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
-	logger := logging.Default()
-	logger.Debug("submitAndWait called", "fd", sqe.fd, "opcode", sqe.opcode)
-	logger.Debug("submitting URING_CMD via io_uring", "fd", sqe.fd, "opcode", sqe.opcode)
-
-	// Discard any straggler completion left in the CQ by a previously timed-out
-	// control command, so the completion we wait for below is unambiguously ours.
-	// The control ring is strictly synchronous (one command in flight at a time),
-	// so in normal operation the CQ is already empty here and this is a single
-	// non-blocking check.
-	for {
-		if _, ok := r.pollCtrlCompletion(); !ok {
-			break
-		}
-		logger.Warn("discarded stale control completion before submit")
-	}
-
-	// This is the real io_uring submission implementation
-	// Step 1: Get next available SQ entry
-	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
-	sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
-	sqMask := r.params.sqEntries - 1
-
-	// Check if queue is full
-	if (*sqTail - *sqHead) >= r.params.sqEntries {
-		return nil, fmt.Errorf("submission queue full")
-	}
-
-	// Step 2: Get SQE slot and copy our prepared SQE into SQEs mapping
-	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
-	sqIndex := *sqTail & sqMask
-
-	// Calculate SQE slot offset
-	sqeSize := unsafe.Sizeof(*sqe)
-	if sqeSize != 128 {
-		logger.Error("SQE size mismatch during submission", "size", sqeSize)
-	}
-	sqeSlot := unsafe.Add(r.sqesAddr, sqeSize*uintptr(sqIndex))
-
-	// Copy our SQE to the SQEs array
-	*(*sqe128)(sqeSlot) = *sqe
-
-	// For URING_CMD, write control command directly to sqeSlot at byte 48
-	if sqe.opcode == kernelUringCmdOpcode() {
-		// Extract and copy the control command
-		srcCmd := (*[32]byte)(unsafe.Pointer(uintptr(unsafe.Pointer(sqe)) + 48))
-		dstCmd := (*[32]byte)(unsafe.Pointer(uintptr(sqeSlot) + 48))
-		copy(dstCmd[:], srcCmd[:])
-	}
-
-	// Update array entry
-	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), uintptr(4*sqIndex))) = sqIndex
-
-	// Step 3: Update tail to submit the entry
-	oldTail := *sqTail
-	newTail := oldTail + 1
-
-	// CRITICAL: Full store fence to ensure SQE writes are visible to kernel
-	// before we update the tail. runtime.KeepAlive and atomic operations
-	// do NOT provide this guarantee for non-atomic stores.
-	Sfence()
-
-	// Use atomic store to ensure the tail update is visible to the kernel
-	atomic.StoreUint32(sqTail, newTail)
-
-	logger.Debug("updated SQ tail", "old", oldTail, "new", newTail)
-
-	// Submit the prepared SQE, then wait for its completion in a bounded re-wait
-	// loop (see waitCtrlCompletion). The previous code did a single
-	// submitAndWaitRing(1,1) followed by a 50µs poll, which is not robust for
-	// control commands: UBLK_F_URING_CMD_COMP_IN_TASK defers the completion to
-	// the target task's task_work, so the first io_uring_enter can return before
-	// the CQE is posted, and Go's async preemption (SIGURG) interrupts the wait
-	// with EINTR. That turned a completion we WILL receive into a hard failure
-	// ("no completions available after retries") and, for STOP_DEV on a busy
-	// device, an unbounded hang (Critical Bug #8).
-
-	// submitOnly does not wait for completions, so it cannot block; retry only if
-	// async preemption interrupts the submit itself. The SQ tail was advanced
-	// above, so the kernel consumes exactly this one SQE.
-	for {
-		submitted, serrno := r.submitOnly(1)
-		if serrno == syscall.EINTR {
-			continue
-		}
-		if serrno != 0 {
-			logger.Error("io_uring_enter submit failed", "errno", serrno)
-			return nil, fmt.Errorf("io_uring_enter submit failed: %w", serrno)
-		}
-		logger.Debug("control SQE submitted", "submitted", submitted)
-		break
-	}
-
-	return r.waitCtrlCompletion()
-}
-
-// waitCtrlCompletion blocks until the control ring's single outstanding
-// completion is available and returns it. The control ring is strictly
-// synchronous — one command in flight at a time — so the head CQE is the
-// completion for the command just submitted.
-//
-// It re-waits across EINTR (Go's async-preemption SIGURG) and timed-out/empty
-// wakeups until the completion appears, bounded by an overall deadline. The
-// deadline is what makes STOP_DEV on a busy device fail cleanly instead of
-// wedging forever (Critical Bug #8): a single io_uring_enter here can never
-// block past perWaitNs, and the loop as a whole can never block past
-// ctrlCmdTimeout.
-func (r *minimalRing) waitCtrlCompletion() (Result, error) {
-	const (
-		perWaitNs      = 100 * 1000 * 1000 // 100ms per bounded io_uring_enter
-		ctrlCmdTimeout = 10 * time.Second  // overall cap for one control command
-	)
-	deadline := time.Now().Add(ctrlCmdTimeout)
-	for {
-		// The completion may already be posted (fast path or a prior wakeup).
-		if res, ok := r.pollCtrlCompletion(); ok {
-			return res, nil
-		}
-		if !time.Now().Before(deadline) {
-			return nil, fmt.Errorf("timeout waiting for control command completion after %s", ctrlCmdTimeout)
-		}
-		// Block (bounded) for at least one completion. Retry on EINTR; treat
-		// ETIME (nothing ready within perWaitNs) as a wakeup and re-poll.
-		switch errno := r.enterBoundedWait(1, perWaitNs); errno {
-		case 0, syscall.ETIME, syscall.EINTR:
-			// fall through to re-poll / re-wait
-		default:
-			return nil, fmt.Errorf("io_uring_enter wait failed: %w", errno)
-		}
-	}
-}
-
-// pollCtrlCompletion consumes and returns the head CQE if one is present,
-// without blocking; ok is false when the CQ is currently empty. The control
-// ring is synchronous (at most one command in flight), so the head CQE belongs
-// to the command being awaited.
-func (r *minimalRing) pollCtrlCompletion() (Result, bool) {
-	cqHead := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.head))
-	cqTail := (*uint32)(unsafe.Add(r.cqAddr, r.params.cqOff.tail))
-
-	// Load tail with acquire semantics (kernel publishes with release), then a
-	// full fence so the CQE payload written before the tail bump is visible.
-	currentTail := atomic.LoadUint32(cqTail)
-	Mfence()
-	currentHead := atomic.LoadUint32(cqHead)
-	if currentHead == currentTail {
-		return nil, false
-	}
-
-	cqMask := r.params.cqEntries - 1
-	cqIndex := currentHead & cqMask
-	cqeSlot := unsafe.Add(r.cqAddr, uintptr(r.params.cqOff.cqes)+uintptr(unsafe.Sizeof(cqe32{}))*uintptr(cqIndex))
-	cqe := (*cqe32)(cqeSlot)
-
-	result := &minimalResult{userData: cqe.userData, value: cqe.res}
-	if cqe.res < 0 {
-		result.err = fmt.Errorf("operation failed with result: %d", cqe.res)
-	}
-
-	// Consume: advance head with release semantics.
-	atomic.StoreUint32(cqHead, currentHead+1)
-	return result, true
-}
-
-// submitAndWaitRing calls io_uring_enter to submit and wait for completions
-func (r *minimalRing) submitAndWaitRing(toSubmit, minComplete uint32) (submitted, completed uint32, errno syscall.Errno) {
-	logger := logging.Default()
-	const (
-		IORING_ENTER_GETEVENTS = 1 << 0
-	)
-
-	// Only use GETEVENTS flag if we're actually waiting for completions
-	var flags uint32
-	if minComplete > 0 {
-		flags = IORING_ENTER_GETEVENTS
-	}
-
-	logger.Debug("calling io_uring_enter", "toSubmit", toSubmit, "minComplete", minComplete, "flags", flags)
-
-	r1, r2, err := syscall.Syscall6(
-		unix.SYS_IO_URING_ENTER,
-		uintptr(r.ringFd),
-		uintptr(toSubmit),
-		uintptr(minComplete),
-		uintptr(flags),
-		0, 0)
-
-	logger.Debug("io_uring_enter returned", "r1", r1, "r2", r2, "err", err)
-
-	return uint32(r1), uint32(r2), err
-}
-
-// ioUringGeteventsArg is the extra-argument struct for IORING_ENTER_EXT_ARG,
-// which lets io_uring_enter wait with a timeout (kernel 5.11+). ts holds a
-// pointer to a __kernel_timespec (layout matches syscall.Timespec on 64-bit).
-type ioUringGeteventsArg struct {
-	sigmask   uint64
-	sigmaskSz uint32
-	pad       uint32
-	ts        uint64
-}
-
-// enterBoundedWait waits for up to minComplete completions but returns after
-// timeoutNs even if none arrive. Bounding the park time lets the data-plane
-// ioLoop observe context cancellation and exit during teardown even when no I/O
-// and no STOP_DEV ever wake it (e.g. tearing down a device that was primed but
-// never started) — an unbounded io_uring_enter there wedges shutdown forever.
-// Returns ETIME on timeout with no completions; callers treat that like a
-// spurious wakeup and drain whatever (if anything) arrived.
-func (r *minimalRing) enterBoundedWait(minComplete uint32, timeoutNs int64) syscall.Errno {
-	const (
-		IORING_ENTER_GETEVENTS = 1 << 0
-		IORING_ENTER_EXT_ARG   = 1 << 3
-	)
-	ts := syscall.NsecToTimespec(timeoutNs)
-	arg := ioUringGeteventsArg{ts: uint64(uintptr(unsafe.Pointer(&ts)))}
-	_, _, errno := syscall.Syscall6(
-		unix.SYS_IO_URING_ENTER,
-		uintptr(r.ringFd),
-		0, // toSubmit: submissions are flushed separately
-		uintptr(minComplete),
-		uintptr(IORING_ENTER_GETEVENTS|IORING_ENTER_EXT_ARG),
-		uintptr(unsafe.Pointer(&arg)),
-		unsafe.Sizeof(arg),
-	)
-	runtime.KeepAlive(&ts)
-	return errno
-}
-
-// submitOnly calls io_uring_enter to submit without waiting
-func (r *minimalRing) submitOnly(toSubmit uint32) (submitted uint32, errno syscall.Errno) {
-	r1, _, err := syscall.Syscall6(
-		unix.SYS_IO_URING_ENTER,
-		uintptr(r.ringFd),
-		uintptr(toSubmit),
-		0, // don't wait for completions
-		0, // no flags
-		0, 0)
-
-	return uint32(r1), err
-}
-
-// prepareSQE writes an SQE to the ring buffer without submitting to the kernel.
-// The SQE is visible to us (sqTailLocal is incremented) but not to the kernel
-// until flushSubmissions() is called. This enables batching.
-func (r *minimalRing) prepareSQE(sqe *sqe128) error {
-	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
-	sqMask := r.params.sqEntries - 1
-
-	// Check if ring is full. In normal operation this should never happen
-	// because the state machine guarantees at most depth in-flight operations.
-	if r.sqTailLocal-atomic.LoadUint32(sqHead) >= r.params.sqEntries {
-		return ErrRingFull
-	}
-
-	// Get SQE slot index and destination
-	sqIndex := r.sqTailLocal & sqMask
-	sqeSlot := unsafe.Add(r.sqesAddr, 128*uintptr(sqIndex))
-
-	// Copy SQE to ring slot (includes cmd area at bytes 48-127)
-	*(*sqe128)(sqeSlot) = *sqe
-
-	// Update the indirection array entry
-	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
-	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
-
-	// Increment LOCAL tail - kernel doesn't see this yet
-	r.sqTailLocal++
-
-	// NO memory barrier here - that happens in flushSubmissions
-	// NO syscall here - that's the whole point of batching
-	return nil
-}
-
-// flushSubmissions submits all prepared SQEs with a single io_uring_enter syscall.
-// This publishes sqTailLocal to the shared tail, making all prepared SQEs visible
-// to the kernel, then calls io_uring_enter to wake the kernel.
-func (r *minimalRing) flushSubmissions() (uint32, error) {
-	sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
-	currentTail := atomic.LoadUint32(sqTail)
-	pending := r.sqTailLocal - currentTail
-
-	if pending == 0 {
-		return 0, nil // Nothing to submit
-	}
-
-	// CRITICAL: Memory barrier ensures all SQE writes are visible to kernel
-	// before we update the shared tail pointer. Without this, the kernel might
-	// see the new tail value but read stale/garbage SQE data.
-	Sfence()
-
-	// Publish new tail to kernel - this makes all prepared SQEs visible
-	atomic.StoreUint32(sqTail, r.sqTailLocal)
-
-	// ONE syscall for the entire batch
-	submitted, errno := r.submitOnly(pending)
-	if errno != 0 {
-		return 0, fmt.Errorf("io_uring_enter failed: %w", errno)
-	}
-
-	return submitted, nil
-}
-
-// submitOnlyCmd submits a command SQE without waiting for completion
-func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
-	// Get SQ head and tail
-	sqHead := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.head))
-	sqTail := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.tail))
-	sqMask := r.params.sqEntries - 1
-
-	// Check if queue is full
-	if (*sqTail - *sqHead) >= r.params.sqEntries {
-		return 0, fmt.Errorf("submission queue full")
-	}
-
-	// Get SQE slot and copy our prepared SQE
-	sqArray := (*uint32)(unsafe.Add(r.sqAddr, r.params.sqOff.array))
-	sqIndex := *sqTail & sqMask
-	sqeSlot := unsafe.Add(r.sqesAddr, 128*uintptr(sqIndex))
-	*(*sqe128)(sqeSlot) = *sqe
-	// NOTE: No extra copy needed - the struct copy includes the cmd area at bytes 48-127
-
-	// Update array entry
-	*(*uint32)(unsafe.Add(unsafe.Pointer(sqArray), unsafe.Sizeof(uint32(0))*uintptr(sqIndex))) = sqIndex
-
-	// Update tail with proper memory ordering
-	oldTail := *sqTail
-	newTail := oldTail + 1
-
-	// CRITICAL: Full store fence to ensure SQE writes are visible to kernel
-	// before we update the tail. This is the key fix for the race condition.
-	Sfence()
-
-	atomic.StoreUint32(sqTail, newTail)
-
-	// Submit without waiting
-	submitted, errno := r.submitOnly(1)
-	if errno != 0 {
-		return 0, fmt.Errorf("io_uring_enter failed: %w", errno)
-	}
-
-	return submitted, nil
 }

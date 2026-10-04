@@ -3,6 +3,7 @@ package uring
 
 import (
 	"errors"
+	"time"
 
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
@@ -12,6 +13,15 @@ import (
 // In normal ublk operation this should never happen - the state machine
 // guarantees at most depth in-flight operations.
 var ErrRingFull = errors.New("submission queue full")
+
+// ErrRingClosed is returned by Ring methods called after Close.
+var ErrRingClosed = errors.New("ring closed")
+
+// ErrCtrlTimeout means SubmitCtrlCmd submitted the command but stopped
+// waiting before its completion arrived (deadline, Close, or a failed wait).
+// The command may still execute; the kernel never touches the caller's
+// buffer afterwards.
+var ErrCtrlTimeout = errors.New("control command submitted but its completion was not reaped")
 
 // Ring provides the interface for io_uring operations needed by ublk
 type Ring interface {
@@ -103,7 +113,10 @@ func GetFeatures() (Features, error) {
 type Config struct {
 	Entries uint32 // Number of entries in the ring
 	FD      int32  // File descriptor for operations
-	Flags   uint32 // Additional flags
+	Flags   uint32 // Additional IORING_SETUP_* flags
+	// CtrlTimeout bounds each SubmitCtrlCmd wait: 0 means 10s, negative
+	// means wait for the completion however long it takes.
+	CtrlTimeout time.Duration
 }
 
 // NewRing creates a new Ring implementation using pure Go io_uring
@@ -111,7 +124,7 @@ func NewRing(config Config) (Ring, error) {
 	logger := logging.Default()
 	logger.Debug("creating io_uring", "entries", config.Entries, "fd", config.FD)
 
-	ring, err := NewMinimalRing(config.Entries, config.FD)
+	ring, err := newMinimalRing(config)
 	if err != nil {
 		logger.Error("failed to create io_uring", "error", err)
 		return nil, err
