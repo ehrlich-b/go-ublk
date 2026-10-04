@@ -102,7 +102,7 @@ ssize_t n = pwrite(ublkc_fd, z, sizeof(z), ublk_user_copy_pos(q_id, tag, 0));
 commit(q_id, tag, n < 0 ? -EIO : (int)n);
 ```
 
-Commit the number of bytes you wrote, or a negative errno. <!-- VERIFY: REPORT_ZONES result semantics in user-copy mode. 7.3-rc5 completes the request on any non-negative result; 6.17 passed the result to blk_update_request, so a count shorter than the kernel's report buffer requeued the remainder. Confirm what rublk or other zoned servers commit. -->
+Commit the number of bytes you wrote (normally `nr_zones × 64`; rublk commits its `pwrite` return value), or a negative errno. Never commit 0 for a report on kernels before 7.3: there the result goes through `blk_update_request`, so 0 re-dispatches the request indefinitely, and a count shorter than the kernel's buffer re-dispatches the rest. From 7.3 any non-negative result completes it.
 
 ## A minimal zone model
 
@@ -120,7 +120,7 @@ The server is the zoned device, so it owns the state machine. For each sequentia
 
 Enforce `max_open_zones` and `max_active_zones` if you advertised them. Conventional zones (`BLK_ZONE_TYPE_CONVENTIONAL`, condition `BLK_ZONE_COND_NOT_WP`) accept writes anywhere and ignore zone operations.
 
-The kernel's selftest server has no zoned target. The Rust `rublk` server has one and is a useful reference. <!-- VERIFY: that rublk ships a zoned target, and its name on the command line -->
+The kernel's selftest server has no zoned target. The Rust `rublk` server has one (`rublk add zoned`) and is a useful reference.
 
 ## go-ublk
 

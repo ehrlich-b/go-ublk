@@ -27,7 +27,7 @@ Some block devices store a few bytes of metadata alongside every data interval: 
 | `metadata_size` | `__u8` | Metadata bytes per interval | Must be non-zero |
 | `pi_offset` | `__u8` | Offset of the PI tuple within each interval's metadata | `pi_offset + tuple size <= metadata_size` |
 | `csum_type` | `__u8` | `LBMD_PI_CSUM_NONE`, `_IP`, `_CRC16_T10DIF`, `_CRC64_NVME` | One of these four |
-| `tag_size` | `__u8` | Size of the tag field in the PI tuple <!-- VERIFY: exact meaning of blk_integrity.tag_size (application tag vs storage tag size) --> | Passed through to the block layer |
+| `tag_size` | `__u8` | Bytes of tag space available to applications in each tuple (the application tag, plus reference or storage-tag bytes the format does not check), reported as `integrity/tag_size` | Passed through to the block layer |
 | `pad[5]` | | | |
 
 The checksum type fixes the PI tuple size: 0 bytes for `NONE` (metadata without PI), 8 for IP and CRC16 T10-DIF, 16 for CRC64 NVMe. At `START_DEV` the kernel turns these values into the disk's integrity profile: `LBMD_PI_CAP_INTEGRITY` becomes the block layer's device-capable flag and `LBMD_PI_CAP_REFTAG` its reference-tag flag.
@@ -65,7 +65,7 @@ if (desc->op_flags & UBLK_IO_F_INTEGRITY) {
 
 Using `UBLKSRV_IO_INTEGRITY_FLAG` on a device without `UBLK_F_INTEGRITY` fails with `-EINVAL`; an offset beyond the metadata length fails the same way. The data and metadata copies are independent, so a server can fetch them in either order and in pieces.
 
-What the server owes the kernel is simple to state: persist each interval's metadata with its data, and return it unchanged on READ. Where the metadata comes from depends on the block layer and the application. For PI formats the block layer can generate tuples on write and verify them on read, controlled per disk under `/sys/block/ublkbN/integrity/`; applications can also supply their own metadata. A server that returns wrong PI on a READ will see the reader get an I/O error when verification is on. <!-- VERIFY: default write_generate/read_verify behavior for a ublk disk with a PI csum_type, and which userspace interfaces (io_uring PI attributes, others) let applications pass metadata to a ublk device -->
+What the server owes the kernel is simple to state: persist each interval's metadata with its data, and return it unchanged on READ. Where the metadata comes from depends on the block layer and the application. For PI formats the block layer can generate tuples on write and verify them on read, controlled per disk under `/sys/block/ublkbN/integrity/`; applications can also supply their own metadata. Generation and verification are on by default for a disk with a checksum type (`write_generate` and `read_verify` are 1). A server that returns wrong PI on a READ makes the reader fail with `EILSEQ` while `read_verify` is on. Applications can supply and receive metadata themselves through io_uring's PI read/write attributes (6.14+), and `FS_IOC_GETLBMD_CAP` (6.17+) reports a device's metadata format.
 
 ## Testing
 

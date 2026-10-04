@@ -42,7 +42,7 @@ The struct is 32 bytes. Any buffer you pass by `addr` must stay valid and unmove
 
 Linux 6.0 through 6.3 identified commands by small integers (`UBLK_CMD_ADD_DEV` is 0x04). Linux 6.4 introduced ioctl-style encodings built with `_IOR`/`_IOWR('u', nr, struct ublksrv_ctrl_cmd)`, named `UBLK_U_CMD_*`, and every command added since exists only in that form. The driver accepts both encodings unless the kernel was built without `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES`, in which case legacy numbers fail with `EOPNOTSUPP`. New servers should use the encoded form; supporting kernels older than 6.4 means also speaking the legacy numbers.
 
-The kernel always reports `UBLK_F_CMD_IOCTL_ENCODE` in the negotiated flags of devices it creates, so a server that sees the bit knows the encoded form is understood. <!-- VERIFY: from which release the driver forces UBLK_F_CMD_IOCTL_ENCODE on in ADD_DEV (it does in 6.17) -->
+The kernel always reports `UBLK_F_CMD_IOCTL_ENCODE` in the negotiated flags of devices it creates, so a server that sees the bit knows the encoded form is understood (since 6.4).
 
 ## Commands
 
@@ -108,7 +108,7 @@ The kernel copies at most its own `sizeof(struct ublk_params)` and masks `types`
 
 Exposes `/dev/ublkbN`. `data[0]` must be the PID (thread-group ID) of the process that opened `/dev/ublkcN`; anything else, or a missing basic parameter block, is `EINVAL`.
 
-The order matters. `START_DEV` first waits, interruptibly, until **every tag of every queue has a `FETCH_REQ` outstanding**, then allocates the disk with the limits from `SET_PARAMS`, applies the attributes, and calls `add_disk`, which emits udev events and triggers a partition scan (reads of the first sectors). So the queue threads must be submitting their fetches before or while `START_DEV` is pending, and must be serving reads from that moment. On older kernels the partition scan runs inside `add_disk`, so the server receives reads while `START_DEV` is still in flight; 7.3-rc5 defers it to a work item that runs after the command returns. <!-- VERIFY: first release with the asynchronous partition scan (present in 7.3-rc5, absent in 6.17) --> A device already live returns `EEXIST`.
+The order matters. `START_DEV` first waits, interruptibly, until **every tag of every queue has a `FETCH_REQ` outstanding**, then allocates the disk with the limits from `SET_PARAMS`, applies the attributes, and calls `add_disk`, which emits udev events. Before 6.19 (and in stable 6.18 before 6.18.4) `add_disk` also scans the partition table synchronously, so the server receives reads of the first sectors while `START_DEV` is still in flight. From 6.19 the driver suppresses that scan during `add_disk` and queues it on a work item instead, so `START_DEV` no longer waits for it; no scan happens at all for unprivileged servers or with `UBLK_F_NO_AUTO_PART_SCAN`. Either way the queue threads must be submitting their fetches before or while `START_DEV` is pending, and must be serving reads from that moment. A device already live returns `EEXIST`.
 
 Partition scanning is suppressed for devices whose queues are served by unprivileged tasks, and from Linux 7.0 can be turned off with `UBLK_F_NO_AUTO_PART_SCAN`.
 
@@ -176,7 +176,7 @@ The `state` field of `ublksrv_ctrl_dev_info` takes four values:
 
 {{< diagram "device-states" "`DEL_DEV` is accepted from any state. Without a recovery flag, a server exit stops the device; with one, the device waits for a new server." >}}
 
-The driver's state machine looks as if it allows starting a device again after a stop: once the old disk is released, a server could reopen `/dev/ublkcN`, fetch every tag and send `START_DEV`. Don't. Tested across kernels, it fails with `-EBUSY`, wedges the control plane (6.10 to 6.12), or oopses (Arch 7.2.8); see [known kernel bugs](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix). Delete the device and add a new one.
+A stopped device cannot be started again. `STOP_DEV` does not reset the queues: they still count as fully fetched, so new `FETCH_REQ`s fail with `-EBUSY` and a different process cannot even map the descriptors, while a `START_DEV` sent anyway can bring up a disk with no fetch commands armed and crash the kernel on its first request. go-ublk's kernel matrix saw all three outcomes, `-EBUSY`, a wedged control plane (6.10 to 6.12) and a NULL dereference in `ublk_queue_rq` (Arch 7.2.8); see [known kernel bugs](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix). Delete the device and add a new one.
 
 ## Putting it together
 

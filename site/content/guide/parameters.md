@@ -57,7 +57,7 @@ struct ublk_param_basic {
 |---|---|---|
 | `logical_bs_shift` | log2 of the logical block size: the smallest addressable unit | 9 to `PAGE_SHIFT` (512 bytes to the page size) |
 | `physical_bs_shift` | log2 of the physical block size: the unit the backend writes atomically or efficiently | at least `logical_bs_shift` |
-| `io_min_shift`, `io_opt_shift` | log2 of the minimum and optimal I/O sizes; hints exported to filesystems and tools | none <!-- VERIFY: how blk_validate_limits treats io_min/io_opt of 1 << 0 (go-ublk sends io_opt_shift 0 without errors on 6.17 and 7.0) --> |
+| `io_min_shift`, `io_opt_shift` | log2 of the minimum and optimal I/O sizes; hints exported to filesystems and tools | none (an `io_min_shift` below the physical block size is raised to it; `io_opt_shift` 0 is reported as no optimal size from 6.13, and as 1 byte in `optimal_io_size` before) |
 | `max_sectors` | largest request, in 512-byte sectors | at most `max_io_buf_bytes >> 9` from `ADD_DEV` |
 | `chunk_sectors` | boundary requests must not cross, in sectors; 0 for none | required (the zone size) on zoned devices |
 | `dev_sectors` | capacity in 512-byte sectors | should be a multiple of the logical block size |

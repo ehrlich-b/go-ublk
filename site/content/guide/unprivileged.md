@@ -25,7 +25,7 @@ KERNEL=="ublk-control", MODE="0666"
 KERNEL=="ublk[bc]*", ACTION=="add", RUN+="/usr/local/sbin/ublk-chown %k"
 ```
 
-The helper looks the device up with `UBLK_U_CMD_GET_DEV_INFO2` and `chown`s both nodes to `owner_uid:owner_gid`. ublksrv ships a rule and a helper script that do this. <!-- VERIFY: names and contents of ublksrv's udev rule and chown helper (believed to be a 99-ublk-dev.rules file and ublk_chown.sh) --> Making the control node world-writable lets any user add devices; the `ublks_max` limit below is what bounds that.
+The helper looks the device up with `UBLK_U_CMD_GET_DEV_INFO2` and `chown`s both nodes to `owner_uid:owner_gid`. ublksrv ships a rule (`utils/ublk_dev.rules`) and a helper (`utils/ublk_chown.sh`, which calls the small `ublk_user_id` program) that do this; go-ublk ships `examples/ublk-chown` and `99-ublk-unprivileged.rules`. Making the control node world-writable lets any user add devices; the `ublks_max` limit below is what bounds that.
 
 ## The device-path prefix
 
@@ -88,7 +88,7 @@ libublk-rs implements exactly this: try `GET_DEV_INFO2`, fall back to `GET_DEV_I
 
 ## Limits and restrictions
 
-**Device count.** The `ublks_max` module parameter, default 64, caps the number of unprivileged devices. `ADD_DEV` fails with `-EACCES` once it is reached. It is writable at runtime through `/sys/module/ublk_drv/parameters/ublks_max`, up to the driver's minor-number limit. In the 6.17 driver it counts only unprivileged devices; privileged devices are limited only by the minor space. <!-- VERIFY: when ublks_max changed from capping every device to capping only unprivileged ones; e2b's ublk-go README describes 64 as a system-wide default -->
+**Device count.** The `ublks_max` module parameter, default 64, caps the number of unprivileged devices. `ADD_DEV` fails with `-EACCES` once it is reached. It is writable at runtime through `/sys/module/ublk_drv/parameters/ublks_max`, up to the driver's minor-number limit. In 6.15 and later it counts only unprivileged devices; privileged devices are limited only by the minor space. From 6.3 to 6.14 it capped every device, and before 6.7 it could only be set at module load.
 
 **Copy and zero-copy modes.** `ADD_DEV` with `UBLK_F_UNPRIVILEGED_DEV` together with `UBLK_F_USER_COPY`, `UBLK_F_SUPPORT_ZERO_COPY` or `UBLK_F_AUTO_BUF_REG` fails with `-EINVAL`. In those modes the server is responsible for filling read buffers, and a server that returned success without writing them would hand uninitialized kernel memory to the reader. Unprivileged devices always use the default copy mode (or `NEED_GET_DATA`). See [data copy modes](/guide/data-copy/).
 
@@ -96,15 +96,15 @@ libublk-rs implements exactly this: try `GET_DEV_INFO2`, fall back to `GET_DEV_I
 
 **No partition scan.** If any task serving the device lacks `CAP_SYS_ADMIN`, the kernel suppresses the partition scan when the disk is added, so an untrusted server cannot feed the kernel's partition parsers. The check runs on every fetch. Kernels from 7.0 also offer {{< uapi "UBLK_F_NO_AUTO_PART_SCAN" >}} for turning the scan off explicitly.
 
-**Request timeouts kill the server.** For an unprivileged device, the block layer's request timeout handler sends `SIGKILL` to the server process when a request times out; a privileged device just restarts the timer. The driver does not set its own timeout, so the block layer default applies. <!-- VERIFY: default blk-mq request timeout for ublk devices (30 s) and that it is adjustable via /sys/block/ublkbN/queue/io_timeout --> An unprivileged server must complete every request within that window, which rules out unbounded waits on a slow backend.
+**Request timeouts kill the server.** For an unprivileged device, the block layer's request timeout handler sends `SIGKILL` to the server process when a request times out; a privileged device just restarts the timer. The driver does not set its own timeout, so the block layer default (30 s) applies; root can change it through `/sys/block/ublkbN/queue/io_timeout`, the device's unprivileged owner cannot. An unprivileged server must complete every request within that window, which rules out unbounded waits on a slow backend.
 
 **Who can open the block device.** A user without `CAP_SYS_ADMIN` can open an unprivileged device's `/dev/ublkbN` only if both their UID and GID match the device's owner, whatever the node's permissions say. The rule stops one user from creating a device, granting access to others, and serving them crafted data.
 
-**PIDs.** As for any device, `data[0]` of `START_DEV` and `END_USER_RECOVERY` must be the thread-group ID of the process that opened `/dev/ublkcN`. A server in a PID namespace needs a kernel with "ublk: fix ublksrv pid handling for pid namespaces", which Ubuntu's 6.17 kernels carry from 6.17.0-41. <!-- VERIFY: which mainline release contains the pid-namespace fix, and the exact failure on kernels without it -->
+**PIDs.** As for any device, `data[0]` of `START_DEV` and `END_USER_RECOVERY` must be the thread-group ID of the process that opened `/dev/ublkcN`. A server in a PID namespace needs a kernel with "ublk: fix ublksrv pid handling for pid namespaces" (mainline 6.19, stable 6.18.8; Ubuntu `linux-hwe-6.17` from 6.17.0-41). On 6.17 to 6.18.7 without it, `START_DEV` and `END_USER_RECOVERY` fail with `-EINVAL`, because the kernel compares the namespace-local PID with the init-namespace one. This applies to privileged servers in a PID namespace too.
 
 ## Containers
 
-Because permission is decided by the path the caller presents and by ordinary inode checks, a device created inside a container can be managed only from where its char node is visible and accessible. The kernel documentation calls this container-aware: a device created in one container can be controlled and accessed only inside that container. The container still needs `/dev/ublk-control` and the device's nodes to exist in its `/dev`, and its device cgroup, if any, must allow them. <!-- VERIFY: ublk char devices use a dynamically allocated major ("ublk-char"), so device-cgroup rules must be written against the runtime major number -->
+Because permission is decided by the path the caller presents and by ordinary inode checks, a device created inside a container can be managed only from where its char node is visible and accessible. The kernel documentation calls this container-aware: a device created in one container can be controlled and accessed only inside that container. The container still needs `/dev/ublk-control` and the device's nodes to exist in its `/dev`, and its device cgroup, if any, must allow them. The char devices use a dynamically allocated major (`ublk-char` in `/proc/devices`, minor = device ID), `/dev/ublk-control` is a misc device (major 10, dynamic minor), and `/dev/ublkbN` disks use major 259 (`blkext`) with dynamic minors, so device-cgroup rules must use the runtime numbers.
 
 ## go-ublk
 

@@ -20,7 +20,7 @@ Linux has several ways to do this. They sit at different layers:
 | **ublk** | blk-mq block device | io_uring commands on a per-device char device, one ring per hardware queue | Copy, user copy, or zero copy. Linux 6.0+ |
 | NBD | blk-mq block device | The NBD protocol over a socket | Server can be remote. Mature, simple, one more protocol hop |
 | TCMU | SCSI target (LIO) | A shared-memory ring through UIO | Exposes a SCSI LUN through a fabric; SCSI command set |
-| VDUSE | virtio device | vDPA bus, virtqueues in shared memory | Appears as virtio-blk through `virtio-vdpa` or to a VM through `vhost-vdpa` <!-- VERIFY: VDUSE merged in 5.15; confirm and whether to state the version --> |
+| VDUSE | virtio device | vDPA bus, virtqueues in shared memory | Appears as virtio-blk through `virtio-vdpa` or to a VM through `vhost-vdpa` (Linux 5.15) |
 | FUSE | VFS filesystem | `/dev/fuse` | A filesystem, not a block device |
 
 ublk's advantages come from staying inside blk-mq and using io_uring end to end: the block layer's multiqueue model maps one to one onto server threads, a server can use the same io_uring for its backend I/O as for the ublk protocol, and recent kernels let the backend I/O use the request's pages directly ([zero copy](/guide/data-copy/)).

@@ -45,7 +45,7 @@ Second, the char-device release handler (`ublk_ch_release_work_fn` in the driver
 | `/dev/ublkbN` | removed | kept | kept | kept |
 | Resulting state | `UBLK_S_DEV_DEAD` | `UBLK_S_DEV_QUIESCED` | `UBLK_S_DEV_QUIESCED` | `UBLK_S_DEV_FAIL_IO` |
 
-In the `FAIL_IO` state new requests are rejected at submission with `BLK_STS_TARGET`, which userspace sees as `EREMOTEIO`. <!-- VERIFY: blk_status_to_errno(BLK_STS_TARGET) == -EREMOTEIO on current kernels --> Waiting requests in the `QUIESCED` state sit on the block layer's requeue list until recovery finishes, or until someone stops the device.
+In the `FAIL_IO` state new requests are rejected at submission with `BLK_STS_TARGET`, which direct and raw I/O sees as `EREMOTEIO` (a filesystem above may report `EIO` instead). Waiting requests in the `QUIESCED` state sit on the block layer's requeue list until recovery finishes, or until someone stops the device.
 
 > [!NOTE]
 > "Fail with `EIO`" does not mean "untouched". A write the dead server was processing may have reached its backend completely, partly or not at all. That is the same contract as a real disk that loses power mid-write, and filesystems are built for it, but your backend has to be consistent at block granularity when it restarts.
@@ -97,7 +97,7 @@ ctrl_cmd(UBLK_U_CMD_END_USER_RECOVERY, id, .data = getpid());  /* blocks until a
 
 ### What survives and what does not
 
-The kernel keeps the device ID, the gendisk and every file descriptor open on `/dev/ublkbN`, the parameters, the negotiated flags, the queue count, depth and buffer size, and the `ublksrv_flags` field of the device info, which the driver stores without interpreting. <!-- VERIFY: ublksrv_flags is preserved verbatim across recovery on current kernels; "ublk: reset kernel-owned dev_info fields in ublk_ctrl_add_dev()" resets only kernel-owned fields --> `SET_PARAMS` is refused with `-EACCES` once the disk has been created, so recovery cannot change the geometry; use `UBLK_U_CMD_UPDATE_SIZE` ({{< since "6.16" >}}) after recovery if the size must change.
+The kernel keeps the device ID, the gendisk and every file descriptor open on `/dev/ublkbN`, the parameters, the negotiated flags, the queue count, depth and buffer size, and the `ublksrv_flags` field of the device info, which the driver stores without interpreting and returns verbatim from `GET_DEV_INFO`. `SET_PARAMS` is refused with `-EACCES` once the disk has been created, so recovery cannot change the geometry; use `UBLK_U_CMD_UPDATE_SIZE` ({{< since "6.16" >}}) after recovery if the size must change.
 
 It forgets everything that belonged to the old process: the descriptor mappings, the rings, the per-tag buffers and the per-tag daemon tasks. Your server's own state is your problem. Backend connections, open files and caches have to be rebuilt, and the backend must already hold every write the old server acknowledged. If the device advertises a volatile write cache, an acknowledged but unflushed write lost in the crash is the same event as a disk losing its cache on power failure: allowed by the contract, and handled by the filesystem's flushes. If it does not, every acknowledged write must have been durable.
 
@@ -117,8 +117,8 @@ On a `LIVE` device the kernel marks every queue as canceling, then polls every 3
 The old server has to cooperate:
 
 - Treat `UBLK_IO_RES_ABORT` on a tag as final and do not fetch that tag again.
-- Finish the requests it currently owns and commit them. <!-- VERIFY: exact handling of COMMIT_AND_FETCH_REQ while the queue is canceling: the request completes, and the re-armed fetch is then cancelled with UBLK_IO_RES_ABORT -->
-- Once every tag is aborted, close `/dev/ublkcN` and exit.
+- Finish the requests it currently owns and commit them. Each commit completes its request, but the fetch it re-arms will receive nothing (new requests are being requeued) and is only completed, with `UBLK_IO_RES_ABORT`, when the server's io_uring is torn down or the device is stopped.
+- Once every tag it owned has been committed and every other tag aborted, close `/dev/ublkcN` and exit without waiting for the re-armed fetches. (Waiting for them stalls the handoff until a timeout; go-ublk's `Detach` once did exactly that.)
 
 The release handler then moves the device to `QUIESCED` (or `FAIL_IO`) exactly as after a crash, except that nothing was in flight, and the new server runs the recovery sequence above. Applications see a pause, not an error. Any process allowed to send control commands for the device can issue `QUIESCE_DEV`: the new binary, the old one in response to a signal, or an admin tool.
 
@@ -139,7 +139,7 @@ On kernels older than 6.16 the only way to hand over is to stop the old server a
 
 **The reset path itself.** `f7700a4415af` ("ublk: fix use-after-free in `ublk_cancel_cmd()`") also covers the `USER_RECOVERY` reset path. It first appears in v7.1-rc3, carries no `Cc: stable`, and is not in 7.0.y or in any `linux-hwe-7.0` build through 7.0.0-39. Test recovery on the kernel you will ship. [Known kernel bugs](/guide/kernel-bugs/) has the details.
 
-**Batch I/O.** Recovery for `UBLK_F_BATCH_IO` devices had its own fixes in early 2026 ("ublk: fix batch I/O recovery -ENODEV error", "ublk: fix canceling flag handling in batch I/O recovery"). <!-- VERIFY: which release first contains both batch-recovery fixes (expected 7.0, since they predate the 7.0 release) -->
+**Batch I/O.** Recovery for `UBLK_F_BATCH_IO` devices had its own fixes ("ublk: fix batch I/O recovery -ENODEV error", "ublk: fix canceling flag handling in batch I/O recovery"), both in 7.0. Recovering a batch device after `QUIESCE_DEV` also needs "ublk: clear force_abort in ublk_queue_reset_io_flags()" (7.3-rc3, stable 7.2.7); see [known kernel bugs](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix).
 
 **Unprivileged devices** cannot use recovery at all; see [unprivileged devices](/guide/unprivileged/).
 

@@ -32,7 +32,7 @@ Note the shift: `ublksrv_get_flags()` returns `op_flags >> 8`, while the `UBLK_I
 | `UBLK_IO_OP_ZONE_RESET` | 15 | 6.6 | Zoned devices | None |
 | `UBLK_IO_OP_REPORT_ZONES` | 18 | 6.6 | Zoned devices, from the driver itself | Server writes `struct blk_zone` entries; `nr_zones` replaces `nr_sectors` |
 
-`WRITE_SAME` is in the UAPI because it existed in the block layer when ublk was merged; the block layer dropped its write-same operation before then <!-- VERIFY: REQ_OP_WRITE_SAME was removed from the block layer in 5.18, before ublk merged in 6.0 -->, and the driver maps nothing to it. Operations the driver does not translate, such as secure erase, fail in the kernel and never reach the server.
+`WRITE_SAME` is in the UAPI because it existed in the block layer when ublk was merged; the block layer dropped its write-same operation in 5.18, before ublk merged in 6.0, and the driver maps nothing to it. Operations the driver does not translate, such as secure erase, fail in the kernel and never reach the server.
 
 ### READ and WRITE
 
@@ -75,7 +75,7 @@ As with discard, the length is a range and can be gigabytes.
 
 The first seven are translations of block-layer `REQ_*` flags and exist since 6.0. The failfast flags are hints: a server with retry logic (a network backend reconnecting, say) can skip it and fail quickly when they are set.
 
-`UBLK_IO_F_SWAP` deserves a warning. A ublk device can back swap, but if the server needs to allocate memory to complete a swap-out, and memory is short because the system is trying to swap, the system can deadlock on itself. Servers that support swap need preallocated memory and a backend that does not allocate on the I/O path. <!-- VERIFY: whether the kernel docs or driver give guidance on ublk-backed swap; this is general userspace-block-device reasoning -->
+`UBLK_IO_F_SWAP` deserves a warning. The kernel documentation gives no guidance on ublk-backed swap and the driver does nothing special for it beyond setting this flag. As with any userspace block device, if the server must allocate memory to complete a swap-out while the system is short of memory, the system can deadlock on itself. Servers that support swap need preallocated memory and a backend that does not allocate on the I/O path.
 
 ## Reporting results
 
@@ -85,7 +85,7 @@ The commit's `result` field:
 |---|---|---|---|
 | READ, WRITE, ZONE_APPEND | `nr_sectors << 9` | avoid: in 6.17 a short count completes that many bytes and the rest is re-issued; in 7.3-rc5 only a copy-mode read is completed partially, and other short results complete the whole request. A read that returns 0 bytes becomes `-EIO` | negative errno |
 | FLUSH, DISCARD, WRITE_ZEROES, zone management | any value ≥ 0 | not applicable | negative errno |
-| REPORT_ZONES | bytes of zone report written <!-- VERIFY: REPORT_ZONES commit result semantics --> | | negative errno |
+| REPORT_ZONES | bytes of zone report written (`nr_zones × 64`); never 0 on kernels before 7.3, where it re-dispatches the request | | negative errno |
 
 For range operations, do not echo the length back: `nr_sectors << 9` for a 4 GiB discard does not fit in the signed 32-bit result, and a negative result is an error.
 
@@ -99,8 +99,12 @@ The errno reaches the application as a block status. The useful ones:
 | `-ETIMEDOUT` | `BLK_STS_TIMEOUT` | `ETIMEDOUT` |
 | `-ENOLINK` | `BLK_STS_TRANSPORT` | a transport error, which multipath above can retry elsewhere |
 | `-EAGAIN` | `BLK_STS_AGAIN` | for non-blocking submitters, a retryable failure |
+| `-EILSEQ` | `BLK_STS_PROTECTION` | `EILSEQ`, an integrity (protection information) error |
+| `-ENODATA` | `BLK_STS_MEDIUM` | a medium error |
+| `-EREMOTEIO` | `BLK_STS_TARGET` | a critical target error |
+| `-EINVAL` | `BLK_STS_INVAL` | 6.11 and later; `BLK_STS_IOERR` before |
 
-<!-- VERIFY: errno_to_blk_status mapping table for these errnos in current kernels -->
+Every release since 6.0 passes a negative result through `errno_to_blk_status`, and any errno not in its table becomes `BLK_STS_IOERR`.
 
 ## The durability contract
 

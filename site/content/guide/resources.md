@@ -9,12 +9,12 @@ weight: 150
 
 | Project | Language | What it is |
 |---|---|---|
-| [ublksrv](https://github.com/ublk-org/ublksrv) | C | The original userspace side, by the driver's author: `libublksrv` for building servers, and the `ublk` command-line tool (`ublk add -t loop -f disk.img`, `ublk list`, `ublk del`) with built-in targets such as null and loop. <!-- VERIFY: current list of built-in ublksrv targets (null, loop; nbd and qcow2 were historically separate or experimental) --> The kernel documentation still links its old home, `github.com/ming1/ubdsrv`. |
+| [ublksrv](https://github.com/ublk-org/ublksrv) | C | The original userspace side, by the driver's author: `libublksrv` for building servers, and the `ublk` command-line tool (`ublk add -t loop -f disk.img`, `ublk list`, `ublk del`) with targets for null and loop, plus nbd, NFS, iSCSI, NVMe and sheepdog targets in the same tree. The kernel documentation still links its old home, `github.com/ming1/ubdsrv`. |
 | [libublk-rs](https://github.com/ublk-org/libublk-rs) | Rust | A Rust library for ublk servers with sync and async APIs. Its control code is a good second reference for the unprivileged device-path protocol and for which commands may run asynchronously. |
 | [rublk](https://github.com/ublk-org/rublk) | Rust | A command-line ublk server built on libublk-rs. |
 | kublk ([`tools/testing/selftests/ublk/`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/tools/testing/selftests/ublk)) | C | The server the kernel's own selftests drive, with null, loop, stripe and fault-injection targets. It is updated in the same patch series as the driver, so it is the first working example of every new feature: batch I/O, auto buffer registration, shared-memory zero copy, per-I/O daemons, recovery and quiesce. |
-| nbdublk (libnbd) | C | An NBD client that exposes a remote NBD export as a ublk device, built on `libublksrv`; the kernel documentation cites it as an example. <!-- VERIFY: nbdublk still ships with libnbd and builds against current libublksrv --> |
-| SPDK ublk target | C | SPDK can export its block devices to the host as ublk devices. <!-- VERIFY: SPDK ublk module status and the RPC names (ublk_create_target, ublk_start_disk) --> |
+| nbdublk (libnbd) | C | An NBD client that exposes a remote NBD export as a ublk device, built on `libublksrv` (libnbd builds it when libublksrv is installed); the kernel documentation cites it as an example. |
+| SPDK ublk target | C | SPDK can export its block devices to the host as ublk devices, with the `ublk_create_target` and `ublk_start_disk` RPCs ([docs](https://spdk.io/doc/ublk.html)). |
 | [e2b-dev/ublk-go](https://github.com/e2b-dev/ublk-go) | Go | An Apache-2.0 Go library, pure Go per its README, which states Linux 6.0+ and testing on 6.17. Version 0.1.3 was current at the time of writing. |
 | [go-ublk](https://github.com/ehrlich-b/go-ublk) | Go | This project: an MIT-licensed, pure-Go library. See [go-ublk](/go-ublk/). |
 
@@ -34,7 +34,7 @@ ublk is an io_uring client before it is anything else, so a server author needs 
 - [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html) and [io_uring_enter(2)](https://man7.org/linux/man-pages/man2/io_uring_enter.2.html): ring setup flags (`IORING_SETUP_SQE128` is required for control commands), the mmap offsets, and the enter flags including `IORING_ENTER_EXT_ARG` for bounded waits.
 - [liburing](https://github.com/axboe/liburing): the reference library. Even if you do not link it, its source is the clearest statement of the SQ/CQ memory-ordering rules.
 - "Efficient IO with io_uring" by Jens Axboe ([kernel.dk/io_uring.pdf](https://kernel.dk/io_uring.pdf)): the design paper.
-- "Lord of the io_uring" ([unixism.net/loti](https://unixism.net/loti/)): a tutorial built around liburing. <!-- VERIFY: unixism.net/loti is still online -->
+- "Lord of the io_uring" ([unixism.net/loti](https://unixism.net/loti/)): a tutorial built around liburing.
 
 ## Reading the driver
 

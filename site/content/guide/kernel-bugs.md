@@ -31,7 +31,7 @@ Once a kernel passes your tests, hold it (`apt-mark hold` on Ubuntu). A newer ke
 |---|---|---|
 | Ubuntu `linux-hwe-6.17` (generic) | confirmed by crash: 6.17.0-35, -40; by changelog: -38. The backport first appears in the 6.17.0-24 changelog, so -24 to -29 are suspect. | 6.17.0-41; 6.17.0-42 has been in noble-updates and security since 2026-08-05 |
 | Ubuntu `linux-aws-6.17` | 6.17.0-1019 | 6.17.0-1020 |
-| Ubuntu `linux-azure` 6.17 | 6.17.0-1015 ([Launchpad bug 2154635](https://bugs.launchpad.net/bugs/2154635)) | <!-- VERIFY: first fixed linux-azure 6.17 build --> later builds |
+| Ubuntu `linux-azure-6.17` | 6.17.0-1015 through -1020 (the backport first appears in the -1014 changelog; [Launchpad bug 2154635](https://bugs.launchpad.net/bugs/2154635)) | 6.17.0-1021 (noble-updates since 2026-07-23); -1022 current |
 | kernel.org stable 6.18 | 6.18.4, 6.18.5 | 6.18.6 |
 | Ubuntu 6.18 (`linux` 6.18.0-9.9, at last check) | lists the NUMA commit without the reorder | check the changelog of any 6.18 build before trusting it |
 
@@ -69,7 +69,7 @@ RIP: io_req_uring_cleanup+0x18
  <- io_uring_cmd_work <- task_work_run <- get_signal
 ```
 
-That is a ublk command being completed twice. The working hypothesis: a *handled* signal makes the server thread run pending io_uring task work from `get_signal` while it is still alive, and the driver's teardown guard in `ublk_dispatch_req` only checks for an exiting task, so it completes a command that cancellation has also completed. The io_uring core commit `3539b1467e94` (include the dying ring in task_work cancel state) is related defense in depth. <!-- VERIFY: which release first contains 3539b1467e94 and whether the 845db023a8ae/f7700a4415af pair fully closes the io_req_uring_cleanup double completion -->
+That is a ublk command being completed twice. The working hypothesis: a *handled* signal makes the server thread run pending io_uring task work from `get_signal` while it is still alive, and the driver's teardown guard in `ublk_dispatch_req` only checks for an exiting task, so it completes a command that cancellation has also completed. The io_uring core commit `3539b1467e94` (include the dying ring in task_work cancel state, 6.17-rc7) is related defense in depth, but mainline 6.17 already contains it, so the kernel that oopsed had it. Whether `845db023a8ae` and `f7700a4415af` (7.1) close this double completion has not been verified.
 
 **How likely it is: unknown.** It happened once, during a systemd shutdown storm. It has not reproduced since: 150 teardown-under-load cycles plus a 24-combination integrity sweep on arm64 6.17.0-41, and 150 cycles on x86_64 6.17.0-1020-aws, a build that has none of the three fixes, were all clean. An earlier note claiming it reproduced "within 120 cycles" on arm64 was a test-harness bug: the harness parsed the "1" out of `USR1` and sent SIGINT to PID 1, rebooting the VM each time. Masking signals on the I/O threads does not prevent it in a Go server, because the Go runtime keeps unblocking the signals it manages.
 
@@ -101,9 +101,9 @@ These come from the Ubuntu and stable changelogs. Each is a reason to stay curre
 | Fix | What it changes | Where it landed |
 |---|---|---|
 | `1860c2f85922` ublk: reject max_sectors smaller than PAGE_SECTORS in parameter validation | A `max_sectors` below one page used to pass `SET_PARAMS` and trip a `WARN_ON_ONCE` at `START_DEV`; now `SET_PARAMS` fails with `-EINVAL` | stable 7.0.11; `linux-hwe-7.0` 7.0.0-28 |
-| ublk: wait on ublk_dev_ready() instead of ub->completion (CVE-2026-68173) | How `START_DEV` and recovery wait for the queues to become ready <!-- VERIFY: user-visible effect of this fix --> | `linux-hwe-7.0` 7.0.0-38 |
+| ublk: wait on ublk_dev_ready() instead of ub->completion (CVE-2026-68173) | After a server crash, `END_USER_RECOVERY` could mark the device live before every queue had fetched again (when the preceding `START_USER_RECOVERY` had failed), stranding a requeued request (for example ext4's flush) so `fsync` and teardown hung. Recovery and `START_DEV` now wait for real queue readiness | `linux-hwe-7.0` 7.0.0-38 |
 | ublk: reset kernel-owned dev_info fields in ublk_ctrl_add_dev() (CVE-2026-74472) | `ADD_DEV` no longer keeps kernel-owned fields of the caller's `ublksrv_ctrl_dev_info` | `linux-hwe-7.0` 7.0.0-39 (proposed) |
-| ublk: clear VM_MAYWRITE on read-only ublk char device mmap (CVE-2026-89793) | The read-only descriptor mapping can no longer be made writable later <!-- VERIFY: the exact exposure fixed --> | `linux-hwe-7.0` 7.0.0-39 (proposed) |
+| ublk: clear VM_MAYWRITE on read-only ublk char device mmap (CVE-2026-89793) | The descriptor array is mapped read-only, but `mprotect()` could make it writable, letting a server (an unprivileged one in particular) corrupt the kernel-written descriptors (`op_flags`, `nr_sectors`, `start_sector`, `addr`); `mprotect` now fails with `EACCES` | `linux-hwe-7.0` 7.0.0-39 (proposed) |
 | ublk: fix use-after-free in ublk_partition_scan_work | Use-after-free in the asynchronous partition scan that Ubuntu backported into 6.17.0-24 | `linux-hwe-6.17` 6.17.0-41 |
 | ublk: fix ublksrv pid handling for pid namespaces | Servers running in a PID namespace | `linux-hwe-6.17` 6.17.0-41 |
 | ublk: fix deadlock when reading partition table (CVE-2025-68823) | Deadlock during the partition scan at `START_DEV` | `linux-hwe-6.17` 6.17.0-22 |
