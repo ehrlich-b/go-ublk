@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -636,35 +635,6 @@ func (r *Runner) handleIORequest(tag uint16, desc uapi.UblksrvIODesc) error {
 
 	// Submit COMMIT_AND_FETCH_REQ with result
 	return r.submitCommitAndFetch(tag, err, desc)
-}
-
-func readResultError(n, length int, err error) error {
-	if n < 0 || n > length {
-		return fmt.Errorf("backend ReadAt returned invalid count %d for %d-byte buffer", n, length)
-	}
-	if n == length && err == io.EOF {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if n != length {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-
-func writeResultError(n, length int, err error) error {
-	if n < 0 || n > length {
-		return fmt.Errorf("backend WriteAt returned invalid count %d for %d-byte buffer", n, length)
-	}
-	if err != nil {
-		return err
-	}
-	if n != length {
-		return io.ErrShortWrite
-	}
-	return nil
 }
 
 // submitCommitAndFetch prepares COMMIT_AND_FETCH_REQ with proper state tracking.

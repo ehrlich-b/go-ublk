@@ -25,6 +25,14 @@ type WriteZeroesBackend interface {
 	WriteZeroes(offset, length int64) error
 }
 
+// FUABackend is an optional interface for backends that can make a single
+// write durable before returning (Force Unit Access) without flushing
+// everything else. Its presence lets a device advertise FUA.
+type FUABackend interface {
+	Backend
+	WriteAtFUA(p []byte, off int64) (n int, err error)
+}
+
 // Logger interface for optional logging.
 type Logger interface {
 	Printf(format string, args ...interface{})
