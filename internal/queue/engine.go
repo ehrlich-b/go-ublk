@@ -367,7 +367,11 @@ func (e *engine) handleFetch(res int32, flags uint32) {
 				tag := int(buf[k]) | int(buf[k+1])<<8
 				i := tag - e.cfg.tagLo
 				if i < 0 || i >= len(e.tags) || e.tags[i] != tagFetching {
-					e.fail(fmt.Errorf("queue %d: batch fetch delivered tag %d in state %v", e.cfg.queueID, tag, i))
+					st := -1
+					if i >= 0 && i < len(e.tags) {
+						st = int(e.tags[i])
+					}
+					e.fail(fmt.Errorf("queue %d: batch fetch delivered tag %d in state %d", e.cfg.queueID, tag, st))
 					continue
 				}
 				if e.stopping.Load() {
@@ -433,6 +437,13 @@ func (e *engine) flushBatchCommits() {
 	}
 	e.pendingCommit = e.pendingCommit[n:]
 	e.commitSent[slot] = sent
+	// The tags go back to the kernel as soon as it consumes the commit, and
+	// it may hand one a new request — announced by the fetch — before this
+	// command's own completion arrives. Treat them as returned now; committed
+	// takes back any the kernel did not consume.
+	for _, r := range sent {
+		e.tags[int(r.Tag)-e.cfg.tagLo] = tagFetching
+	}
 }
 
 // committed handles a COMMIT_IO_CMDS completion: res is the bytes of the
@@ -446,10 +457,10 @@ func (e *engine) committed(slot int, res int32) {
 	if res > 0 {
 		done = int(res / eb)
 	}
-	for _, r := range sent[:done] {
-		e.tags[int(r.Tag)-e.cfg.tagLo] = tagFetching
-	}
 	if done < len(sent) {
+		for _, r := range sent[done:] {
+			e.tags[int(r.Tag)-e.cfg.tagLo] = tagHandling // not consumed: still ours
+		}
 		if res < 0 && done == 0 && res != -int32(syscall.EBUSY) {
 			e.fail(fmt.Errorf("queue %d: COMMIT_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
 		}

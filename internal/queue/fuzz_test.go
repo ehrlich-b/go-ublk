@@ -22,6 +22,8 @@ func FuzzEngine(f *testing.F) {
 	f.Add([]byte{0, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})
 	f.Add([]byte{1, 2, 0, 0, 0, 0, 0, 0, 255, 255})
 	f.Add([]byte{3, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9, 9, 9, 9, 9})
+	f.Add([]byte{8, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+	f.Add([]byte{25, 8, 31, 17, 3, 200, 5, 9, 11, 13})
 	f.Fuzz(func(t *testing.T, script []byte) {
 		if len(script) < 2 {
 			return
@@ -33,8 +35,12 @@ func FuzzEngine(f *testing.F) {
 		}
 		inline := mode&1 != 0
 		stopKind := (mode >> 1) & 1 // 0: abort like STOP_DEV, 1: abandon
+		batch := mode&8 != 0
 		k := newFakeKernel(t, depth, testBufSize)
-		k.needGetData = mode&4 != 0
+		k.needGetData = mode&4 != 0 && !batch // the kernel clears NEED_GET_DATA under BATCH_IO
+		if batch && mode&16 != 0 {
+			k.commitLimit = 1 + int(mode>>5)%3 // force partial commits
+		}
 
 		h := HandlerFunc(func(r *Request) {
 			b := byte(r.Offset >> 9) // the script byte that created it
@@ -63,7 +69,7 @@ func FuzzEngine(f *testing.F) {
 			tagLo: 0, tagHi: depth, charFd: -1,
 			desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 			bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-			handler: h, inline: inline, cpu: -1, waitInterval: 5 * time.Millisecond,
+			handler: h, inline: inline, batch: batch, cpu: -1, waitInterval: 5 * time.Millisecond,
 			newRing: func(uint32) (ring, error) { return k, nil },
 		})
 		if err := e.start(); err != nil {

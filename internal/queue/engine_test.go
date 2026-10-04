@@ -497,3 +497,64 @@ func TestEngineZeroCopyShortReadFails(t *testing.T) {
 		t.Fatalf("short zero-copy read committed %d, want -EIO", c[0].result)
 	}
 }
+
+func startBatchEngine(t *testing.T, k *fakeKernel, h Handler, inline bool) *engine {
+	t.Helper()
+	e := newEngine(engineConfig{
+		tagLo: 0, tagHi: k.depth, charFd: k.ufile,
+		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
+		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
+		userCopy: k.ufile >= 0, batch: true,
+		handler: h, inline: inline, cpu: -1, waitInterval: 20 * time.Millisecond,
+		newRing: func(uint32) (ring, error) { return k, nil },
+	})
+	if err := e.start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { e.abandon(); <-e.done })
+	return e
+}
+
+func testBatch(t *testing.T, inline, userCopy bool, commitLimit int) {
+	k := newFakeKernel(t, 8, testBufSize)
+	k.commitLimit = commitLimit
+	if userCopy {
+		f, err := os.CreateTemp(t.TempDir(), "ublkc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+		k.ufile = int(f.Fd())
+	}
+	b := &memBackend{data: make([]byte, 1<<20)}
+	e := startBatchEngine(t, k, BackendHandler(b, nil), inline)
+	n := 0
+	for round := 0; round < 3; round++ {
+		for tag := 0; tag < 8; tag++ {
+			w := pattern(4096, byte(tag+round))
+			off := uint64(tag*16+round*2) * 8
+			k.inject(tag, fkReq{op: uapi.UBLK_IO_OP_WRITE, sector: off, nr: 8, data: w, id: n})
+			k.inject(tag, fkReq{op: uapi.UBLK_IO_OP_READ, sector: off, nr: 8, id: n + 1})
+			n += 2
+		}
+	}
+	c := k.waitCommits(n, 10*time.Second)
+	for _, x := range c {
+		if x.result != 4096 {
+			t.Fatalf("request %d result %d, want 4096", x.id, x.result)
+		}
+		if x.id%2 == 1 && len(x.data) != 4096 {
+			t.Fatalf("read %d returned %d bytes", x.id, len(x.data))
+		}
+	}
+	k.stop()
+	waitDone(t, e)
+	if e.err != nil {
+		t.Fatalf("batch engine stopped with %v", e.err)
+	}
+}
+
+func TestEngineBatchCopy(t *testing.T)           { testBatch(t, false, false, 0) }
+func TestEngineBatchCopyInline(t *testing.T)     { testBatch(t, true, false, 0) }
+func TestEngineBatchUserCopy(t *testing.T)       { testBatch(t, false, true, 0) }
+func TestEngineBatchPartialCommits(t *testing.T) { testBatch(t, false, false, 1) }
