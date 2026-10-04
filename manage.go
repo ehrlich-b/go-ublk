@@ -1,6 +1,7 @@
 package ublk
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
@@ -24,7 +25,7 @@ func ListDevices() ([]uint32, error) {
 		return nil, fmt.Errorf("open control device: %w", err)
 	}
 	defer c.Close()
-	return scanDevices(c.GetDeviceInfo)
+	return scanDevices(func(id uint32) (*uapi.UblksrvCtrlDevInfo, error) { return c.GetDevInfo(context.Background(), id) })
 }
 
 func scanDevices(getInfo func(uint32) (*uapi.UblksrvCtrlDevInfo, error)) ([]uint32, error) {
@@ -59,11 +60,11 @@ func DeleteDevice(id uint32) error {
 	}
 	defer c.Close()
 
-	if _, err := c.GetDeviceInfo(id); err != nil {
+	if _, err := c.GetDevInfo(context.Background(), id); err != nil {
 		return fmt.Errorf("device %d: %w", id, err)
 	}
-	_ = c.StopDevice(id)
-	if err := c.DeleteDevice(id); err != nil {
+	_ = c.StopDev(context.Background(), id)
+	if err := c.DelDev(context.Background(), id); err != nil {
 		return fmt.Errorf("device %d: %w", id, err)
 	}
 	return nil
