@@ -211,6 +211,7 @@ def cmd_parse(a):
         "detail": {
             "go_ublk_commit": commit,
             "extra_append": a.append,
+            "cmdline": getattr(a, "cmdline", ""),
             "wall_s": a.wall,
             "timeout_s": a.timeout,
             "qemu_rc": a.rc,
@@ -251,7 +252,8 @@ def cmd_reparse(a):
                 accel=old.get("accel", "tcg"), timeout=det.get("timeout_s") or 0,
                 kinfo=os.path.join(kdir, "kinfo.json"), fetch=fetch, commit_file="",
                 commit=det.get("go_ublk_commit", ""), date=old.get("date", ""), boot=old.get("boot", "initramfs"),
-                append=det.get("extra_append", ""), oops_in_dmesg_only=old.get("accel") == "native",
+                append=det.get("extra_append", ""), cmdline=det.get("cmdline", ""),
+                oops_in_dmesg_only=old.get("accel") == "native",
                 hung_poweroff=any(x["test"] == "poweroff" for x in old.get("results", [])))
             cmd_parse(ns)
             print(f"reparsed {old['id']}")
@@ -372,6 +374,7 @@ def main():
     p.add_argument("--accel", default="tcg")
     p.add_argument("--boot", default="initramfs")
     p.add_argument("--append", default="", help="extra kernel command line this run used")
+    p.add_argument("--cmdline", default="", help="the whole kernel command line, for the record")
     p.add_argument("--hung-poweroff", action="store_true", help="the host killed a finished guest stuck in power-off")
     p.add_argument("--oops-in-dmesg-only", action="store_true",
                    help="scan only the dmesg block (native runs, where the console is not the kernel log)")

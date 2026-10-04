@@ -9,6 +9,7 @@
 #
 # Knobs (environment):
 #   ACCEL=tcg|kvm   QEMU=qemu-system-x86_64   MEM=2048 (MiB)   SMP=2
+#   POSSIBLE_CPUS=8 (possible_cpus= on the command line when above SMP)
 #   TIMEOUT=seconds (default 3000 under tcg, 1200 under kvm)
 #   SCALE=ublk-suite -scale (default 0.25 under tcg, 1 under kvm)
 #   PROFILE=full|quick   TESTS="probe unit largeio verify loop suite" (default: all)
@@ -51,7 +52,12 @@ rm -f "$out/console.log" "$out/results.log" "$out/run.json"
 initrd=$out/initrd.cpio
 cat "$BUILD/userland.cpio" "$BUILD/payload.cpio" "$k/modules.cpio" >"$initrd"
 
+# More possible CPUs than online ones, as on most real machines and VMs: the
+# Ubuntu 6.17.0-40 ADD_DEV NULL dereference (for_each_possible_cpu over an
+# unallocated map) only fires with more than 2 possible CPUs. Costs nothing.
+POSSIBLE_CPUS=${POSSIBLE_CPUS:-8}
 append="console=ttyS0,115200 panic=-1 random.trust_cpu=on rdinit=/init $append_accel"
+[ "$POSSIBLE_CPUS" -gt "$SMP" ] && append="$append possible_cpus=$POSSIBLE_CPUS"
 append="$append goublk.profile=$PROFILE goublk.scale=$SCALE"
 [ -n "$TESTS" ] && append="$append goublk.tests=$(echo $TESTS | tr ' ' ',')"
 # ublk-suite -run/-skip regexps; no spaces (they ride on the kernel command line).
@@ -92,5 +98,6 @@ rm -f "$initrd"
 python3 "$MATRIX_DIR/report.py" parse "$out" --id "$rid" --rc "$rc" --wall "$wall" \
 	--accel "$ACCEL" --timeout "$TIMEOUT" --kinfo "$k/kinfo.json" \
 	--fetch "$k/fetch.json" --commit-file "$BUILD/payload/COMMIT" --append "${EXTRA_APPEND:-}" \
+	--cmdline "$append" \
 	${hung_poweroff:+--hung-poweroff}
 log "$rid: $(json_get "$out/run.json" status) after ${wall}s (qemu rc=$rc)"

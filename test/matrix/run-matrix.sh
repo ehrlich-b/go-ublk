@@ -36,7 +36,7 @@ if [ "${RESUME:-}" = 1 ]; then
 	[ ${#ids[@]} -gt 0 ] || log "run $RUN_ID: nothing left to run"
 fi
 log "run $RUN_ID: ${#ids[@]} kernels, $JOBS at a time -> $rundir"
-export ACCEL QEMU MEM SMP TIMEOUT SCALE PROFILE TESTS SUITE_RUN SUITE_SKIP EXTRA_APPEND ID_SUFFIX MATRIX_HOME 2>/dev/null
+export ACCEL QEMU MEM SMP POSSIBLE_CPUS TIMEOUT SCALE PROFILE TESTS SUITE_RUN SUITE_SKIP EXTRA_APPEND ID_SUFFIX MATRIX_HOME 2>/dev/null
 [ ${#ids[@]} -eq 0 ] || printf '%s\n' "${ids[@]}" | xargs -P "$JOBS" -I{} bash "$MATRIX_DIR/run-one.sh" {} "$rundir"
 
 python3 "$MATRIX_DIR/fetch.py" manifest

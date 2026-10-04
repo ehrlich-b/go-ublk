@@ -114,7 +114,9 @@ docker run -d --name goublk-matrix-run -v $M:$M -e MATRIX_HOME=$M -e JOBS=5 \
 
 Knobs (environment or make variables): `ACCEL=tcg|kvm`, `QEMU=` (binary or
 wrapper), `JOBS` (concurrent guests, default 4), `MEM` (MiB per guest,
-default 2048), `SMP` (default 2), `TIMEOUT` (seconds per guest, default 3000
+default 2048), `SMP` (default 2), `POSSIBLE_CPUS` (default 8, passed as
+`possible_cpus=`: some kernel bugs, such as the Ubuntu 6.17.0-40 ADD_DEV
+oops, only fire with more possible CPUs than 2), `TIMEOUT` (seconds per guest, default 3000
 under TCG and 1200 under KVM), `SCALE` (ublk-suite `-scale`, default 0.25
 under TCG and 1 under KVM), `PROFILE=quick` (shorter integrity sweep),
 `TESTS`, `SUITE_RUN` / `SUITE_SKIP` (ublk-suite `-run` / `-skip` regexps, no
