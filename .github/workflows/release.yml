@@ -1,0 +1,49 @@
+name: Release
+
+# Pushing a vX.Y.Z tag runs the CI checks on the tagged commit and publishes
+# a GitHub release whose body is that version's section of the changelog
+# (site/content/go-ublk/releases.md). The real-kernel gates run before the tag
+# is cut; see "How releases are made" on that page.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run unit tests
+        run: make test-unit
+
+      - name: Run unit tests with race detector
+        run: make test-race
+
+      - name: Fuzz
+        run: make test-uapi-fuzz FUZZ_TIME=30s FUZZ_PARALLEL=2
+
+      - name: Extract release notes
+        run: |
+          scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md
+          test -s notes.md || { echo "no changelog section for $GITHUB_REF_NAME"; exit 1; }
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

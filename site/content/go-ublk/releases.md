@@ -18,7 +18,7 @@ Every tag passes the same gates, and the evidence ships with it:
 1. **`make release-check`** — formatting, `go vet`, unit tests, the race detector, and a longer fuzzing pass over the UAPI decoders and the queue engine.
 2. **The kernel matrix** — `ublk-suite` booted under every kernel in [`test/matrix`](https://github.com/ehrlich-b/go-ublk/tree/main/test/matrix): mainline 6.0–7.3-rc and the current kernels of the major distributions. A release requires every test to pass on every kernel that has ublk, except failures traced to a documented kernel bug. The results for the tagged commit are committed as `site/data/matrix.json` and published on the [compatibility matrix](/reference/matrix/).
 3. **Recovery under systemd** — the shipped units, a mounted filesystem, a verifying writer, a crash and an upgrade handoff, zero I/O errors.
-4. The tag is cut, and the GitHub release body is this page's section for it (`scripts/release-notes.sh vX.Y.Z`).
+4. The tag is cut. Pushing it runs the CI checks again on the tagged commit and publishes the GitHub release, whose body is this page's section for that version (`scripts/release-notes.sh vX.Y.Z`); a tag without a changelog section fails.
 
 Bug fixes that affect data integrity or teardown are listed first in a release's notes.
 
