@@ -176,7 +176,7 @@ The `state` field of `ublksrv_ctrl_dev_info` takes four values:
 
 {{< diagram "device-states" "`DEL_DEV` is accepted from any state. Without a recovery flag, a server exit stops the device; with one, the device waits for a new server." >}}
 
-A device can be started again after a stop: once the old disk has been released, a server that reopens `/dev/ublkcN` and fetches every tag can send `START_DEV` again. This path is rarely used; most servers delete and re-add. <!-- VERIFY: restart after STOP_DEV without DEL_DEV; 6.17 clears UB_STATE_USED when the gendisk is freed, so START_DEV should succeed once the disk's last opener is gone and the char device was reopened -->
+The driver's state machine looks as if it allows starting a device again after a stop: once the old disk is released, a server could reopen `/dev/ublkcN`, fetch every tag and send `START_DEV`. Don't. Tested across kernels, it fails with `-EBUSY`, wedges the control plane (6.10 to 6.12), or oopses (Arch 7.2.8); see [known kernel bugs](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix). Delete the device and add a new one.
 
 ## Putting it together
 

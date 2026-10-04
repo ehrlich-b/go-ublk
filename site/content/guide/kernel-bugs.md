@@ -75,6 +75,23 @@ That is a ublk command being completed twice. The working hypothesis: a *handled
 
 If you can, run 7.1.y. If you cannot, the risk sits in graceful teardown under load, so stop devices when they are quiet where you can.
 
+## Found by go-ublk's kernel matrix
+
+Running one conformance suite under dozens of kernels turned up these. They affect any ublk server, not only go-ublk.
+
+**Write-zeroes of 4 GiB or more is silently truncated before 6.11.** If a device advertises `max_write_zeroes_sectors` above `UINT32_MAX >> 9`, a zeroout that fits the limit is built as one bio whose 32-bit `bi_size` holds `nr_sects << 9`. `blkdiscard -z -l 5G` then succeeds, the server receives a 1 GiB write-zeroes, and the last 4 GiB keep their old contents. Seen on mainline 6.4, 6.6, 6.9 and 6.10, Ubuntu's 6.8 (the default 24.04 kernel) and openSUSE Leap 15.6; correct on 6.11.11 and later. A server should cap both `max_write_zeroes_sectors` and `max_discard_sectors` at `UINT32_MAX >> 9`, rounded down to the logical block size, on every kernel. go-ublk does so since v0.2.0.
+
+**`START_DEV` after `STOP_DEV` is not safe.** The control protocol appears to allow starting a stopped device again (see [the control plane](/guide/control-plane/)), but in practice it fails with `EBUSY` (Fedora 6.19 and 7.2.8, mainline 7.0.14), wedges the control plane (6.10 to 6.12), or oopses. On Arch's 7.2.8-arch1-2 the result was a NULL dereference in `ublk_queue_rq` called from `ublk_partition_scan_work`, a partition-scan read reaching a queue whose per-I/O state is gone. Delete a stopped device and add a new one.
+
+**UBSAN `array-index-out-of-bounds` in `io_buffer_register_bvec`.** Zero copy, through `UBLK_U_IO_REGISTER_IO_BUF` or automatic buffer registration, logs this on Fedora 42 (6.19.14) and Fedora 43 and 44 (7.2.8):
+
+```text
+UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12
+index 0 is out of range for type 'bio_vec [*]'
+```
+
+It is a false positive in io_uring, still present in 7.3-rc5. `struct io_mapped_ubuf` declares `bvec[] __counted_by(nr_bvecs)`, `io_alloc_imu` does not initialize `nr_bvecs`, and `io_buffer_register_bvec` fills `bvec[]` before it sets the count. With a compiler that understands `__counted_by` and `CONFIG_UBSAN_BOUNDS`, as on Fedora, every registration of a request that carries data is flagged. The array is allocated for `blk_rq_nr_phys_segments(rq)` entries, so nothing is written out of bounds. The only practical risk is a machine booted with `panic_on_warn`, where UBSAN reports panic. There, avoid zero copy until the kernel sets `nr_bvecs` before the loop.
+
 ## Smaller fixes worth having
 
 These come from the Ubuntu and stable changelogs. Each is a reason to stay current within a kernel line.
@@ -97,6 +114,7 @@ The `dev_info` fix is a reminder for servers too: zero `struct ublksrv_ctrl_dev_
 `ublk_drv` is a module (`CONFIG_BLK_DEV_UBLK=m` on the distributions tested), and it is not always installed.
 
 - **Ubuntu on AWS.** It ships in `linux-modules-extra-*-aws`, not in the base AWS kernel image. Without that package there is no `/dev/ublk-control`: install `linux-modules-extra-$(uname -r)`.
+- **RHEL 10 family** (RHEL, CentOS Stream, AlmaLinux and Rocky 10). `ublk_drv` is there, but io_uring is disabled by default through the `kernel.io_uring_disabled` sysctl, so every ublk operation fails with a permission error. With `sysctl kernel.io_uring_disabled=0` go-ublk's whole suite passes on their 6.12 kernels. The RHEL 9 family (5.14) has no `ublk_drv` at all.
 - **WSL2.** Microsoft's WSL2 kernel (6.6.87.2-microsoft-standard-WSL2 at the time of writing) is built without `ublk_drv`. Test in a VM.
 - **Not loaded.** The module is not auto-loaded on first open of `/dev/ublk-control`: the control node is a misc device with a dynamic minor and the driver declares no device-name alias (checked in 6.17 and 7.3-rc5), so `/dev/ublk-control` only exists once the module is loaded. Run `modprobe ublk_drv`, or list it in `/etc/modules-load.d/`.
 
