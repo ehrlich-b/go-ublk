@@ -140,10 +140,9 @@ func newSlot() (*slot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", UblkControlPath, err)
 	}
-	// Once internal/uring has Config.CtrlTimeout and SubmitCtrlCmdContext
-	// (ctxRing), set CtrlTimeout: -1 here so the caller's context, not a fixed
-	// 10s cap, bounds STOP_DEV and DEL_DEV; the context then cancels.
-	ring, err := uring.NewRing(uring.Config{Entries: 4, FD: int32(fd)})
+	// No fixed cap: the caller's context bounds STOP_DEV and DEL_DEV, and
+	// SubmitCtrlCmdContext cancels the command when it ends.
+	ring, err := uring.NewRing(uring.Config{Entries: 4, FD: int32(fd), CtrlTimeout: -1})
 	if err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to create io_uring: %w", err)
