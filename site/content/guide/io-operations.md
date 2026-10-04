@@ -83,7 +83,7 @@ The commit's `result` field:
 
 | Operation | Success | Partial | Failure |
 |---|---|---|---|
-| READ, WRITE, ZONE_APPEND | bytes transferred, normally `nr_sectors << 9` | a smaller positive count completes that many bytes; the block layer re-issues the rest. A read that returns 0 bytes is converted to `-EIO` | negative errno |
+| READ, WRITE, ZONE_APPEND | `nr_sectors << 9` | avoid: in 6.17 a short count completes that many bytes and the rest is re-issued; in 7.3-rc5 only a copy-mode read is completed partially, and other short results complete the whole request. A read that returns 0 bytes becomes `-EIO` | negative errno |
 | FLUSH, DISCARD, WRITE_ZEROES, zone management | any value ≥ 0 | not applicable | negative errno |
 | REPORT_ZONES | bytes of zone report written <!-- VERIFY: REPORT_ZONES commit result semantics --> | | negative errno |
 

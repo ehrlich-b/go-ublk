@@ -80,7 +80,7 @@ Creates a device and its char device `/dev/ublkcN`. `addr` points at a 64-byte `
 | 0 | `__u16 nr_hw_queues` | requested queues | clamped to the number of CPU IDs |
 | 2 | `__u16 queue_depth` | 1 to 4096 | unchanged |
 | 4 | `__u16 state` | ignored | `UBLK_S_DEV_DEAD` |
-| 6 | `__u16 io_desc_size` | 7.3+, with `UBLK_F_IO_DESC_SIZE` | descriptor size in use <!-- VERIFY: io_desc_size semantics on 7.3; this field was pad0 before 7.3-rc1 --> |
+| 6 | `__u16 io_desc_size` | with `UBLK_F_IO_DESC_SIZE` (7.3): the descriptor size the server wants, 24 to 256 and a multiple of 8 | the descriptor size in use; 24 without the flag. Before 7.3 this field was padding |
 | 8 | `__u32 max_io_buf_bytes` | largest request the server will handle | rounded down to a page |
 | 12 | `__u32 dev_id` | must equal the header's `dev_id` | the assigned ID |
 | 16 | `__s32 ublksrv_pid` | | |
@@ -88,11 +88,11 @@ Creates a device and its char device `/dev/ublkcN`. `addr` points at a 64-byte `
 | 32 | `__u64 ublksrv_flags` | server's own use; the kernel stores and returns it | |
 | 40 | `__u32 owner_uid`, `owner_gid` | ignored | the creating user's IDs |
 
-Read every field back. The kernel can give you fewer queues than you asked for (one per CPU at most), a smaller buffer size, and a different feature set: it clears flags it does not know, clears `UBLK_F_NEED_GET_DATA` when a user-copy or zero-copy mode is set, and forces on flags that describe its own behavior (in 6.17: `UBLK_F_CMD_IOCTL_ENCODE`, `UBLK_F_URING_CMD_COMP_IN_TASK`, `UBLK_F_PER_IO_DAEMON` and `UBLK_F_BUF_REG_OFF_DAEMON`). The flags it returns are the contract for the device's lifetime. A server that sizes its queue threads or buffers from what it requested instead of what came back will map descriptor arrays that do not exist or overrun buffers.
+Read every field back. The kernel can give you fewer queues than you asked for (one per CPU at most), a smaller buffer size, and a different feature set: it clears flags it does not know, clears `UBLK_F_NEED_GET_DATA` when a user-copy or zero-copy mode is set, and forces on flags that describe its own behavior (in 6.17: `UBLK_F_CMD_IOCTL_ENCODE`, `UBLK_F_URING_CMD_COMP_IN_TASK`, `UBLK_F_PER_IO_DAEMON` and `UBLK_F_BUF_REG_OFF_DAEMON`; 7.3-rc5 adds `UBLK_F_SAFE_STOP_DEV` and withholds `UBLK_F_PER_IO_DAEMON` from batch-I/O devices). [Feature flags](/guide/features/) lists the negotiation rules in order. The flags it returns are the contract for the device's lifetime. A server that sizes its queue threads or buffers from what it requested instead of what came back will map descriptor arrays that do not exist or overrun buffers.
 
 `ADD_DEV` fails with:
 
-- `EINVAL` for a depth or queue count of 0 or above 4096, a header `queue_id` other than -1, a header `dev_id` that differs from `info.dev_id`, an ID above the maximum, an invalid combination of [recovery flags](/guide/recovery/), `UBLK_F_QUIESCE` without `UBLK_F_USER_RECOVERY`, `UBLK_F_ZONED` without a user-copy or zero-copy mode, or (for unprivileged devices) a copy mode that unprivileged servers may not use.
+- `EINVAL` for a depth or queue count of 0 or above 4096, a header `queue_id` other than -1, a header `dev_id` that differs from `info.dev_id`, an ID above the maximum, an invalid combination of [recovery flags](/guide/recovery/), `UBLK_F_QUIESCE` without `UBLK_F_USER_RECOVERY`, `UBLK_F_ZONED` without a user-copy or zero-copy mode, `UBLK_F_INTEGRITY` without `UBLK_F_USER_COPY`, an out-of-range `io_desc_size` with `UBLK_F_IO_DESC_SIZE`, or (for unprivileged devices) a copy mode that unprivileged servers may not use.
 - `EPERM` without `CAP_SYS_ADMIN`, unless `UBLK_F_UNPRIVILEGED_DEV` is set. With the capability, that flag is silently cleared and the device is an ordinary privileged one.
 - `EEXIST` if the requested ID is taken (an auto-assigned ID is the lowest free one), `EACCES` when the unprivileged-device limit is reached, `ENOMEM`.
 
@@ -108,7 +108,7 @@ The kernel copies at most its own `sizeof(struct ublk_params)` and masks `types`
 
 Exposes `/dev/ublkbN`. `data[0]` must be the PID (thread-group ID) of the process that opened `/dev/ublkcN`; anything else, or a missing basic parameter block, is `EINVAL`.
 
-The order matters. `START_DEV` first waits, interruptibly, until **every tag of every queue has a `FETCH_REQ` outstanding**, then allocates the disk with the limits from `SET_PARAMS`, applies the attributes, and calls `add_disk`, which triggers a partition scan (reads of the first sectors) and udev events. So the queue threads must be submitting their fetches before or while `START_DEV` is pending, and they must already be able to serve reads by the time it returns, because the partition scan arrives first. A device already live returns `EEXIST`.
+The order matters. `START_DEV` first waits, interruptibly, until **every tag of every queue has a `FETCH_REQ` outstanding**, then allocates the disk with the limits from `SET_PARAMS`, applies the attributes, and calls `add_disk`, which emits udev events and triggers a partition scan (reads of the first sectors). So the queue threads must be submitting their fetches before or while `START_DEV` is pending, and must be serving reads from that moment. On older kernels the partition scan runs inside `add_disk`, so the server receives reads while `START_DEV` is still in flight; 7.3-rc5 defers it to a work item that runs after the command returns. <!-- VERIFY: first release with the asynchronous partition scan (present in 7.3-rc5, absent in 6.17) --> A device already live returns `EEXIST`.
 
 Partition scanning is suppressed for devices whose queues are served by unprivileged tasks, and from Linux 7.0 can be turned off with `UBLK_F_NO_AUTO_PART_SCAN`.
 
@@ -127,7 +127,7 @@ DEL_DEV
 
 ### TRY_STOP_DEV
 
-{{< since "7.0" >}} Stops the device only if nothing has `/dev/ublkbN` open, and fails with `EBUSY` otherwise. Requires `UBLK_F_SAFE_STOP_DEV`. Useful for "detach if idle" without yanking a disk out from under a mounted filesystem. <!-- VERIFY: TRY_STOP_DEV semantics and error code against the 7.0 driver; the header only says "stop the device only if there are no openers" -->
+{{< since "7.0" >}} Stops the device only if nothing has `/dev/ublkbN` open. It fails with `EBUSY` while the disk has openers and `ENODEV` if the device has no disk; otherwise it blocks new opens and performs a normal `STOP_DEV`. Belongs to `UBLK_F_SAFE_STOP_DEV`, which 7.3-rc5 reports on every device. Useful for "detach if idle" without pulling a disk out from under a mounted filesystem.
 
 ### DEL_DEV and DEL_DEV_ASYNC
 
@@ -153,7 +153,7 @@ Returns the set of CPUs that blk-mq maps to queue `data[0]`, as a CPU bitmask in
 
 ### UPDATE_SIZE
 
-{{< since "6.16" >}} Changes the capacity of a started device to `data[0]` 512-byte sectors and notifies the block layer, which emits a resize uevent. Requires `UBLK_F_UPDATE_SIZE`. The server must be ready to serve the new range before it grows the device and must stop relying on the old range only after it shrinks it. <!-- VERIFY: behavior of UPDATE_SIZE on a device that is not started (6.17 dereferences ub_disk unconditionally); whether later kernels reject it -->
+{{< since "6.16" >}} Changes the capacity of a started device to `data[0]` 512-byte sectors and notifies the block layer, which emits a resize uevent. It belongs to `UBLK_F_UPDATE_SIZE`, though the driver does not check the flag. Only send it to a started device: 7.3-rc5 returns `ENODEV` otherwise, and the 6.17 driver does not check at all. The server must be ready to serve the new range before it grows the device and must stop relying on the old range only after it shrinks it.
 
 ### QUIESCE_DEV, START_USER_RECOVERY, END_USER_RECOVERY
 

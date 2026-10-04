@@ -55,7 +55,7 @@ The kernel derives the queue number from the offset as `off / stride` and requir
 > [!CAUTION]
 > Computing the offset as `q * round_up(queue_depth * 24, page)` is the classic bug. With any realistic depth that offset is smaller than the fixed stride, the kernel floors it to queue 0, and every queue maps queue 0's descriptors. Queue 0 works; every other queue reads the wrong descriptors, does I/O at the wrong offsets, and commits tags the kernel did not hand it. The symptoms are silent data corruption and requests stuck forever in uninterruptible sleep, at a rate of (N-1)/N of the I/O on an N-queue device. go-ublk shipped with exactly this bug until it was found by a multi-queue integrity sweep.
 
-With `UBLK_F_IO_DESC_SIZE` (Linux 7.3) the descriptor size is negotiated through the `io_desc_size` field of `ublksrv_ctrl_dev_info` instead of being fixed at 24 bytes. <!-- VERIFY: IO_DESC_SIZE semantics on 7.3-rc5: how io_desc_size is negotiated, whether the mmap stride and per-queue length scale with it, and what the extra bytes carry -->
+With `UBLK_F_IO_DESC_SIZE` (Linux 7.3) the server chooses the descriptor size at `ADD_DEV` through the `io_desc_size` field of `ublksrv_ctrl_dev_info` (24 to 256 bytes, a multiple of 8), and everything above scales with it: descriptor *t* is at `t * io_desc_size`, the per-queue length is `round_up(queue_depth * io_desc_size, page)`, and the stride is `round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, page)`. Without the flag the kernel reports 24. The first 24 bytes keep the layout above. <!-- VERIFY: what the descriptor bytes beyond 24 are intended to carry; nothing in 7.3-rc5 writes them --> A server that hard-codes 24 must not request the flag.
 
 A descriptor is valid from the moment its tag's command completes until the server commits the tag. The CQE is the synchronization point: read the descriptor after reaping the completion, not before, and in languages with a weak memory model use acquire loads or an equivalent barrier for the read. Treat the fields as untrusted input for bounds checks (a request beyond your capacity is a kernel bug, but a server should fail it, not crash).
 
@@ -151,7 +151,7 @@ The loop reaps every available completion, prepares a commit for each, and submi
 
 What to put in `result` when committing:
 
-- **Read and write:** the number of bytes transferred, normally `nr_sectors << 9`. A short positive count completes that many bytes and the block layer re-issues the remainder as a new request. A read that commits 0 is turned into `-EIO`.
+- **Read and write:** the full length, `nr_sectors << 9`. A read that commits 0 is turned into `-EIO`. Do not commit a short positive count: its meaning has changed between releases. In 6.17 a short read or write completes that many bytes and the block layer re-issues the rest; in 7.3-rc5 only a copy-mode read is completed partially, and a short write, or any non-negative result in user-copy or zero-copy mode, completes the whole request as successful. If you cannot transfer everything, fail the request.
 - **Flush, discard, write-zeroes:** any non-negative value means success. Do not report the range length: discards can be gigabytes, and `nr_sectors << 9` overflows a signed 32-bit result at 2 GiB, which the kernel then treats as an error.
 - **Failure:** a negative errno. The block layer maps it to a block status (`-EIO` to an I/O error, `-ENOSPC` to no-space, `-EOPNOTSUPP` to not-supported, and so on), which is what the application ultimately sees.
 

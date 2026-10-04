@@ -67,7 +67,7 @@ These map to `UBLK_F_*` flags at `ADD_DEV`. Most are placeholders for work that 
 | Field | Status | What actually happens |
 |---|---|---|
 | `EnableIoctlEncode` | harmless | Requests `UBLK_F_CMD_IOCTL_ENCODE`. go-ublk sends ioctl-encoded commands regardless, and modern kernels report the flag on every device |
-| `EnableZeroCopy` | **not implemented; do not set** | Requests `UBLK_F_SUPPORT_ZERO_COPY`, but the data plane still passes buffer addresses and never registers request buffers, which is not how a zero-copy device is served |
+| `EnableZeroCopy` | **not implemented; do not set** | Requests `UBLK_F_SUPPORT_ZERO_COPY`, but the data plane still passes a buffer address with every fetch. A zero-copy device requires that address to be 0, so the kernel rejects the fetches, `START_DEV` never sees a ready queue, and creation fails after the control timeout (inferred from the driver source, not tested) |
 | `EnableUserCopy` | **not implemented** | `Create` and `CreateAndServe` fail with an error matching `ErrNotImplemented` |
 | `EnableUnprivileged` | **not implemented** | Requests `UBLK_F_UNPRIVILEGED_DEV`. As root the kernel clears the flag. A non-root user who has been given access to `/dev/ublk-control` can get through `ADD_DEV`, but every later command fails, because go-ublk does not send the char-device path that [unprivileged devices](/guide/unprivileged/) require |
 | `EnableZoned` | **no effect** | Not sent to the kernel |
