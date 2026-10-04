@@ -13,8 +13,7 @@ on:
         type: choice
         options: [default, full]
         default: default
-  push:
-    tags: ['v*']
+  # Add `push: tags: ['v*']` once a manual run has passed in Actions.
 
 env:
   MATRIX_HOME: ${{ github.workspace }}/../goublk-matrix
