@@ -154,14 +154,29 @@ func discardParams(params *DeviceParams) (uapi.UblkParamDiscard, bool) {
 		DiscardAlignment:   params.DiscardAlignment,
 		DiscardGranularity: granularity,
 	}
+	limit := min(params.MaxDiscardSectors, maxRangeSectors(params.LogicalBlockSize))
 	if canDiscard {
-		discard.MaxDiscardSectors = params.MaxDiscardSectors
+		discard.MaxDiscardSectors = limit
 		discard.MaxDiscardSegments = 1
 	}
 	if canWriteZeroes {
-		discard.MaxWriteZeroesSectors = params.MaxDiscardSectors
+		discard.MaxWriteZeroesSectors = limit
 	}
 	return discard, true
+}
+
+// maxRangeSectors is the largest discard or write-zeroes limit that is safe on
+// every kernel: one request's size must fit the block layer's 32-bit byte
+// count. Kernels before 6.11 build a whole write-zeroes request of up to
+// max_write_zeroes_sectors in one bio and store nr_sects << 9 in the 32-bit
+// bi_size, so advertising more (0xffffffff sectors) made a 5 GiB BLKZEROOUT
+// zero only 1 GiB and report success — the rest was silently skipped. Found by
+// the kernel matrix on 6.4 through 6.10 and Ubuntu's 6.8; harmless on newer
+// kernels, which split by size. Rounded down to a whole logical block.
+func maxRangeSectors(logicalBlockSize int) uint32 {
+	const limit = (1<<32 - 1) >> uapi.SectorShift // 4 GiB - 512 bytes
+	blockSectors := uint32(max(logicalBlockSize, uapi.SectorSize) / uapi.SectorSize)
+	return limit / blockSectors * blockSectors
 }
 
 // buildFeatureFlags maps the DeviceParams feature switches onto UBLK_F_*.

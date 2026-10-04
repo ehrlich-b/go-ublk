@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -73,11 +74,19 @@ func Probe() (KernelSupport, error) {
 // explainControlError adds the usual cause to errors opening the control
 // plane.
 func explainControlError(err error) error {
+	var errno syscall.Errno
+	errors.As(err, &errno)
 	switch {
-	case errors.Is(err, os.ErrNotExist):
+	case errno == syscall.ENOENT:
 		return fmt.Errorf("%w (is the ublk_drv module loaded? try: modprobe ublk_drv)", err)
-	case errors.Is(err, syscall.EPERM) && !errors.Is(err, os.ErrPermission):
-		return fmt.Errorf("%w (io_uring may be disabled: check sysctl kernel.io_uring_disabled)", err)
+	case errno == syscall.EPERM && strings.Contains(err.Error(), "io_uring"):
+		// io_uring_setup itself was refused: the RHEL 10 family ships with
+		// kernel.io_uring_disabled set. (syscall.EPERM also matches
+		// os.ErrPermission, so test the errno itself.)
+		return fmt.Errorf("%w (io_uring is disabled: set sysctl kernel.io_uring_disabled=0, "+
+			"or 1 with this process in kernel.io_uring_group)", err)
+	case errno == syscall.EACCES || errno == syscall.EPERM:
+		return fmt.Errorf("%w (creating ublk devices needs root or CAP_SYS_ADMIN, or EnableUnprivileged with udev rules)", err)
 	}
 	return err
 }

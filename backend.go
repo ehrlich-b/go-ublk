@@ -577,7 +577,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 
 	controller, err := createController()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create controller: %w", err)
+		return nil, fmt.Errorf("failed to create controller: %w", explainControlError(err))
 	}
 	defer controller.Close()
 
