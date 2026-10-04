@@ -453,6 +453,14 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     outstanding. `recovery/{batch-kill-and-recover,batch-detach-handoff,integrity-kill-and-recover}`
     failed before and pass 3/3 after on 7.0.0-38.
 
+
+26. **[OPEN — minor, v0.2.1] Two leftovers from the v0.2.0 kernel matrix.** (a) On RHEL 10 with
+    io_uring disabled, every error carries the `kernel.io_uring_disabled` hint except one path:
+    `lifecycle/fixed-id` reports a bare "open control device: … operation not permitted". Wrap that
+    path with `explainControlError` too. (b) The io_uring unit tests fail on 5.15 kernels (SQE128 and
+    CQE32 arrived in 5.19) and on RHEL 9 (io_uring disabled); go-ublk cannot run there, but the tests
+    should skip rather than fail.
+
 ---
 
 ## Production Roadmap (BCDR use)
