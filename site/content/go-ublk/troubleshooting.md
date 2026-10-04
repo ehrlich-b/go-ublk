@@ -31,8 +31,8 @@ weight: 80
 **The device has fewer queues than I asked for**
 : The kernel caps hardware queues at the number of CPUs and go-ublk uses what it returns. `Device.NumQueues()` reports the real count.
 
-**`EnableZeroCopy` or `EnableZoned` returns "not implemented"**
-: Not implemented yet; see the [roadmap](/go-ublk/roadmap/). User copy, `NeedGetData`, per-I/O threads and unprivileged devices are supported; see [Configuration](/go-ublk/configuration/#data-copy-modes).
+**`EnableZeroCopy` or `EnableZoned` is rejected at creation**
+: Zero copy needs a backend that implements `ZeroCopyBackend` (it serves the device from a file descriptor); zoned devices need a `Handler`, because a `Backend` cannot serve zone operations. See [Configuration](/go-ublk/configuration/#data-copy-modes).
 
 ## Serving I/O
 

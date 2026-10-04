@@ -20,7 +20,7 @@ heroLinks:
 </a>
 <a class="card" href="/go-ublk/">
 <p class="card-title">go-ublk</p>
-<p>Implement a small <code>Backend</code> interface shaped like <code>io.ReaderAt</code> and <code>io.WriterAt</code>, and get a <code>/dev/ublkbN</code>. The library handles io_uring, the kernel protocol and the device lifecycle.</p>
+<p>Implement a small <code>Backend</code> interface shaped like <code>io.ReaderAt</code> and <code>io.WriterAt</code> — or a raw request <code>Handler</code> — and get a <code>/dev/ublkbN</code>. The library handles io_uring, the kernel protocol, recovery and the device lifecycle.</p>
 </a>
 <a class="card" href="/reference/">
 <p class="card-title">Reference</p>
@@ -43,7 +43,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"os/signal"
 	"syscall"
 
@@ -59,14 +58,15 @@ func (n null) Flush() error                             { return nil }
 func (n null) Close() error                             { return nil }
 
 func main() {
-	dev, err := ublk.CreateAndServe(context.Background(), ublk.DefaultParams(null{1 << 30}), nil)
+	// Serve until a signal; cancelling the context stops the device gracefully.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	dev, err := ublk.CreateAndServe(ctx, ublk.DefaultParams(null{1 << 30}), nil)
 	if err != nil {
 		panic(err)
 	}
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	dev.Close() // STOP_DEV, drain in-flight I/O, DEL_DEV
+	<-dev.Done()
+	dev.Close() // delete the device
 }
 ```
 
@@ -80,13 +80,13 @@ sudo mkfs.ext4 /dev/ublkb0 && sudo mount /dev/ublkb0 /mnt
 
 ## Status
 
-**go-ublk is a prototype that is approaching usable, not a production-hardened library.** What is true today:
+**go-ublk v0.2.0 implements the whole kernel interface as of Linux 7.3-rc5** — every control command, feature and parameter block, from user recovery and zero copy to batch I/O, zoned devices and integrity metadata — and is tested on real kernels:
 
-- Single- and multi-queue I/O is verified byte-exact on arm64 and x86_64 on Ubuntu kernels 6.17 and 7.0, including O_DIRECT and concurrent read-after-write sweeps, crash consistency under SIGKILL, and power-fail consistency under a guest hard reset.
-- Read, write, flush, discard and write-zeroes work; logical block sizes from 512 bytes to the page size work.
-- Teardown of a busy device is clean, and a device leaked by a killed process can be reaped.
-- Several lifecycle defects found by a 2026-10-03 code audit are open, user recovery is not implemented, and the daemon must run as a correctly ordered systemd unit to survive host reboots. See [Testing and compatibility](/go-ublk/testing/), [Deployment](/go-ublk/deployment/) and the [roadmap](/go-ublk/roadmap/).
+- A real-kernel conformance suite (data integrity across queue and block-size combinations, filesystems, every feature, crash recovery, live upgrade handoffs, teardown under load, chaos) runs under dozens of mainline and distribution kernels; see the [compatibility matrix](/reference/matrix/).
+- The queue engine is unit-tested and fuzzed against a model of the kernel driver.
+- User recovery keeps a device — and the filesystem mounted on it — across a server crash or upgrade, verified under systemd with a verifying writer and zero I/O errors.
+- Kernel bugs found along the way, and the ones that bite ublk servers in general, are tracked in [known kernel bugs](/guide/kernel-bugs/).
 
-The guide covers the entire kernel interface as of Linux 7.3-rc5, whether or not go-ublk uses a given feature yet. The [UAPI reference](/reference/uapi/) marks go-ublk's status item by item.
+It is pre-1.0: the API can still change between minor releases. See [Releases](/go-ublk/releases/) and the [roadmap](/go-ublk/roadmap/).
 
 </div>

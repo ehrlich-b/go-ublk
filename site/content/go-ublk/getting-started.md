@@ -9,9 +9,9 @@ weight: 10
 
 | Requirement | Detail |
 |---|---|
-| Linux kernel | 6.8 or newer is the documented minimum. go-ublk always sends ioctl-encoded commands, which kernels before 6.4 do not understand; 6.4 through 6.16 are expected to work but are not verified. Verified kernels are Ubuntu 6.17 and 7.0 builds on arm64 and x86_64; see [Testing and compatibility](/go-ublk/testing/) |
+| Linux kernel | 6.4 or newer: go-ublk always sends ioctl-encoded commands, which older kernels do not understand. Newer features need newer kernels and are reported by `ublk.Probe()`. The [compatibility matrix](/reference/matrix/) lists every kernel the conformance suite has run on |
 | Kernel module | `ublk_drv` loaded, so that `/dev/ublk-control` exists |
-| Privileges | root, or `CAP_SYS_ADMIN`, to create devices |
+| Privileges | root, or `CAP_SYS_ADMIN`, to create devices — or an unprivileged user with the udev rule in `examples/ublk-chown` |
 | Go | 1.25 or newer (the module's `go` directive) |
 | Architectures | amd64 and arm64 are tested. The code has no architecture-specific assembly |
 
