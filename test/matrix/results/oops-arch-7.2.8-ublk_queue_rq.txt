@@ -1,0 +1,127 @@
+Kernel NULL pointer dereference in ublk_queue_rq after START_DEV on a stopped device
+====================================================================================
+
+Kernel:     7.2.8-arch1-2 (Arch Linux "linux" package)
+Package:    https://fastly.mirror.pkgbuild.com/core/os/x86_64/linux-7.2.8.arch1-2-x86_64.pkg.tar.zst
+            sha256 99745cb20f82292d5285d9cb4307970f80844ba94d816ce6d708689d1a1895b4
+ublk_drv:   srcversion 465AF2E302619F74AAD76FE, GET_FEATURES 0xfffff
+Guest:      QEMU TCG (-cpu max, 2 vCPU, 2 GiB, i440FX), initramfs boot, kernel-matrix harness
+go-ublk:    595536b, ublk-suite -scale 0.25 (matrix run m2, kernel id "arch")
+Trigger:    ublk-suite lifecycle/restart-after-stop: Create -> Start -> Stop -> Start
+            on the same device (STOP_DEV, then START_DEV again with no DEL/ADD).
+            The second START_DEV returned 0. The asynchronous partition scan
+            it schedules then submitted a read into a queue whose per-I/O
+            state was gone. The test timed out at 60s, the next test's
+            DEL_DEV timed out, and the guest could not power off.
+
+Seen once: this was the only Arch 7.2.8 run that reached the second START_DEV.
+On other kernels the same test failed in other ways:
+- EBUSY opening /dev/ublkc0: Fedora 6.19/7.2.8, arch-lts 6.18.55, mainline 7.0.14.
+- A 10s START_DEV timeout followed by hung tasks: Debian 6.12, mainline 6.10-6.16.
+go-ublk now treats Start after Stop as unsupported, and the matrix skips this
+test from run m3 on.
+
+Serial console, from 30 lines before the oops (payload log lines interleaved):
+------------------------------------------------------------------------------
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=3
+2026/10/04 14:12:12 [INFO] created io_uring entries=32
+PASS    lifecycle/server-killed (0.27s) 
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=3
+2026/10/04 14:12:12 [INFO] created io_uring entries=32
+2026/10/04 14:12:12 [INFO] ADD_DEV completed result=0
+2026/10/04 14:12:12 [INFO] device created dev_id=0 queues=2 max_io=1048576
+2026/10/04 14:12:12 [INFO] SET_PARAMS completed result=0
+2026/10/04 14:12:12 [INFO] opened char device for multi-queue fd=3 path=/dev/ublkc0
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=6
+2026/10/04 14:12:12 [INFO] created io_uring entries=64
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=8
+2026/10/04 14:12:12 [INFO] created io_uring entries=64
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=10
+2026/10/04 14:12:12 [INFO] created io_uring entries=32
+2026/10/04 14:12:12 [INFO] START_DEV completed result=0
+2026/10/04 14:12:12 [INFO] device started
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=3
+2026/10/04 14:12:12 [INFO] created io_uring entries=32
+2026/10/04 14:12:12 [INFO] opened char device for multi-queue fd=3 path=/dev/ublkc0
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=6
+2026/10/04 14:12:12 [INFO] created io_uring entries=64
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=8
+2026/10/04 14:12:12 [INFO] created io_uring entries=64
+@@GOUBLK@@ {"test":"lifecycle/churn-leaks","status":"fail","duration_s":0.93737671,"detail":"leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"}
+@@GOUBLK@@ {"test":"lifecycle/concurrent-create","status":"pass","duration_s":0.22541939}
+@@GOUBLK@@ {"test":"lifecycle/close-under-load","status":"pass","duration_s":0.32906998}
+@@GOUBLK@@ {"test":"lifecycle/server-killed","status":"pass","duration_s":0.2718032}
+2026/10/04 14:12:12 [INFO] registered char device with io_uring fd=10
+2026/10/04 14:12:12 [INFO] created io_uring entries=32
+[  218.816253] BUG: kernel NULL pointer dereference, address: 0000000000000018
+[  218.816430] #PF: supervisor write access in kernel mode
+[  218.816479] #PF: error_code(0x0002) - not-present page
+[  218.816555] PGD 9527067 P4D 4e3f067 PUD 4abc067 PMD 0 
+[  218.816615] Oops: Oops: 0002 [#1] SMP NOPTI
+[  218.816615] CPU: 1 UID: 0 PID: 28 Comm: kworker/1:0 Not tainted 7.2.8-arch1-2 #1 PREEMPT(full)  186163caea6eb5dc4b2a0252463c7ce1c6927294
+[  218.816615] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+[  218.816615] Workqueue: events ublk_partition_scan_work [ublk_drv]
+[  218.816615] RIP: 0010:ublk_queue_rq+0x4d/0xc0 [ublk_drv]
+[  218.816615] Code: f8 ff ff 84 c0 75 31 80 7b 19 00 75 36 48 63 55 20 48 c7 c6 90 56 40 c0 88 44 24 07 48 c1 e2 06 48 8b bc 13 90 00 00 00 31 d2 <48> 89 6f 18 e8 ca ea 05 f1 0f b6 44 24 07 48 83 c4 08 5b 5d c3 cc
+[  218.816615] RSP: 0018:ff4484c1800f3a40 EFLAGS: 00000246
+[  218.816615] RAX: 0000000000000000 RBX: ff11e4fa84dd8000 RCX: 0000000000000000
+[  218.816615] RDX: 0000000000000000 RSI: ffffffffc0405690 RDI: 0000000000000000
+[  218.816615] RBP: ff11e4fa8cc42940 R08: ff11e4faf811f100 R09: 00000000fffedc00
+[  218.816615] R10: ff11e4fa84dd8000 R11: ff11e4fa8d01f318 R12: ff11e4fa8cc4c848
+[  218.816615] R13: ff11e4fa90039248 R14: 0000000000000001 R15: fffcc3bc00347740
+[  218.816615] FS:  0000000000000000(0000) GS:ff11e4fb4442a000(0000) knlGS:0000000000000000
+[  218.816615] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[  218.816615] CR2: 0000000000000018 CR3: 00000000095f8000 CR4: 0000000000751ef0
+[  218.816615] PKRU: 55555554
+[  218.816615] Call Trace:
+[  218.816615]  <TASK>
+[  218.816615]  __blk_mq_issue_directly+0x44/0xc0
+[  218.816615]  blk_mq_try_issue_directly+0x8b/0xd0
+[  218.816615]  blk_mq_submit_bio+0x84b/0x9f0
+[  218.816615]  submit_bio_noacct_nocheck+0x2dd/0x3c0
+[  218.816615]  block_read_full_folio+0x177/0x290
+[  218.816615]  ? __pfx_blkdev_get_block+0x10/0x10
+[  218.816615]  filemap_read_folio+0x3b/0xf0
+[  218.816615]  ? __pfx_blkdev_read_folio+0x10/0x10
+[  218.816615]  ? __pfx_blkdev_read_folio+0x10/0x10
+[  218.816615]  do_read_cache_folio+0xbf/0x4d0
+[  218.816615]  ? vmap_small_pages_range_noflush+0x37f/0x660
+[  218.816615]  read_part_sector+0x3a/0xc0
+[  218.816615]  read_lba+0xa2/0x130
+[  218.816615]  efi_partition+0xb8/0x810
+[  218.816615]  ? seq_buf_printf+0x7b/0xc0
+[  218.816615]  ? __pfx_efi_partition+0x10/0x10
+[  218.816615]  bdev_disk_changed+0x2e0/0x4b0
+[  218.816615]  ublk_partition_scan_work+0x66/0x90 [ublk_drv 77f7bdd879398368edda3a9474ad8ac0e62f5ef9]
+[  218.816615]  process_one_work+0x19f/0x370
+[  218.816615]  worker_thread+0x1b1/0x310
+[  218.816615]  ? __pfx_worker_thread+0x10/0x10
+[  218.816615]  kthread+0xe4/0x120
+[  218.816615]  ? __pfx_kthread+0x10/0x10
+[  218.816615]  ret_from_fork+0x2a7/0x330
+[  218.816615]  ? __pfx_kthread+0x10/0x10
+[  218.816615]  ret_from_fork_asm+0x1a/0x30
+[  218.816615]  </TASK>
+[  218.816615] Modules linked in: xfs ublk_drv
+[  218.816615] CR2: 0000000000000018
+[  218.816615] ---[ end trace 0000000000000000 ]---
+[  218.816615] RIP: 0010:ublk_queue_rq+0x4d/0xc0 [ublk_drv]
+[  218.816615] Code: f8 ff ff 84 c0 75 31 80 7b 19 00 75 36 48 63 55 20 48 c7 c6 90 56 40 c0 88 44 24 07 48 c1 e2 06 48 8b bc 13 90 00 00 00 31 d2 <48> 89 6f 18 e8 ca ea 05 f1 0f b6 44 24 07 48 83 c4 08 5b 5d c3 cc
+[  218.816615] RSP: 0018:ff4484c1800f3a40 EFLAGS: 00000246
+[  218.816615] RAX: 0000000000000000 RBX: ff11e4fa84dd8000 RCX: 0000000000000000
+[  218.816615] RDX: 0000000000000000 RSI: ffffffffc0405690 RDI: 0000000000000000
+[  218.816615] RBP: ff11e4fa8cc42940 R08: ff11e4faf811f100 R09: 00000000fffedc00
+[  218.816615] R10: ff11e4fa84dd8000 R11: ff11e4fa8d01f318 R12: ff11e4fa8cc4c848
+[  218.816615] R13: ff11e4fa90039248 R14: 0000000000000001 R15: fffcc3bc00347740
+[  218.816615] FS:  0000000000000000(0000) GS:ff11e4fb4442a000(0000) knlGS:0000000000000000
+[  218.816615] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[  218.816615] CR2: 0000000000000018 CR3: 00000000095f8000 CR4: 0000000000751ef0
+[  218.816615] PKRU: 55555554
+[  218.816615] note: kworker/1:0[28] exited with irqs disabled
+2026/10/04 14:12:12 [INFO] START_DEV completed result=0
+2026/10/04 14:12:12 [INFO] device started
+=== lifecycle/restart-after-stop timed out after 1m0s; goroutines:
+goroutine 1 [running]:
+main.runOne({{0x584e44?, 0xc000090020?}, 0x581e7f?, 0x58d5c8?}, 0x3fd0000000000000)
+	/home/ehrli/goublk-matrix/src/test/suite/main.go:184 +0x2bf
+main.main()

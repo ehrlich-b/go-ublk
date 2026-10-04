@@ -27,6 +27,7 @@ go build -o "$out/bin/ublk-loop" ./examples/ublk-loop
 go build -o "$out/bin/verify" ./test/verify
 go build -o "$out/bin/ublk-probe" ./test/matrix/cmd/ublk-probe
 go build -o "$out/bin/ublk-suite" ./test/suite
+go build -o "$out/bin/ublk-ctrl" ./test/ctrl
 for pkg in $(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./...); do
 	name=${pkg#github.com/ehrlich-b/go-ublk}
 	name=${name#/}

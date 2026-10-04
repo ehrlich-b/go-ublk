@@ -28,7 +28,7 @@ W=/tmp/matrix-work
 mkdir -p "$W"
 PROFILE=${MATRIX_PROFILE:-full}
 SCALE=${MATRIX_SCALE:-1}
-TESTS=${MATRIX_TESTS:-probe unit largeio verify loop suite}
+TESTS=${MATRIX_TESTS:-probe unit largeio verify loop ctrl suite}
 # Wall-clock cap for the whole suite: generous, and longer when scaled up.
 SUITE_TIMEOUT=$(awk -v s="$SCALE" 'BEGIN { printf "%d", 1800 * (s > 1 ? s : 1) }')
 
@@ -172,6 +172,27 @@ t_suite() {
 	: >"$W/suite.jsonl"
 	ublk-suite "${args[@]}" >"$W/suite.jsonl" 3>&- &
 	spid=$!
+	# A targeted run (MATRIX_SUITE_RUN) also logs what the kernel advertises and
+	# counts for each device while the test runs: queue limits, and the
+	# /sys/block/X/stat counters (write I/Os vs sectors tells plain writes from
+	# one big WRITE_ZEROES).
+	local sampler=
+	if [ -n "${MATRIX_SUITE_RUN:-}" ]; then
+		(
+			last=
+			while [ -e "/proc/$spid" ]; do
+				cur=$(for q in /sys/block/ublkb*/queue; do
+					[ -d "$q" ] || continue
+					d=${q%/queue}
+					echo "$(basename "$d") wz_max=$(cat "$q/write_zeroes_max_bytes") disc_max=$(cat "$q/discard_max_bytes") max_hw_kb=$(cat "$q/max_hw_sectors_kb") stat=[$(tr -s ' ' <"$d/stat")]"
+				done 2>/dev/null)
+				[ -n "$cur" ] && [ "$cur" != "$last" ] && echo "sample: $cur"
+				last=$cur
+				sleep 0.5
+			done
+		) 3>&- &
+		sampler=$!
+	fi
 	while :; do
 		n=$(wc -l <"$W/suite.jsonl")
 		[ "$n" -gt "$sent" ] && { sed -n "$((sent + 1)),${n}p" "$W/suite.jsonl" >&3; sent=$n; }
@@ -185,6 +206,7 @@ t_suite() {
 	done
 	n=$(wc -l <"$W/suite.jsonl")
 	[ "$n" -gt "$sent" ] && sed -n "$((sent + 1)),${n}p" "$W/suite.jsonl" >&3
+	[ -n "$sampler" ] && kill "$sampler" 2>/dev/null
 	if [ -e "/proc/$spid" ] && ! grep -q '^State:.*zombie' "/proc/$spid/status" 2>/dev/null; then
 		state="$(grep '^State' "/proc/$spid/status" | tr -s '\t ' ' ') wchan=$(cat "/proc/$spid/wchan" 2>/dev/null)"
 		echo "--- ublk-suite pid $spid did not exit: $state"
@@ -203,6 +225,33 @@ t_suite() {
 		kill -9 "$spid" 2>/dev/null
 	fi
 	hygiene suite
+}
+
+# test/ctrl drives every control command through internal/ctrl and prints
+# "PASS|FAIL|SKIP name detail" per check; each check becomes a result.
+t_ctrl() {
+	local rc log line st name detail n=0
+	need_ublk ctrl || return
+	start ctrl
+	log=$W/ctrl.log
+	timeout -k 10 300 ublk-ctrl >"$log" 2>&1 3>&-
+	rc=$?
+	cat "$log"
+	while read -r st name detail; do
+		case $st in
+		PASS | FAIL | SKIP) ;;
+		*) continue ;;
+		esac
+		n=$((n + 1))
+		printf '{"test":"ctrl/%s","status":"%s","duration_s":0,"detail":"%s"}\n' \
+			"$name" "$(echo "$st" | tr 'A-Z' 'a-z')" "$(jstr "$detail")" >&3
+	done <"$log"
+	case $rc in
+	0) ;;
+	124 | 137) result ctrl timeout "$T0" "killed after 300s after $n checks; last: $(tail -2 "$log" | tr '\n' ' ')" ;;
+	*) grep -q '^FAIL' "$log" || result ctrl error "$T0" "exit $rc after $n checks: $(tail -3 "$log" | tr '\n' ' ')" ;;
+	esac
+	hygiene ctrl
 }
 
 t_unit() {
@@ -257,6 +306,7 @@ for t in $TESTS; do
 	case $t in
 	probe) t_probe ;;
 	suite) t_suite ;;
+	ctrl) t_ctrl ;;
 	unit) t_unit ;;
 	largeio) t_largeio ;;
 	verify) t_verify ;;
