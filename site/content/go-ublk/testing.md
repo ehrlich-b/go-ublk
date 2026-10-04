@@ -53,6 +53,7 @@ Nine "product hangs" in this project's history were test-harness accidents, incl
 | 2026-08-22 | `6.17.0-41-generic` | arm64 | Lima VM | Re-verified: unit, simple e2e, sweep 24/24, loop e2e 14/14, crash 6/6, 40-cycle churn; shutdown storm (23 reboots) |
 | 2026-08-22 | `7.0.0-30-generic` (`linux-hwe-7.0`) | arm64 | Lima VM | Unit, simple e2e, sweep 24/24, loop e2e 14/14, crash 6/6 |
 | 2026-10-03 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | Unit 9/9 packages, full-size I/O test, sweep 24/24, loop e2e 14/14, 1-8 GiB discards and a 3 GiB write-zeroes |
+| 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | 4-hour soak (`make vm-soak`) through the shipped units: 23 crash and upgrade handoffs, all recovered in 1.3–6.1 s; fio verified every block; server RSS 13.4 → 13.8 MB and fds 15 → 15 over two steady hours; `e2fsck` clean. The only kernel warning was the VM's virtual display (bochs vblank timeout) |
 | 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | v0.2.0 engine: `ublk-suite` 54/54 applicable tests (2 skipped: features newer than 7.0); systemd recovery under a verifying fio — 2 upgrade handoffs and 1 SIGKILL, 0 I/O errors |
 
 All runs show no oops, no stuck tasks and no leaked devices unless noted. Timings and IOPS from the emulated (TCG) run are meaningless.

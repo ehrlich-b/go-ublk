@@ -68,6 +68,7 @@ A rebuild of everything under the public API, aimed at production use: a new I/O
 - **Kernel matrix**: on the release candidate (`4d9712f`; later commits change only documentation and CI), the unit tests, the large-I/O test, the integrity sweep and the full conformance suite passed on all 47 kernels in the [compatibility matrix](/reference/matrix/) that ship `ublk_drv`: mainline 6.4 through 7.3-rc3; Ubuntu 22.04 HWE, 24.04 (GA, HWE 6.11, 6.14, 6.17 and 7.0, plus the AWS, Azure and GCP 7.0 kernels), 25.04, 25.10 and 26.04; Debian 12 backports and 13; Fedora 42, 43 and 44; Arch and Arch LTS; openSUSE Tumbleweed and Leap 15.6; Oracle UEK8; and CentOS Stream, AlmaLinux and Rocky 10 with io_uring enabled. There were no product failures. The only kernel-log findings are [known kernel bugs](/guide/kernel-bugs/).
 - **`make release-check`**: formatting, `go vet`, unit and race tests, and 60 seconds of each fuzz target.
 - **Recovery under systemd**: the shipped units with ext4 mounted and a verifying fio running; crash and upgrade handoffs recovered in 1–2 s with zero I/O errors.
+- **Soak**: four hours through the shipped units on Ubuntu 7.0.0-38: 23 crash and upgrade handoffs, every block verified, no memory or file-descriptor growth, clean `e2fsck`.
 
 ## v0.1.0 (2026-09-30)
 

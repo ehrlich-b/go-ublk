@@ -135,8 +135,10 @@ else
   check 1 "one server process lived through phase 2 (first ${p0:-none}, last ${p1:-none})"
 fi
 # Oopses and hung tasks anywhere count; I/O errors only on our device, since
-# other tests on the same machine may fail I/O on theirs on purpose.
-kerr=$(sudo dmesg | grep -E 'BUG:|WARNING:|Oops|blocked for more than|UBSAN|(I/O|EXT4-fs) error.*ublkb0\b' | head -5)
+# other tests on the same machine may fail I/O on theirs on purpose. A VM's
+# virtual display (drivers/gpu) warns about vblank timeouts under emulation.
+kerr=$(sudo dmesg | grep -E 'BUG:|WARNING:|Oops|blocked for more than|UBSAN|(I/O|EXT4-fs) error.*ublkb0\b' |
+  grep -v 'WARNING: drivers/gpu/' | head -5)
 [ -z "$kerr" ]
 check $? "kernel log clean${kerr:+: $kerr}"
 sudo systemctl stop srv-ublk0.mount
