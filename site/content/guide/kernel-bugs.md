@@ -85,6 +85,8 @@ Running one conformance suite under dozens of kernels turned up these. They affe
 
 **`QUIESCE_DEV` on a batch device before 7.3-rc3.** Draining a `UBLK_F_BATCH_IO` device with `QUIESCE_DEV` before a handoff leaves the queues' `force_abort` set, and I/O issued across the handoff fails: on Ubuntu 7.0.0-38 a writer got `EIO` in every attempt. Fixed by "ublk: clear force_abort in ublk_queue_reset_io_flags()" (`8a14be55bdc6`, 7.3-rc3, stable 7.2.7). On earlier kernels, hand off batch devices without `QUIESCE_DEV`: let go of the device and let `UBLK_F_USER_RECOVERY_REISSUE` requeue what was outstanding.
 
+**Provided-buffer rings cannot be registered on Ubuntu's 6.8 kernels.** On Ubuntu 6.8.0-146 (24.04 GA) and 6.8.0-138 (22.04 HWE), `IORING_REGISTER_PBUF_RING` fails with `-EINVAL` for every valid registration: user memory or `IOU_PBUF_RING_MMAP`, any ring size. A registration with a non-zero reserved field, which the kernel must reject, is accepted instead. The changelog for 6.8.0-146 includes a backport of "io_uring/kbuf: use mem_is_zero()", which replaced the reserved-field check, and the backported check is inverted. Mainline 6.8.12, 6.9, Ubuntu's 6.11 and 7.0 are not affected. ublk itself uses provided-buffer rings only for batch I/O, which needs 7.0, but a server whose backend uses them for its own io_uring I/O (liburing's `io_uring_setup_buf_ring`, for example) fails on these kernels.
+
 **UBSAN `array-index-out-of-bounds` in `io_buffer_register_bvec`.** Zero copy, through `UBLK_U_IO_REGISTER_IO_BUF` or automatic buffer registration, logs this on Fedora 42 (6.19.14) and Fedora 43 and 44 (7.2.8):
 
 ```text
