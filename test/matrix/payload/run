@@ -14,7 +14,8 @@
 # real-kernel conformance suite, test/suite); the rest adds what the suite does
 # not cover: the GET_FEATURES probe, the unit tests against the guest's real
 # io_uring, the large-I/O integration test, the repo's integrity sweep and the
-# ublk-loop / ublk-mem --zip example e2e.
+# ublk-loop / ublk-mem --zip example e2e. The wzcheck group (a 5 GiB
+# BLKZEROOUT check) is opt-in.
 #
 # MATRIX_TESTS selects groups (default: all, the suite last because its final
 # tests deliberately risk wedging a device). MATRIX_SCALE scales the suite's
