@@ -526,8 +526,10 @@ func testGeometry(t *T) error {
 	if err != nil {
 		return err
 	}
-	if len(ents) != 3 {
-		return fmt.Errorf("%d hardware queues in sysfs, want 3", len(ents))
+	// The kernel clamps nr_hw_queues to the number of possible CPUs, and the
+	// device must report the count it was actually granted.
+	if q := dev.NumQueues(); q < 1 || q > 3 || len(ents) != q {
+		return fmt.Errorf("%d hardware queues in sysfs, device reports %d, requested 3", len(ents), q)
 	}
 	return nil
 }
