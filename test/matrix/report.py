@@ -127,6 +127,14 @@ def cmd_parse(a):
         results.append({"test": "kernel-log", "status": "fail", "duration_s": 0.0,
                         "detail": f"{len(oops_lines)} oops/hang line(s); first: {excerpt}"})
 
+    # A guest OOM kill is the harness's fault (MEM too small for the payload),
+    # and whatever test it hit failed for that reason: say so explicitly.
+    ooms = re.findall(r"Out of memory: Killed process \d+ \((\S+)\)", klog)
+    if ooms:
+        results.append({"test": "guest-oom", "status": "error", "duration_s": 0.0,
+                        "detail": f"the guest OOM-killed {', '.join(sorted(set(ooms)))}; a failure in the test "
+                                  f"that was running is a harness memory limit, not a product result"})
+
     probe = meta.get("probe") or {}
     kinfo_ublk = kinfo.get("ublk_drv")
     if not kinfo:
