@@ -45,6 +45,12 @@ func (f *lifecycleFakeRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlC
 	return &fakeResult{userData: userData}, nil
 }
 
+func (f *lifecycleFakeRing) SubmitCtrlCmdContext(
+	_ context.Context, cmd uint32, c *uapi.UblksrvCtrlCmd, ud uint64,
+) (uring.Result, error) {
+	return f.SubmitCtrlCmd(cmd, c, ud)
+}
+
 func (f *lifecycleFakeRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*uring.AsyncHandle, error) {
 	return nil, nil
 }

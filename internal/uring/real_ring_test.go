@@ -2,6 +2,7 @@ package uring
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"os"
@@ -195,8 +196,8 @@ func TestCtrlTimeoutAndStragglerCQE(t *testing.T) {
 	defer ring.Close()
 	tag := queueStandInCtrlCmd(t, ring, rfd)
 	start := time.Now()
-	if _, err := ring.waitCtrlCompletion(tag); !errors.Is(err, ErrCtrlTimeout) {
-		t.Fatalf("waitCtrlCompletion: %v, want ErrCtrlTimeout", err)
+	if _, reaped, err := ring.waitCtrlCompletion(context.Background(), tag); reaped || !errors.Is(err, ErrCtrlTimeout) {
+		t.Fatalf("waitCtrlCompletion: reaped %v, %v; want unreaped ErrCtrlTimeout", reaped, err)
 	}
 	if d := time.Since(start); d < 45*time.Millisecond || d > time.Second {
 		t.Errorf("gave up after %v, want ~50ms", d)
@@ -211,6 +212,67 @@ func TestCtrlTimeoutAndStragglerCQE(t *testing.T) {
 	}
 	if res.UserData() != 9 || res.Value() != -95 {
 		t.Fatalf("result {ud=%d val=%d}, want {9 -95}: the straggler was taken for this command", res.UserData(), res.Value())
+	}
+}
+
+// Cancelling the context of an unbounded control wait cancels the command and
+// reaps its CQE, so nothing is left in flight and the staging buffer is kept.
+// The pipe read stands in for a command blocked in the kernel, such as
+// END_USER_RECOVERY with no data plane.
+func TestCtrlContextCancelReapsCommand(t *testing.T) {
+	rfd, _ := pipeFds(t)
+	ring, err := newMinimalRing(Config{Entries: 4, FD: rfd, CtrlTimeout: -1})
+	if err != nil {
+		t.Fatalf("newMinimalRing: %v", err)
+	}
+	defer ring.Close()
+	tag := queueStandInCtrlCmd(t, ring, rfd)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(30*time.Millisecond, cancel)
+	start := time.Now()
+	res, reaped, err := ring.waitCtrlCompletion(ctx, tag)
+	if !reaped || res != -int32(unix.ECANCELED) {
+		t.Fatalf("reaped %v res %d (%v), want the command's -ECANCELED", reaped, res, err)
+	}
+	if !errors.Is(err, ErrCtrlCanceled) || !errors.Is(err, context.Canceled) || errors.Is(err, ErrCtrlTimeout) {
+		t.Fatalf("err = %v, want ErrCtrlCanceled wrapping context.Canceled", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("cancel took %v", d)
+	}
+	if ring.core.PeekCQE() != nil {
+		t.Error("cancel request's CQE left in the ring")
+	}
+	// The ring is reusable, and the cancel CQE was not taken for this command.
+	res2, err := ring.SubmitCtrlCmd(0, &uapi.UblksrvCtrlCmd{}, 5)
+	if err != nil || res2.Value() != -95 || res2.UserData() != 5 {
+		t.Fatalf("next command: %v %v", res2, err)
+	}
+	// A context already done submits nothing.
+	head := ring.core.sqeTail
+	if _, err := ring.SubmitCtrlCmdContext(ctx, 0, &uapi.UblksrvCtrlCmd{}, 6); !errors.Is(err, context.Canceled) ||
+		errors.Is(err, ErrCtrlCanceled) || ring.core.sqeTail != head {
+		t.Fatalf("done ctx: err %v, SQEs queued %d", err, ring.core.sqeTail-head)
+	}
+}
+
+// A command that does not finish within the grace after its cancel is
+// abandoned with ErrCtrlTimeout. Here the cancel targets a tag nothing
+// carries, which stands in for a command that ignores the signal.
+func TestCtrlContextCancelGraceExpires(t *testing.T) {
+	rfd, _ := pipeFds(t)
+	ring, err := newMinimalRing(Config{Entries: 4, FD: rfd, CtrlTimeout: -1})
+	if err != nil {
+		t.Fatalf("newMinimalRing: %v", err)
+	}
+	defer ring.Close()
+	ring.ctrlCancelGrace = 50 * time.Millisecond
+	queueStandInCtrlCmd(t, ring, rfd)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, reaped, err := ring.waitCtrlCompletion(ctx, ctrlTagBase|0xABCDEF)
+	if reaped || !errors.Is(err, ErrCtrlTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("reaped %v, err %v; want unreaped ErrCtrlTimeout wrapping DeadlineExceeded", reaped, err)
 	}
 }
 
@@ -229,7 +291,7 @@ func TestCloseDuringUnboundedCtrlWait(t *testing.T) {
 			done <- ErrRingClosed
 			return
 		}
-		_, err := ring.waitCtrlCompletion(tag)
+		_, _, err := ring.waitCtrlCompletion(context.Background(), tag)
 		ring.release()
 		done <- err
 	}()

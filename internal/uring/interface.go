@@ -2,6 +2,7 @@
 package uring
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -23,6 +24,11 @@ var ErrRingClosed = errors.New("ring closed")
 // buffer afterwards.
 var ErrCtrlTimeout = errors.New("control command submitted but its completion was not reaped")
 
+// ErrCtrlCanceled means SubmitCtrlCmdContext cancelled the command after its
+// context was done and reaped its completion: the command has finished, and
+// the Result returned alongside says how.
+var ErrCtrlCanceled = errors.New("control command cancelled")
+
 // Ring provides the interface for io_uring operations needed by ublk
 type Ring interface {
 	// Close closes the ring and releases resources
@@ -30,6 +36,10 @@ type Ring interface {
 
 	// SubmitCtrlCmd submits a control command and returns the result
 	SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (Result, error)
+
+	// SubmitCtrlCmdContext is SubmitCtrlCmd that cancels the command when ctx is done
+	SubmitCtrlCmdContext(ctx context.Context, cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd,
+		userData uint64) (Result, error)
 
 	// SubmitCtrlCmdAsync submits a control command without waiting for completion
 	SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*AsyncHandle, error)

@@ -401,7 +401,7 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     user_data tag. A command whose context ends returns `*ctrl.InFlightError`;
     `Ring.SubmitCtrlCmdContext` cancels it with IORING_OP_ASYNC_CANCEL, so an abandoned command that
     sleeps interruptibly in the kernel (END_USER_RECOVERY or START_DEV waiting for FETCHes, DEL_DEV
-    waiting for the last reference, QUIESCE_DEV) gets EINTR and releases its device instead of
+    waiting for the last reference, QUIESCE_DEV) gets EINTR (its CQE is reaped within a 1s grace and `ErrCtrlCanceled` returned) and releases its device instead of
     lingering until process exit (measured on 7.0.0-38). ctrl's rings therefore run with
     `CtrlTimeout: -1` and rely on the caller's context for bounds.
 
