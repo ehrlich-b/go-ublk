@@ -572,11 +572,20 @@ func testDetachHandoff(t *T) error {
 	go func() { w.run(stop); close(done) }()
 	time.Sleep(t.Duration(300 * time.Millisecond))
 
+	start := time.Now()
 	if err := cmd.Process.Signal(syscall.SIGUSR1); err != nil {
 		return err
 	}
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("old server exited with %v after Detach", err)
+	}
+	// Detach drains what handlers hold and lets go; it must not wait out a
+	// timeout (it once took 30s under load: fetches re-armed by late commits
+	// after QUIESCE_DEV were never aborted).
+	if took := time.Since(start); took > 15*time.Second {
+		return fmt.Errorf("Detach under load took %s", took.Round(time.Millisecond))
+	} else {
+		t.Logf("Detach under load took %s", took.Round(time.Millisecond))
 	}
 	before := w.ops.Load()
 	b, err := openFileBackend(path, size)

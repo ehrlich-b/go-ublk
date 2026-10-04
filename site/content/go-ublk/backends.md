@@ -75,7 +75,7 @@ Whether `Flush` is ever called depends on `DeviceParams.VolatileCache`, which te
 
 The default is `true` because the two mistakes are not symmetric. Claiming a cache that does not exist costs an occasional no-op call. Hiding one that does exist means the kernel never asks you to flush, filesystems believe their journal commits are durable, and a power failure loses acknowledged data with no error anywhere.
 
-Per-write FUA is not implemented: go-ublk never advertises `UBLK_ATTR_FUA`, and `EnableFUA` only logs a warning. The block layer then emulates FUA writes as a write followed by a flush, so a correct `Flush` is all that durability needs.
+By default FUA (Force Unit Access) is not advertised, and the block layer emulates a FUA write as a write followed by a flush, so a correct `Flush` is all that durability needs. A backend that can make one write durable cheaply implements `FUABackend` (`WriteAtFUA`) and sets `DeviceParams.EnableFUA`; writes the application issues with `O_DSYNC`, and a filesystem's journal commits, then arrive at `WriteAtFUA` instead of costing a whole-device flush.
 
 ## Close
 
@@ -100,33 +100,66 @@ The optional interfaces are detected with a type assertion on the value in `Devi
 
 Both receive **ranges, not buffers**, and the ranges can be enormous: by default the device advertises the largest discard the block layer allows, so `mkfs` and `blkdiscard` on a large device send multi-gigabyte requests. Never allocate a buffer the size of `length`.
 
-The kernel's `UBLK_IO_F_NOUNMAP` flag ("zero the range but keep it allocated") is not passed to `WriteZeroes`. A backend that punches holes for write-zeroes will deallocate even when the caller asked it not to. That matters only for callers that preallocate on purpose; `fallocate(FALLOC_FL_ZERO_RANGE)` on the device is the usual source.
+The kernel's `UBLK_IO_F_NOUNMAP` flag ("zero the range but keep it allocated") is not passed to `WriteZeroes`, so a backend that punches holes for write-zeroes deallocates even when the caller asked it not to. That matters only for callers that preallocate on purpose (`fallocate(FALLOC_FL_ZERO_RANGE)` on the device). A [Handler](#the-handler-interface) sees the flag as `FlagNoUnmap`.
 
 `MaxDiscardSectors` caps both operations, and setting it to 0 turns both off. `DiscardGranularity` and `DiscardAlignment` describe your allocation unit; the defaults are 4096.
 
 ## Concurrency
 
-go-ublk runs one goroutine per hardware queue, each locked to an OS thread, and each calls the backend directly. With `NumQueues` queues, up to `NumQueues` backend calls can be in progress at once, in any mix of methods. **A backend must be safe for concurrent use.** A single mutex is correct; sharded locks, as in the `ublk-mem` example, or lock-free positional I/O, as in `ublk-loop`, scale better.
+go-ublk runs one I/O thread per hardware queue (or several, with `ThreadsPerQueue`), each with its own io_uring. By default every request is handed to **its own goroutine**, so up to `QueueDepth` backend calls per queue — `NumQueues × QueueDepth` in total — can be in progress at once, in any mix of methods. When a call returns, its completion goes back to the queue's thread through an eventfd armed in that thread's io_uring and is committed to the kernel there. **A backend must be safe for concurrent use.** A single mutex is correct; sharded locks, as in the `ublk-mem` example, or lock-free positional I/O, as in `ublk-loop`, scale better.
 
-Within one queue, requests are handled **one at a time**: the queue goroutine takes a batch of completed fetches from io_uring, calls the backend for each in turn, and then submits all the commits in one system call. `QueueDepth` controls how many requests the kernel can have outstanding on a queue, not how many backend calls run concurrently. The consequences:
+This is what makes latency-bound backends (network, object storage, a slow disk) work: a backend that takes 1 ms per call is not limited to 1,000 requests per second per queue, and one slow call does not stall the requests behind it.
 
-- Per-queue throughput is bounded by backend latency. A backend that takes 1 ms per call serves at most about 1,000 requests per second per queue, whatever the depth.
-- A backend call that blocks stalls its whole queue, and every request the kernel has routed to it.
-- Throughput scales with queues, which the kernel caps at the number of CPUs.
+`DeviceParams.Inline` instead runs the backend directly on the queue's thread. It saves a goroutine hand-off per request, which matters only for backends that complete in well under a microsecond and never block (RAM). Inline, a queue serves one request at a time and a blocking call stalls the queue.
 
-An asynchronous backend interface, where one queue can have many backend operations in flight, is on the [roadmap](/go-ublk/roadmap/). Until then, latency-bound backends (network, object storage) want as many queues as the machine has CPUs, and fast backends want the default.
+The block layer does not serialize requests to overlapping ranges, so two requests can write the same block at the same time. The result may be either write, as on any disk, but the backend's own data structures must survive it. A compressed or copy-on-write backend that rewrites a chunk needs a lock covering the chunk.
 
-The block layer does not serialize requests to overlapping ranges, so two queues can write the same block at the same time. The result may be either write, as on any disk, but the backend's own data structures must survive it. A compressed or copy-on-write backend that rewrites a chunk needs a lock covering the chunk.
-
-Keep calls bounded. A call that never returns cannot be cancelled, and teardown waits for the queue goroutine only for a limited time before releasing the memory it uses (see [Roadmap](/go-ublk/roadmap/), open defect #19). Network backends should use timeouts and return errors rather than hang. Never call `Device.Close` from inside a backend method: `Close` waits for the queue goroutine that is running your method.
+Keep calls bounded. A call that never returns cannot be cancelled: the request stays in flight, `STOP_DEV` waits for it (bounded by `Options.StopTimeout`), and its queue's memory can never be freed, so `Close` fails rather than release memory the call may still use. Network backends should use timeouts and return errors rather than hang. Never call `Device.Close` from inside a backend method: `Close` waits for the calls in flight, including yours.
 
 ## Errors
 
-Any failure, an error or a short count, completes the request with `-EIO`. go-ublk does not pass errnos through, so a thin-provisioned backend that runs out of space produces an I/O error, not `ENOSPC`, in the application. There are no retries in the library.
+A failed call completes the request with an errno the application sees:
 
-A panic in a backend method is not recovered. It crashes the server, which fails the in-flight I/O and leaves the device registered until it is [reaped](/go-ublk/getting-started/#cleaning-up-a-leaked-device). Recover inside your methods if a panic is survivable.
+- An error that is (or wraps) a `syscall.Errno` passes through: return `syscall.ENOSPC` from a thin-provisioned backend that is full and the application gets `ENOSPC`, not a generic I/O error. Kernels whose ublk driver translates errnos to block statuses (`errno_to_blk_status`) pass the common ones (`ENOSPC`, `ETIMEDOUT`, `EOPNOTSUPP`, ...) through to userspace; older kernels report every failure as `EIO`.
+- `context.DeadlineExceeded` and `os.ErrDeadlineExceeded` become `ETIMEDOUT`; `errors.ErrUnsupported` becomes `EOPNOTSUPP`.
+- Anything else, including a short read or write count, becomes `EIO`. `ublk.Errno(err)` shows the mapping.
+
+There are no retries in the library. An I/O error fails only that request; the queue keeps serving.
+
+A panic in a backend method is recovered: the request fails with `EIO` and, with a logger configured, the panic is logged. The server keeps running. Fix the panic anyway — the library cannot know whether your backend's state survived it.
 
 Failed operations are counted in [metrics](/go-ublk/lifecycle/#metrics) and reported to an `Observer` with `success == false`.
+
+## The Handler interface
+
+`Backend` covers what most storage needs. For everything else, set `DeviceParams.Handler` instead: it receives each raw request and completes it whenever it likes.
+
+```go
+h := ublk.HandlerFunc(func(r *ublk.Request) {
+	switch r.Op {
+	case ublk.OpRead:
+		go func() { // complete later, from any goroutine
+			n, err := store.ReadAt(r.Data, r.Offset)
+			r.CompleteN(n, err)
+		}()
+	case ublk.OpWrite:
+		durable := r.Flags&ublk.FlagFUA != 0
+		r.Complete(store.Write(r.Data, r.Offset, durable))
+	case ublk.OpFlush:
+		r.Complete(store.Sync())
+	default:
+		r.Complete(syscall.EOPNOTSUPP)
+	}
+})
+params := ublk.DeviceParams{Handler: h, Size: store.Size(), /* ... */}
+```
+
+A `Request` carries the operation (`OpRead`, `OpWrite`, `OpFlush`, `OpDiscard`, `OpWriteZeroes`, and the zoned operations), the kernel's flags (`FlagFUA`, `FlagNoUnmap`, the fail-fast and swap hints), the byte offset and length, and for data operations a `Data` buffer. Rules:
+
+- Call exactly one `Complete` method exactly once — `Complete(err)`, `CompleteN(n, err)` for a partial read, or `CompleteZoneAppend(sector, err)`. Calling twice panics. Not calling at all leaves the request in flight until the device is torn down.
+- `Data` and the `Request` itself are valid only until that call; the next request on the same tag reuses them.
+- Only a read can complete partially (the kernel resubmits the rest). A short write must be reported as an error, because the kernel treats any non-negative result for a write as complete success; `CompleteN` enforces this.
+- Discard and write-zeroes are only sent if you set `HandlerDiscard` / `HandlerWriteZeroes`; FUA only if you set `EnableFUA`.
 
 ## Memory
 

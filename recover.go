@@ -221,25 +221,25 @@ func (d *Device) Detach() error {
 	d.leaving.Store(true)
 	close(d.unwatch)
 
-	quiesced := false
 	if d.Features().Has(FeatureQuiesce) {
-		c, err := createController()
-		if err == nil {
+		// Best effort: if it fails (EBUSY when no queue goes idle in time),
+		// the kernel still requeues or fails what is outstanding once we let
+		// go.
+		if c, err := createController(); err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), quiesceTimeout+5*time.Second)
-			err = c.QuiesceDev(ctx, d.ID, quiesceTimeout)
+			_ = c.QuiesceDev(ctx, d.ID, quiesceTimeout)
 			cancel()
 			c.Close()
 		}
-		quiesced = err == nil
 	}
-	var err error
-	if quiesced {
-		// QUIESCE_DEV drained the queue and aborted every fetch: the engines
-		// exit on their own.
-		err = d.releaseQueues(30 * time.Second)
-	} else {
-		err = d.abandonQueues()
-	}
+	// QUIESCE_DEV stops the kernel dispatching new requests and aborts the
+	// fetches that were idle, but a request a handler still holds gets a fresh
+	// fetch when it commits, which nothing aborts. So the engines are always
+	// abandoned: they commit what handlers hold, then close their rings,
+	// cancelling whatever fetches remain. Without QUIESCE (before 6.16) a
+	// request fetched meanwhile is requeued (RecoveryReissue) or failed by the
+	// kernel once this process lets go.
+	err := d.abandonQueues()
 	d.state = DeviceStateDetached
 	d.finish(nil)
 	if err != nil {

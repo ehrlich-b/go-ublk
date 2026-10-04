@@ -29,13 +29,22 @@ Conflicts=umount.target
 # After= this one (the mount) start only when the device exists.
 Type=notify
 ExecStartPre=/sbin/modprobe ublk_drv
-ExecStart=/usr/local/bin/ublk-loop -id=%i -file=/var/lib/ublk/%i.img
+# -recovery keeps /dev/ublkb%i, and the filesystem on it, across server
+# restarts: if the server crashes, the kernel holds and requeues its I/O and
+# the restarted server (Restart=always below) takes the device back over, so
+# applications never see an error. For a zero-downtime upgrade, install the
+# new binary and run `systemctl kill -s SIGUSR2 ublk-loop@%i`: the old server
+# detaches and exits, and systemd starts the new one, which recovers it.
+ExecStart=/usr/local/bin/ublk-loop -id=%i -file=/var/lib/ublk/%i.img -recovery
 # SIGTERM goes to the main process only; it runs STOP_DEV then DEL_DEV while
 # its I/O threads are still alive to complete in-flight requests. Give a busy
 # device time to drain before systemd escalates to SIGKILL.
 KillMode=mixed
 TimeoutStopSec=90
-Restart=no
+# An explicit stop (shutdown, systemctl stop) is never restarted; a crash or a
+# SIGUSR2 handoff is.
+Restart=always
+RestartSec=200ms
 
 [Install]
 WantedBy=multi-user.target
