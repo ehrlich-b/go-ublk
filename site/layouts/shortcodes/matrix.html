@@ -1,0 +1,72 @@
+{{- /*
+  Compatibility matrix from site/data/matrix.json: one table per kernel family,
+  one row per run, per-test results behind <details>.
+*/ -}}
+{{- $m := site.Data.matrix -}}
+{{- $runs := $m.runs -}}
+{{- $families := slice -}}
+{{- range $runs }}{{ if not (in $families .family) }}{{ $families = $families | append .family }}{{ end }}{{ end -}}
+<div class="matrix">
+{{- if $m.sample }}
+<div class="callout callout-warning" role="note"><p class="callout-title">Sample data</p><p>This page is rendering the small sample in <code>site/data/matrix.json</code>, not real results. The generated file from the test harness replaces it before publication.</p></div>
+{{- end }}
+<p class="matrix-source">
+{{- with $m.generated }}Generated {{ . }}{{ end }}
+{{- with $m.go_ublk_commit }} against go-ublk <a href="{{ site.Params.repo }}/commit/{{ . }}"><code>{{ substr . 0 12 }}</code></a>{{ end }}.
+{{ len $runs }} runs across {{ len $families }} kernel {{ cond (eq (len $families) 1) "family" "families" }}.</p>
+<ul class="matrix-totals">
+{{- range slice "pass" "fail" "timeout" "no-ublk" "boot-failed" "fetch-failed" }}{{ $n := len (where $runs "status" .) }}{{ if $n }}
+<li>{{ partial "status-badge.html" . }} <span>{{ $n }}</span></li>
+{{- end }}{{ end }}
+</ul>
+<nav class="matrix-index" aria-label="Kernel families"><span>Families:</span>
+{{- range $families }} <a href="#family-{{ . | anchorize }}">{{ . }}</a>{{ end }}
+</nav>
+{{- range $fam := $families }}
+<h2 id="family-{{ $fam | anchorize }}">{{ $fam }}<a class="anchor" href="#family-{{ $fam | anchorize }}" aria-label="Permalink: {{ $fam }}">#</a></h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="{{ $fam }} results, scrolls horizontally">
+<table class="matrix-table">
+<thead><tr><th scope="col">Kernel</th><th scope="col">Distro</th><th scope="col">Arch</th><th scope="col">Boot</th><th scope="col">Status</th><th scope="col" class="num">Pass</th><th scope="col" class="num">Fail</th><th scope="col" class="num">Skip</th><th scope="col" class="num">Error</th><th scope="col">Date</th></tr></thead>
+<tbody>
+{{- range where $runs "family" $fam }}
+{{- $rid := printf "run-%s" (.id | anchorize) }}
+<tr id="{{ $rid }}" class="run run-{{ .status }}">
+<td><a href="#{{ $rid }}"><code>{{ .kernel }}</code></a>{{ with .upstream }}<span class="sub">upstream {{ . }}</span>{{ end }}</td>
+<td>{{ .distro }}</td>
+<td>{{ .arch }}</td>
+<td>{{ .boot }}{{ with .accel }}<span class="sub">{{ . }}</span>{{ end }}</td>
+<td>{{ partial "status-badge.html" .status }}{{ if .oops }} <span class="badge badge-bad" title="The kernel logged an oops during this run">oops</span>{{ end }}</td>
+<td class="num">{{ .summary.pass | default 0 }}</td>
+<td class="num">{{ .summary.fail | default 0 }}</td>
+<td class="num">{{ .summary.skip | default 0 }}</td>
+<td class="num">{{ .summary.error | default 0 }}</td>
+<td class="nowrap">{{ .date }}</td>
+</tr>
+<tr class="run-detail">
+<td colspan="10">
+<details>
+<summary>{{ len .results }} {{ cond (eq (len .results) 1) "test" "tests" }}{{ if not .ublk_drv }}, no <code>ublk_drv</code>{{ end }}{{ with .features }}, features <code>{{ . }}</code>{{ end }}</summary>
+{{- with .features }}{{ $f := partial "feature-names.html" . }}{{ if $f }}
+<p class="run-features"><span class="muted">Feature flags:</span> {{ range $i, $n := $f }}{{ if $i }} {{ end }}<code>{{ $n }}</code>{{ end }}</p>
+{{- end }}{{ end }}
+{{- with .results }}
+<table class="matrix-tests">
+<thead><tr><th scope="col">Test</th><th scope="col">Result</th><th scope="col" class="num">Seconds</th><th scope="col">Detail</th></tr></thead>
+<tbody>
+{{- range . }}
+<tr><td><code>{{ .test }}</code></td><td>{{ partial "status-badge.html" .status }}</td><td class="num">{{ with .duration_s }}{{ lang.FormatNumber 1 . }}{{ end }}</td><td>{{ .detail }}</td></tr>
+{{- end }}
+</tbody>
+</table>
+{{- else }}
+<p class="muted">No tests ran.</p>
+{{- end }}
+</details>
+</td>
+</tr>
+{{- end }}
+</tbody>
+</table>
+</div>
+{{- end }}
+</div>

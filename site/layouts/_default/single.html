@@ -1,0 +1,37 @@
+{{ define "main" }}
+{{- $toc := and (not .Params.notoc) (ge (len .Fragments.HeadingsMap) 3) -}}
+<details class="mobile-nav">
+  <summary>Menu</summary>
+  <nav aria-label="Site (mobile)">{{ partial "nav.html" . }}</nav>
+</details>
+<div class="layout{{ if $toc }} has-toc{{ end }}">
+  <aside class="sidebar">
+    <nav aria-label="Site">{{ partial "nav.html" . }}</nav>
+  </aside>
+  <main id="main" class="content">
+    <article class="prose">
+      <header class="page-header">
+        {{- with .Parent }}{{ if not .IsHome }}<p class="eyebrow"><a href="{{ .RelPermalink }}">{{ .Params.navTitle | default .LinkTitle }}</a></p>{{ end }}{{ end }}
+        <h1>{{ .Title }}</h1>
+        {{- with .Description }}<p class="lede">{{ . }}</p>{{ end }}
+      </header>
+      {{- if $toc }}
+      <details class="toc-inline">
+        <summary>On this page</summary>
+        {{ .TableOfContents }}
+      </details>
+      {{- end }}
+      {{ .Content }}
+      {{- block "after_content" . }}{{ end }}
+      <p class="edit-link"><a href="{{ site.Params.editBase }}{{ .File.Path }}">Edit this page on GitHub</a></p>
+    </article>
+    {{ partial "pager.html" . }}
+  </main>
+  {{- if $toc }}
+  <aside class="toc" aria-label="On this page">
+    <p class="toc-title">On this page</p>
+    {{ .TableOfContents }}
+  </aside>
+  {{- end }}
+</div>
+{{ end }}

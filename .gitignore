@@ -55,3 +55,9 @@ tmp/
 
 # Stack dumps
 ublk-stacks*.txt
+
+# Docs site build output and release tarballs
+site/public/
+site/resources/
+site/release/
+site/.hugo_build.lock

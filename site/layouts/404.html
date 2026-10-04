@@ -1,0 +1,15 @@
+{{ define "main" }}
+<main id="main" class="home-main notfound">
+  <section class="hero">
+    <p class="eyebrow">404</p>
+    <h1>No block at this offset</h1>
+    <p class="hero-lede">The page you asked for does not exist. It may have moved when the site was reorganized.</p>
+    <p class="hero-actions">
+      <a class="button primary" href="{{ "/" | relURL }}">Home</a>
+      {{- range site.Home.Sections.ByWeight }}
+      <a class="button" href="{{ .RelPermalink }}">{{ .Params.navTitle | default .LinkTitle }}</a>
+      {{- end }}
+    </p>
+  </section>
+</main>
+{{ end }}

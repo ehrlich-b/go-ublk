@@ -1,0 +1,12 @@
+{{- /*
+  Inline reference to a UAPI item: {{< uapi "UBLK_F_USER_RECOVERY" >}}.
+  Links to its row in the UAPI reference when site/data/uapi.json has it,
+  otherwise renders plain code, so the guide degrades cleanly with sample data.
+*/ -}}
+{{- $name := .Get 0 -}}
+{{- $item := index (where site.Data.uapi.items "name" $name) 0 -}}
+{{- with $item -}}
+<a class="uapi-ref" href="{{ "/reference/uapi/" | relURL }}#{{ partial "uapi-anchor.html" .name }}"{{ with .summary }} title="{{ . | plainify }}"{{ end }}><code>{{ $name }}</code></a>
+{{- else -}}
+<code>{{ $name }}</code>
+{{- end -}}
