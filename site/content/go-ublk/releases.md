@@ -22,7 +22,7 @@ Every tag passes the same gates, and the evidence ships with it:
 
 Bug fixes that affect data integrity or teardown are listed first in a release's notes.
 
-## v0.2.0 (unreleased)
+## v0.2.0 (2026-10-04)
 
 A rebuild of everything under the public API, aimed at production use: a new I/O engine, user recovery, the whole kernel control surface, and a conformance suite that runs under dozens of kernels. Code written for v0.1.0 compiles unchanged; the behavior changes below are the ones to read.
 
