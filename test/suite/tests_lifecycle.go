@@ -418,3 +418,141 @@ func testServerKilled(t *T) error {
 	}
 	return nil
 }
+
+func init() {
+	register("lifecycle/chaos", 10*time.Minute, testChaos)
+}
+
+// testChaos interleaves random lifecycle actions across several devices at
+// once — create in-process, create in a server subprocess, I/O bursts, Close,
+// SIGKILL a server, reap orphans — and requires that nothing hangs, every
+// orphan can be reaped, and the kernel logs no bug. Seeded and logged, so a
+// failure replays with the same action sequence.
+func testChaos(t *T) error {
+	mark := kmsgMark()
+	seed := uint64(time.Now().UnixNano())
+	t.Logf("seed %d", seed)
+	r := newRNG(seed)
+
+	type slot struct {
+		dev  *ublk.Device // in-process server, or nil
+		cmd  interface{ Kill() error }
+		id   uint32
+		path string
+	}
+	var live []*slot
+	var orphans []uint32
+	defer func() {
+		for _, s := range live {
+			if s.dev != nil {
+				_ = s.dev.Close()
+			} else if s.cmd != nil {
+				_ = s.cmd.Kill()
+				orphans = append(orphans, s.id)
+			}
+		}
+		for _, id := range orphans {
+			_ = ublk.DeleteDevice(id)
+		}
+	}()
+
+	step := func(what string, f func() error) error {
+		done := make(chan error, 1)
+		go func() { done <- f() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("%s: %w", what, err)
+			}
+			return nil
+		case <-time.After(60 * time.Second):
+			return fmt.Errorf("%s: hung for 60s", what)
+		}
+	}
+
+	deadline := time.Now().Add(t.Duration(20 * time.Second))
+	actions := 0
+	for ; time.Now().Before(deadline); actions++ {
+		switch a := r.intn(6); {
+		case a == 0 && len(live) < 6: // in-process create
+			params, _ := memParams(8 << 20)
+			params.NumQueues, params.QueueDepth = 1+r.intn(3), 8<<r.intn(4)
+			s := &slot{}
+			if err := step("create", func() error {
+				dev, err := ublk.CreateAndServe(context.Background(), params, nil)
+				if err != nil {
+					return err
+				}
+				s.dev, s.id, s.path = dev, dev.ID, dev.Path
+				return waitForNode(dev.Path, 5*time.Second)
+			}); err != nil {
+				return err
+			}
+			live = append(live, s)
+		case a == 1 && len(live) < 6: // subprocess create
+			cmd, id, err := startServer(t, 8<<20)
+			if err != nil {
+				return fmt.Errorf("server create: %w", err)
+			}
+			s := &slot{cmd: cmd.Process, id: id, path: fmt.Sprintf("/dev/ublkb%d", id)}
+			if err := waitForNode(s.path, 5*time.Second); err != nil {
+				return err
+			}
+			live = append(live, s)
+		case a == 2 && len(live) > 0: // I/O burst
+			s := live[r.intn(len(live))]
+			if err := step("io on "+s.path, func() error {
+				f, err := os.OpenFile(s.path, os.O_RDWR|syscall.O_DIRECT, 0)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				p, q := alignedBuf(64<<10), alignedBuf(64<<10)
+				r2 := newRNG(r.next())
+				for i := 0; i < 16; i++ {
+					off := int64(r2.intn(64)) * (64 << 10)
+					r2.fill(p)
+					if err := pwriteFull(int(f.Fd()), p, off); err != nil {
+						return err
+					}
+					if err := preadFull(int(f.Fd()), q, off); err != nil {
+						return err
+					}
+					if firstDiff(p, q) >= 0 {
+						return fmt.Errorf("read back differs at %d", off)
+					}
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		case a == 3 && len(live) > 0: // graceful close / kill
+			i := r.intn(len(live))
+			s := live[i]
+			live = append(live[:i], live[i+1:]...)
+			if s.dev != nil {
+				if err := step("close "+s.path, s.dev.Close); err != nil {
+					return err
+				}
+			} else {
+				_ = s.cmd.Kill()
+				orphans = append(orphans, s.id)
+			}
+		case a == 4 && len(orphans) > 0: // reap an orphan
+			id := orphans[0]
+			orphans = orphans[1:]
+			if err := step(fmt.Sprintf("reap %d", id), func() error { return ublk.DeleteDevice(id) }); err != nil {
+				return err
+			}
+		case a == 5: // list must not fail
+			if err := step("list", func() error { _, err := ublk.ListDevices(); return err }); err != nil {
+				return err
+			}
+		}
+	}
+	t.Logf("%d actions", actions)
+	if p := kernelProblems(mark); p != "" {
+		return fmt.Errorf("kernel log (seed %d): %s", seed, p)
+	}
+	return nil
+}
