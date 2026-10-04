@@ -32,6 +32,38 @@ type DeviceParams struct {
 
 	DeviceName  string
 	CPUAffinity []int
+
+	// Size is the device size in bytes; 0 means Backend.Size().
+	Size int64
+	// CanDiscard and CanWriteZeroes say which range operations the server
+	// handles; only those get advertised limits. DeviceParamsFor sets them
+	// from the backend's optional interfaces.
+	CanDiscard, CanWriteZeroes bool
+
+	// Flags are additional UBLK_F_* features to request (recovery,
+	// NEED_GET_DATA, NO_AUTO_PART_SCAN, QUIESCE, UPDATE_SIZE, ...).
+	Flags uint64
+	// UblksrvFlags is stored by the kernel and returned by GET_DEV_INFO.
+	UblksrvFlags uint64
+
+	// Optional geometry; zero means the default derived from LogicalBlockSize.
+	PhysicalBlockSize   int
+	IOMinSize           int
+	IOOptSize           int
+	ChunkSectors        uint32
+	VirtBoundaryMask    uint64
+	DMAAlignment        uint32 // sent as UBLK_PARAM_TYPE_DMA_ALIGN when nonzero
+	SegmentBoundaryMask uint64 // the three segment limits are sent together
+	MaxSegmentSize      uint32 // as UBLK_PARAM_TYPE_SEGMENT when any is nonzero
+	MaxSegments         uint16
+}
+
+// DeviceSize is the device size in bytes.
+func (p *DeviceParams) DeviceSize() int64 {
+	if p.Size > 0 || p.Backend == nil {
+		return p.Size
+	}
+	return p.Backend.Size()
 }
 
 func DefaultDeviceParams(backend interfaces.Backend) DeviceParams {

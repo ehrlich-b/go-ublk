@@ -131,11 +131,11 @@ func testCreateStartStopClose(t *T) error {
 	return waitForGone(dev.Path, 5*time.Second)
 }
 
-// testRestartAfterStop checks the documented contract that Start can resume a
-// device after Stop. Last in the run order because a kernel that can't restart
-// a stopped device may leave it wedged.
+// testRestartAfterStop checks that Start refuses a stopped device. Restarting
+// a stopped ublk device is unreliable in the kernel (it oopsed Arch's 7.2.8 in
+// the partition scan and wedged 6.10-6.12), so the library must never try.
 func testRestartAfterStop(t *T) error {
-	params, b := memParams(16 << 20)
+	params, _ := memParams(16 << 20)
 	dev, err := ublk.Create(params, nil)
 	if err != nil {
 		return err
@@ -147,23 +147,8 @@ func testRestartAfterStop(t *T) error {
 	if err := dev.Stop(); err != nil {
 		return fmt.Errorf("Stop: %w", err)
 	}
-	if err := dev.Start(context.Background()); err != nil {
-		return fmt.Errorf("Start after Stop (documented as supported): %w", err)
-	}
-	if err := waitForNode(dev.Path, 5*time.Second); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	before := b.writes.Load()
-	if err := pwriteFull(int(f.Fd()), alignedBuf(4096), 0); err != nil {
-		return fmt.Errorf("write after restart: %w", err)
-	}
-	if b.writes.Load() == before {
-		return fmt.Errorf("write after restart never reached the backend")
+	if err := dev.Start(context.Background()); !errors.Is(err, ublk.ErrStopped) {
+		return fmt.Errorf("Start after Stop = %v, want ErrStopped", err)
 	}
 	return nil
 }

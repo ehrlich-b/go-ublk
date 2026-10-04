@@ -21,15 +21,12 @@ func (c *Controller) AddDevice(ctx context.Context, params *DeviceParams) (*uapi
 		QueueDepth:    uint16(params.QueueDepth),
 		MaxIOBufBytes: uint32(params.MaxIOSize),
 		Flags:         c.buildFeatureFlags(params),
+		UblksrvFlags:  params.UblksrvFlags,
 	})
 }
 
 // SetDeviceParams is SetParams with the parameters a DeviceParams implies.
 func (c *Controller) SetDeviceParams(ctx context.Context, id uint32, params *DeviceParams) error {
-	if params.EnableFUA {
-		c.logger.Warn("EnableFUA requested but not advertised: per-IO FUA is not implemented; " +
-			"set VolatileCache to get FUA semantics via block-layer post-flush emulation")
-	}
 	p := deviceUblkParams(params)
 	if p.HasDiscard() && params.MaxDiscardSegments != 1 && p.Discard.MaxDiscardSectors != 0 {
 		c.logger.Warn("clamping MaxDiscardSegments to 1: ublk only supports single-segment discard",
@@ -45,19 +42,38 @@ func (c *Controller) SetDeviceParams(ctx context.Context, id uint32, params *Dev
 
 // deviceUblkParams builds the SET_PARAMS payload for a DeviceParams.
 func deviceUblkParams(params *DeviceParams) *uapi.UblkParams {
+	orLBS := func(v int) int {
+		if v > 0 {
+			return v
+		}
+		return params.LogicalBlockSize
+	}
 	p := &uapi.UblkParams{
 		Types: uapi.UBLK_PARAM_TYPE_BASIC,
 		Basic: uapi.UblkParamBasic{
 			Attrs:           basicAttrs(params),
 			LogicalBSShift:  uint8(sizeToShift(params.LogicalBlockSize)),
-			PhysicalBSShift: uint8(sizeToShift(params.LogicalBlockSize)),
-			IOMinShift:      uint8(sizeToShift(params.LogicalBlockSize)),
+			PhysicalBSShift: uint8(sizeToShift(orLBS(params.PhysicalBlockSize))),
+			IOMinShift:      uint8(sizeToShift(orLBS(params.IOMinSize))),
+			IOOptShift:      uint8(sizeToShift(max(params.IOOptSize, 1))),
 			// Both of these count 512-byte sectors, NOT logical blocks: the
 			// kernel checks max_sectors against max_io_buf_bytes >> 9 and
 			// derives capacity from dev_sectors << 9.
-			MaxSectors: uint32(params.MaxIOSize / uapi.SectorSize),
-			DevSectors: uint64(params.Backend.Size() / uapi.SectorSize),
+			MaxSectors:       uint32(params.MaxIOSize / uapi.SectorSize),
+			ChunkSectors:     params.ChunkSectors,
+			DevSectors:       uint64(params.DeviceSize() / uapi.SectorSize),
+			VirtBoundaryMask: params.VirtBoundaryMask,
 		},
+	}
+	if params.DMAAlignment != 0 {
+		p.Types |= uapi.UBLK_PARAM_TYPE_DMA_ALIGN
+		p.DMA.Alignment = params.DMAAlignment
+	}
+	if params.SegmentBoundaryMask != 0 || params.MaxSegmentSize != 0 || params.MaxSegments != 0 {
+		p.Types |= uapi.UBLK_PARAM_TYPE_SEGMENT
+		p.Seg.SegBoundaryMask = params.SegmentBoundaryMask
+		p.Seg.MaxSegmentSize = params.MaxSegmentSize
+		p.Seg.MaxSegments = params.MaxSegments
 	}
 	// Limits are only advertised for operations the backend can actually
 	// service, since advertising one we drop invites silent data loss.
@@ -74,11 +90,10 @@ func deviceUblkParams(params *DeviceParams) *uapi.UblkParams {
 // applied by ublk_dev_param_basic_apply -> set_disk_ro(), so dropping the bit
 // silently hands the caller a writable device.
 //
-// EnableFUA is deliberately NOT advertised. Nothing consumes the per-IO
-// UBLK_IO_F_FUA flag yet, and claiming FUA support we do not honor would turn a
-// power cut into silent corruption. Advertising a volatile cache without FUA is
-// safe: the block layer then emulates FUA as write + post-flush, so a caller
-// asking for FUA still gets those semantics, just via a flush we do implement.
+// EnableFUA is only set by the public layer when the server honors the
+// per-I/O UBLK_IO_F_FUA flag (a FUABackend, or a Handler that says so), and
+// only takes effect with a volatile cache. Without it the block layer emulates
+// FUA as write + post-flush, which is always safe.
 func basicAttrs(params *DeviceParams) uint32 {
 	var attrs uint32
 	if params.ReadOnly {
@@ -89,6 +104,9 @@ func basicAttrs(params *DeviceParams) uint32 {
 	}
 	if params.VolatileCache {
 		attrs |= uapi.UBLK_ATTR_VOLATILE_CACHE
+		if params.EnableFUA {
+			attrs |= uapi.UBLK_ATTR_FUA
+		}
 	}
 	return attrs
 }
@@ -100,8 +118,12 @@ func basicAttrs(params *DeviceParams) uint32 {
 // MaxDiscardSectors doubles as the write-zeroes limit; nothing has yet needed
 // them to differ.
 func discardParams(params *DeviceParams) (uapi.UblkParamDiscard, bool) {
-	_, canDiscard := params.Backend.(interfaces.DiscardBackend)
-	_, canWriteZeroes := params.Backend.(interfaces.WriteZeroesBackend)
+	canDiscard, canWriteZeroes := params.CanDiscard, params.CanWriteZeroes
+	if params.Backend != nil {
+		_, d := params.Backend.(interfaces.DiscardBackend)
+		_, z := params.Backend.(interfaces.WriteZeroesBackend)
+		canDiscard, canWriteZeroes = canDiscard || d, canWriteZeroes || z
+	}
 	if params.MaxDiscardSectors == 0 || (!canDiscard && !canWriteZeroes) {
 		return uapi.UblkParamDiscard{}, false
 	}
@@ -153,7 +175,7 @@ func (c *Controller) buildFeatureFlags(params *DeviceParams) uint64 {
 		flags |= uapi.UBLK_F_CMD_IOCTL_ENCODE
 	}
 
-	return flags
+	return flags | params.Flags
 }
 
 // sizeToShift converts a size to its shift value (log2)

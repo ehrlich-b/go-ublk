@@ -20,37 +20,48 @@ func replaceControllerFactory(t *testing.T, factory func() (*ctrl.Controller, er
 	t.Cleanup(func() { createController = original })
 }
 
-func TestRejectUserCopyBeforeControllerCreation(t *testing.T) {
-	params := DefaultParams(NewMockBackend(1 << 20))
-	if err := validateParams(&params); err != nil {
+func TestRejectUnimplementedModesBeforeControllerCreation(t *testing.T) {
+	base := DefaultParams(NewMockBackend(1 << 20))
+	if err := validateParams(&base); err != nil {
 		t.Fatalf("default address-buffer mode rejected: %v", err)
 	}
-	params.EnableUserCopy = true
-	if err := validateParams(&params); !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("user-copy validation error = %v, want ErrNotImplemented", err)
+	userCopy := base
+	userCopy.EnableUserCopy = true
+	if err := validateParams(&userCopy); err != nil {
+		t.Fatalf("user copy is implemented but was rejected: %v", err)
 	}
 
 	createCalls := 0
 	replaceControllerFactory(t, func() (*ctrl.Controller, error) {
 		createCalls++
-		return nil, errors.New("controller must not be opened for unsupported user-copy mode")
+		return nil, errors.New("controller must not be opened for an unimplemented mode")
 	})
-	for _, test := range []struct {
+	for _, mode := range []struct {
 		name string
-		call func() (*Device, error)
+		set  func(*DeviceParams)
 	}{
-		{"Create", func() (*Device, error) { return Create(params, nil) }},
-		{"CreateAndServe", func() (*Device, error) { return CreateAndServe(context.Background(), params, nil) }},
+		{"EnableZeroCopy", func(p *DeviceParams) { p.EnableZeroCopy = true }},
+		{"EnableZoned", func(p *DeviceParams) { p.EnableZoned = true }},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			device, err := test.call()
-			if device != nil || !errors.Is(err, ErrNotImplemented) || !strings.Contains(err.Error(), "EnableUserCopy") {
-				t.Fatalf("device=%v error=%v, want nil device and explicit unsupported mode", device, err)
-			}
-		})
+		params := base
+		mode.set(&params)
+		for _, test := range []struct {
+			name string
+			call func() (*Device, error)
+		}{
+			{"Create", func() (*Device, error) { return Create(params, nil) }},
+			{"CreateAndServe", func() (*Device, error) { return CreateAndServe(context.Background(), params, nil) }},
+		} {
+			t.Run(mode.name+"/"+test.name, func(t *testing.T) {
+				device, err := test.call()
+				if device != nil || !errors.Is(err, ErrNotImplemented) || !strings.Contains(err.Error(), mode.name) {
+					t.Fatalf("device=%v error=%v, want nil device and explicit unsupported mode", device, err)
+				}
+			})
+		}
 	}
 	if createCalls != 0 {
-		t.Fatalf("opened controller %d times for unsupported mode", createCalls)
+		t.Fatalf("opened controller %d times for unsupported modes", createCalls)
 	}
 }
 
@@ -66,8 +77,8 @@ func TestPublicOperationsPreserveControllerOpenErrors(t *testing.T) {
 			}{
 				{"Create", func() error { _, err := Create(params, nil); return err }},
 				{"CreateAndServe", func() error { _, err := CreateAndServe(context.Background(), params, nil); return err }},
-				{"Stop", func() error { return (&Device{started: true}).Stop() }},
-				{"Close", func() error { return (&Device{}).Close() }},
+				{"Stop", func() error { return (&Device{state: DeviceStateRunning, done: make(chan struct{})}).Stop() }},
+				{"Close", func() error { return (&Device{state: DeviceStateCreated, done: make(chan struct{})}).Close() }},
 				{"ListDevices", func() error { _, err := ListDevices(); return err }},
 				{"DeleteDevice", func() error { return DeleteDevice(42) }},
 			} {

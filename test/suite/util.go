@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
@@ -262,21 +263,74 @@ const serverSubcommand = "__server"
 func serverMain(args []string) {
 	fs := flag.NewFlagSet(serverSubcommand, flag.ExitOnError)
 	size := fs.Int64("size", 64<<20, "device size")
+	file := fs.String("file", "", "back the device with this file instead of RAM")
+	recovery := fs.Bool("recovery", false, "create with RecoveryReissue")
+	detach := fs.Bool("detach-on-usr1", false, "on SIGUSR1, Detach and exit 0")
 	_ = fs.Parse(args)
 
-	params, _ := memParams(*size)
+	var params ublk.DeviceParams
+	if *file != "" {
+		b, err := openFileBackend(*file, *size)
+		if err != nil {
+			fmt.Printf("ERROR %v\n", err)
+			os.Exit(1)
+		}
+		params = ublk.DefaultParams(b)
+		params.NumQueues, params.QueueDepth = 2, 32
+	} else {
+		params, _ = memParams(*size)
+	}
+	if *recovery {
+		params.Recovery = ublk.RecoveryReissue
+	}
 	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
 	if err != nil {
 		fmt.Printf("ERROR %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("READY %d\n", dev.ID)
+	if *detach {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGUSR1)
+		<-ch
+		if err := dev.Detach(); err != nil {
+			fmt.Fprintf(os.Stderr, "detach: %v\n", err)
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
 	select {} // serve until killed
 }
 
+// fileBackend is a file-backed backend, so a device's contents outlive the
+// server process that wrote them (recovery tests).
+type fileBackend struct {
+	f    *os.File
+	size int64
+}
+
+func openFileBackend(path string, size int64) (*fileBackend, error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Truncate(size); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &fileBackend{f: f, size: size}, nil
+}
+
+func (b *fileBackend) ReadAt(p []byte, off int64) (int, error)  { return b.f.ReadAt(p, off) }
+func (b *fileBackend) WriteAt(p []byte, off int64) (int, error) { return b.f.WriteAt(p, off) }
+func (b *fileBackend) Size() int64                              { return b.size }
+func (b *fileBackend) Close() error                             { return b.f.Close() }
+func (b *fileBackend) Flush() error                             { return b.f.Sync() }
+
 // startServer launches a server subprocess and returns it with its device ID.
-func startServer(t *T, size int64) (*exec.Cmd, uint32, error) {
-	cmd := exec.Command("/proc/self/exe", serverSubcommand, "-size", strconv.FormatInt(size, 10))
+func startServer(t *T, size int64, extra ...string) (*exec.Cmd, uint32, error) {
+	args := append([]string{serverSubcommand, "-size", strconv.FormatInt(size, 10)}, extra...)
+	cmd := exec.Command("/proc/self/exe", args...)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {

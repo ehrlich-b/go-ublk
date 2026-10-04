@@ -543,19 +543,18 @@ func (m *memBackend) Close() error                             { return nil }
 func (m *memBackend) Flush() error                             { return nil }
 
 type plane struct {
-	fd      int
-	runners []*queue.Runner
-	cancel  context.CancelFunc
+	fd     int
+	queues []*queue.Queue
 }
 
-// startPlane brings up the existing queue engine for id: open /dev/ublkcN,
-// one runner per queue, FETCH_REQs submitted.
+// startPlane brings up the queue engine for id: open /dev/ublkcN, one queue
+// per hardware queue, FETCH_REQs submitted when it returns.
 func startPlane(id uint32, queues uint16, depth int, be *memBackend) (*plane, error) {
 	path := uapi.UblkDevicePath(id)
 	fd := -1
 	var err error
 	for i := 0; i < constants.CharDeviceOpenRetries; i++ {
-		if fd, err = syscall.Open(path, syscall.O_RDWR, 0); err == nil {
+		if fd, err = syscall.Open(path, syscall.O_RDWR|syscall.O_CLOEXEC, 0); err == nil {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -563,28 +562,31 @@ func startPlane(id uint32, queues uint16, depth int, be *memBackend) (*plane, er
 	if fd < 0 {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	p := &plane{fd: fd, cancel: cancel}
+	p := &plane{fd: fd}
 	for q := uint16(0); q < queues; q++ {
-		r, err := queue.NewRunner(ctx, queue.Config{DevID: id, QueueID: q, Depth: depth, MaxIOSize: 1 << 20, Backend: be, CharFd: fd})
+		qu, err := queue.NewQueue(queue.QueueConfig{QueueID: q, Depth: depth, MaxIOSize: 1 << 20,
+			CharFd: fd, Handler: queue.BackendHandler(be, nil), CPU: -1})
 		if err != nil {
 			p.close()
 			return nil, err
 		}
-		p.runners = append(p.runners, r)
-		if err := r.Start(); err != nil {
+		p.queues = append(p.queues, qu)
+		if err := qu.Start(); err != nil {
 			p.close()
 			return nil, err
 		}
 	}
-	time.Sleep(constants.QueueInitDelay)
 	return p, nil
 }
 
+// close lets go of the device without stopping it, as a dying server would.
 func (p *plane) close() {
-	p.cancel()
-	for _, r := range p.runners {
-		r.Close()
+	for _, q := range p.queues {
+		q.Abandon()
+	}
+	for _, q := range p.queues {
+		q.Wait(10 * time.Second)
+		_ = q.Close()
 	}
 	if p.fd >= 0 {
 		syscall.Close(p.fd)
