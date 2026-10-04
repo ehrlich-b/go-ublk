@@ -100,6 +100,8 @@ These come from the Ubuntu and stable changelogs. Each is a reason to stay curre
 
 | Fix | What it changes | Where it landed |
 |---|---|---|
+| `d369735e02ef` ublk: fix mmap for 64K page size | Multi-queue devices could not map their descriptors on 64K-page kernels (some arm64 builds) | 6.13; stable 6.1.120, 6.6.64, 6.12.2 |
+| `25966fc09769` ublk: fix NULL dereference on `UPDATE_SIZE` without a disk (CVE-2026-43364) | `UPDATE_SIZE` on a device that was never started oopsed 6.16 to 6.19; resize only started devices (go-ublk's `Resize` requires a running device) | 7.0-rc4; stable 6.18.20, 6.19.9 |
 | `1860c2f85922` ublk: reject max_sectors smaller than PAGE_SECTORS in parameter validation | A `max_sectors` below one page used to pass `SET_PARAMS` and trip a `WARN_ON_ONCE` at `START_DEV`; now `SET_PARAMS` fails with `-EINVAL` | stable 7.0.11; `linux-hwe-7.0` 7.0.0-28 |
 | ublk: wait on ublk_dev_ready() instead of ub->completion (CVE-2026-68173) | After a server crash, `END_USER_RECOVERY` could mark the device live before every queue had fetched again (when the preceding `START_USER_RECOVERY` had failed), stranding a requeued request (for example ext4's flush) so `fsync` and teardown hung. Recovery and `START_DEV` now wait for real queue readiness | `linux-hwe-7.0` 7.0.0-38 |
 | ublk: reset kernel-owned dev_info fields in ublk_ctrl_add_dev() (CVE-2026-74472) | `ADD_DEV` no longer keeps kernel-owned fields of the caller's `ublksrv_ctrl_dev_info` | `linux-hwe-7.0` 7.0.0-39 (proposed) |
