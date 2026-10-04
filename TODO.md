@@ -389,11 +389,14 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     stack copy between building the command and the "kernel" write; it fails against the old code
     (reply reads back as zeros) and passes now. A command whose context ends returns
     `*ctrl.InFlightError` and a reaper keeps ring and page alive until the CQE arrives.
-    Still open: an abandoned command that sleeps interruptibly in the kernel (END_USER_RECOVERY or
-    START_DEV waiting for FETCHes, DEL_DEV waiting for the last reference) only ends when its
-    io_uring is cancelled. With today's `minimalRing.Close` (#17) that is process exit; measured
-    on 7.0.0-38, the abandoned device lingered until then. Needs ring teardown on Close or an
-    ASYNC_CANCEL path in `internal/uring`.
+    An abandoned command that sleeps interruptibly in the kernel (END_USER_RECOVERY or START_DEV
+    waiting for FETCHes, DEL_DEV waiting for the last reference, QUIESCE_DEV) only ends when its
+    io_uring request is cancelled. With today's `minimalRing.Close` (#17) that is process exit;
+    measured on 7.0.0-38, the abandoned device lingered until then. ctrl already uses a ring's
+    `SubmitCtrlCmdContext` (IORING_OP_ASYNC_CANCEL) when it has one: on top of the internal/uring
+    rewrite branch, with `CtrlTimeout: -1` set in `ctrl.newSlot`, the same 7.0.0-38 check got
+    EINTR back within the grace period and the device was released. That one-line setting is the
+    remaining step once both branches are merged.
 
 ---
 
