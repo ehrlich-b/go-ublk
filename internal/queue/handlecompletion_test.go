@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"encoding/binary"
 	"strings"
 	"sync"
@@ -25,6 +26,11 @@ type fakeRing struct {
 func (f *fakeRing) Close() error { return nil }
 func (f *fakeRing) SubmitCtrlCmd(cmd uint32, c *uapi.UblksrvCtrlCmd, ud uint64) (uring.Result, error) {
 	return nil, nil
+}
+func (f *fakeRing) SubmitCtrlCmdContext(
+	_ context.Context, cmd uint32, c *uapi.UblksrvCtrlCmd, ud uint64,
+) (uring.Result, error) {
+	return f.SubmitCtrlCmd(cmd, c, ud)
 }
 func (f *fakeRing) SubmitCtrlCmdAsync(cmd uint32, c *uapi.UblksrvCtrlCmd, ud uint64) (*uring.AsyncHandle, error) {
 	return nil, nil

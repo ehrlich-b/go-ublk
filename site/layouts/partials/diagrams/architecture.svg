@@ -1,0 +1,56 @@
+<svg viewBox="0 0 760 432" role="img" aria-labelledby="arch-title arch-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="arch-title">ublk architecture</title>
+<desc id="arch-desc">An application does I/O on /dev/ublkbN. blk-mq hands each request to ublk_drv, which completes an io_uring command held by one of the ublk server's queue threads on /dev/ublkcN. The server's control thread manages the device through io_uring commands on /dev/ublk-control.</desc>
+<defs>
+<marker id="ah-arch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+<marker id="ah-arch-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-accent"/></marker>
+</defs>
+<text x="16" y="22" class="t-band">USERSPACE</text>
+<line x1="8" y1="230" x2="752" y2="230" class="band"/>
+<text x="16" y="252" class="t-band">KERNEL</text>
+<rect x="24" y="44" width="200" height="64" rx="8" class="box"/>
+<text x="124" y="70" text-anchor="middle" class="t-title">Application</text>
+<text x="124" y="90" text-anchor="middle" class="t-small">mkfs, a database, a VM</text>
+<rect x="300" y="32" width="436" height="152" rx="10" class="box"/>
+<text x="518" y="56" text-anchor="middle" class="t-title">ublk server (your process)</text>
+<rect x="316" y="72" width="150" height="96" rx="7" class="box-alt"/>
+<text x="391" y="98" text-anchor="middle" class="t-title">control thread</text>
+<text x="391" y="120" text-anchor="middle" class="t-small">one io_uring for</text>
+<text x="391" y="138" text-anchor="middle" class="t-small">device lifecycle</text>
+<rect x="480" y="72" width="240" height="96" rx="7" class="box-alt"/>
+<text x="600" y="98" text-anchor="middle" class="t-title">queue threads q0 … qN</text>
+<text x="600" y="120" text-anchor="middle" class="t-small">one io_uring per hardware queue,</text>
+<text x="600" y="138" text-anchor="middle" class="t-small">one buffer and one slot per tag</text>
+<rect x="24" y="262" width="200" height="52" rx="8" class="box"/>
+<text x="124" y="285" text-anchor="middle" class="t-mono">/dev/ublkbN</text>
+<text x="124" y="303" text-anchor="middle" class="t-small">the block device</text>
+<rect x="24" y="352" width="200" height="60" rx="8" class="box"/>
+<text x="124" y="377" text-anchor="middle" class="t-title">blk-mq</text>
+<text x="124" y="396" text-anchor="middle" class="t-small">queues × depth tags</text>
+<rect x="316" y="262" width="150" height="52" rx="8" class="box"/>
+<text x="391" y="285" text-anchor="middle" class="t-mono">/dev/ublk-control</text>
+<text x="391" y="303" text-anchor="middle" class="t-small">one per system</text>
+<rect x="480" y="262" width="240" height="52" rx="8" class="box"/>
+<text x="600" y="285" text-anchor="middle" class="t-mono">/dev/ublkcN</text>
+<text x="600" y="303" text-anchor="middle" class="t-small">char device, descriptor mmap</text>
+<rect x="300" y="352" width="436" height="60" rx="10" class="box-alt"/>
+<text x="518" y="377" text-anchor="middle" class="t-title">ublk_drv</text>
+<text x="518" y="396" text-anchor="middle" class="t-small">writes a descriptor per request, completes the waiting command</text>
+<line x1="124" y1="108" x2="124" y2="258" class="line" marker-end="url(#ah-arch)"/>
+<text x="134" y="176" class="t-small">read, write,</text>
+<text x="134" y="191" class="t-small">flush, discard</text>
+<line x1="124" y1="314" x2="124" y2="348" class="line" marker-end="url(#ah-arch)"/>
+<line x1="224" y1="382" x2="296" y2="382" class="line" marker-end="url(#ah-arch)"/>
+<text x="260" y="374" text-anchor="middle" class="t-small">queue_rq</text>
+<line x1="391" y1="168" x2="391" y2="258" class="line-accent" marker-end="url(#ah-arch-a)"/>
+<text x="381" y="194" text-anchor="end" class="t-small">control commands</text>
+<text x="381" y="209" text-anchor="end" class="t-small">(URING_CMD)</text>
+<line x1="568" y1="168" x2="568" y2="258" class="line-accent" marker-end="url(#ah-arch-a)"/>
+<text x="558" y="194" text-anchor="end" class="t-small">commit result,</text>
+<text x="558" y="209" text-anchor="end" class="t-small">fetch next</text>
+<line x1="632" y1="258" x2="632" y2="168" class="line-accent" marker-end="url(#ah-arch-a)"/>
+<text x="642" y="194" class="t-small">CQE: a new</text>
+<text x="642" y="209" class="t-small">request</text>
+<line x1="391" y1="314" x2="391" y2="348" class="line" marker-end="url(#ah-arch)"/>
+<line x1="600" y1="318" x2="600" y2="348" class="line" marker-start="url(#ah-arch)" marker-end="url(#ah-arch)"/>
+</svg>

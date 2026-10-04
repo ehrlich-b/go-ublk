@@ -47,7 +47,7 @@ func DefaultDeviceParams(backend interfaces.Backend) DeviceParams {
 		EnableUnprivileged: false,
 		EnableUserCopy:     false,
 		EnableZoned:        false,
-		EnableIoctlEncode:  false, // Disable ioctl mode, use URING_CMD
+		EnableIoctlEncode:  false, // redundant: AddDev always sets UBLK_F_CMD_IOCTL_ENCODE
 
 		ReadOnly:      false,
 		Rotational:    false,

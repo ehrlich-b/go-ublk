@@ -94,6 +94,13 @@ crash: FORCE
 	@echo "Building crash$(if $(BUILD_FLAGS), (with race detector),)..."
 	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/crash ./test/crash
 
+# Control-plane checker (test/ctrl) — every control command against the running
+# kernel, as root and as an unprivileged user. Creates devices: test guests only.
+ctrltest: FORCE
+	@mkdir -p bin
+	@echo "Building ctrltest..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ctrltest ./test/ctrl
+
 clean:
 	$(GOCLEAN)
 	rm -rf bin/ build/
@@ -118,6 +125,10 @@ test-uapi-fuzz:
 		-run='^$$' -fuzz='^FuzzFixedUAPI$$' -fuzztime=$(FUZZ_TIME) ./internal/uapi
 	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
 		-run='^$$' -fuzz='^FuzzParamsUAPI$$' -fuzztime=$(FUZZ_TIME) ./internal/uapi
+	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
+		-run='^$$' -fuzz='^FuzzUAPIEncodings$$' -fuzztime=$(FUZZ_TIME) ./internal/uapi
+	GOMAXPROCS=$(FUZZ_PARALLEL) $(GOTEST) -p=$(FUZZ_PARALLEL) -parallel=$(FUZZ_PARALLEL) \
+		-run='^$$' -fuzz='^FuzzCtrlDecoders$$' -fuzztime=$(FUZZ_TIME) ./internal/ctrl
 
 test-integration:
 	@echo "Running integration tests (requires root and ublk kernel support)..."
@@ -586,6 +597,29 @@ vm-kernel-latest: vm-check
 	@echo "Done. Kernel: $$($(VM_SSH) 'uname -r')"
 
 #==============================================================================
+# Docs site (Hugo; source in site/, output in site/public, gitignored)
+#==============================================================================
+
+HUGO ?= hugo
+SITE_DIR = site
+
+.PHONY: site site-serve site-check
+
+# Build the static site. Any Hugo warning fails the build, and so does an
+# internal Markdown link to a page that does not exist.
+site:
+	@echo "Building docs site..."
+	@$(HUGO) --source $(SITE_DIR) --gc --minify --cleanDestinationDir --panicOnWarning
+
+# Local preview with live reload on http://localhost:1313/
+site-serve:
+	@$(HUGO) server --source $(SITE_DIR) --bind 127.0.0.1 --port 1313
+
+# Build, then check every internal link and #fragment in the generated HTML.
+site-check: site
+	@python3 $(SITE_DIR)/check-links.py $(SITE_DIR)/public
+
+#==============================================================================
 # Help
 #==============================================================================
 
@@ -616,6 +650,12 @@ help:
 	@echo "  make vm-fuzz        Comprehensive fuzz test (30s/test)"
 	@echo "  make vm-stress      10x stress test"
 	@echo "  make vm-reset       Hard reset VM"
+	@echo ""
+	@echo "Docs site:"
+	@echo "  make site           Build the Hugo site into site/public"
+	@echo "  make site-serve     Preview the site on http://localhost:1313/"
+	@echo "  make site-check     Build, then check internal links and anchors"
+	@echo "  (deploy: bash site/deploy.sh, see the script header)"
 	@echo ""
 	@echo "Kernel:"
 	@echo "  make check-kernel   Check ublk kernel support"

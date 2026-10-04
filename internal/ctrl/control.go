@@ -1,15 +1,21 @@
+// Package ctrl issues ublk control commands on /dev/ublk-control.
+//
+// Every command in the v7.3-rc5 UAPI has one typed method (commands.go).
+// Commands go through io_uring URING_CMD with the header's exact ioctl
+// encodings. A Controller is safe for concurrent use: each in-flight command
+// owns a private io_uring and an off-heap scratch page for its buffer.
 package ctrl
 
 import (
-	"encoding/binary"
+	"context"
 	"errors"
 	"fmt"
-	"os"
-	"runtime"
+	"sync"
 	"syscall"
 	"unsafe"
 
-	"github.com/ehrlich-b/go-ublk/internal/interfaces"
+	"golang.org/x/sys/unix"
+
 	"github.com/ehrlich-b/go-ublk/internal/logging"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
@@ -17,423 +23,172 @@ import (
 
 const (
 	UblkControlPath = "/dev/ublk-control"
+
+	// AnyDevID asks ADD_DEV to pick the device number.
+	AnyDevID = ^uint32(0)
+
+	// defaultMaxInFlight bounds commands running at once on one Controller.
+	// Commands abandoned by their context do not count against it.
+	defaultMaxInFlight = 8
+
+	// scratchSize is each slot's off-heap command buffer: the char-device
+	// path prefix (at most maxDevPathArea bytes) followed by the payload.
+	scratchSize    = 2 * 4096
+	maxDevPathArea = 256
+	maxPayload     = scratchSize - maxDevPathArea
 )
 
-type Controller struct {
-	controlFd int
-	ring      uring.Ring
-	logger    *logging.Logger
+// ENOTSUPP is the kernel-internal "operation not supported" (524) that
+// ublk_drv before v7.x returns for an unknown control command. It is not a
+// userspace errno, so syscall has no name for it.
+const ENOTSUPP = syscall.Errno(524)
+
+// ErrClosed is returned by commands issued after Close.
+var ErrClosed = errors.New("ublk controller closed")
+
+// Error is a failed control command. Err is the kernel's negative CQE result
+// as a syscall.Errno, or the transport error from io_uring. Use errors.Is on
+// it, e.g. errors.Is(err, syscall.EBUSY).
+type Error struct {
+	Op    string // command name, e.g. "STOP_DEV"
+	DevID uint32
+	Err   error
 }
 
-func NewController() (*Controller, error) {
-	fd, err := syscall.Open(UblkControlPath, syscall.O_RDWR, 0)
+func (e *Error) Error() string {
+	if e.DevID == AnyDevID {
+		return fmt.Sprintf("ublk %s: %v", e.Op, e.Err)
+	}
+	return fmt.Sprintf("ublk %s dev %d: %v", e.Op, e.DevID, e.Err)
+}
+
+func (e *Error) Unwrap() error { return e.Err }
+
+// IsUnsupported reports whether err means the running kernel does not know
+// the command: EOPNOTSUPP (v7.x) or ENOTSUPP (v6.x drivers).
+func IsUnsupported(err error) bool {
+	return errors.Is(err, syscall.EOPNOTSUPP) || errors.Is(err, ENOTSUPP)
+}
+
+// InFlightError is returned when a command's context ends before the kernel
+// completes it. The command is NOT cancelled: the kernel keeps executing it,
+// and the Controller keeps its ring and buffer alive until the completion
+// arrives. errors.Is(err, context.DeadlineExceeded) (or Canceled) holds.
+type InFlightError struct {
+	Op    string
+	DevID uint32
+	Err   error // the context's error
+
+	done   chan struct{}
+	result error
+}
+
+func (e *InFlightError) Error() string {
+	return fmt.Sprintf("ublk %s dev %d: %v (command still running in the kernel)", e.Op, e.DevID, e.Err)
+}
+
+func (e *InFlightError) Unwrap() error { return e.Err }
+
+// Done is closed when the kernel completes the abandoned command.
+func (e *InFlightError) Done() <-chan struct{} { return e.done }
+
+// Result is the abandoned command's outcome once Done is closed (nil on
+// success); before that it returns nil.
+func (e *InFlightError) Result() error {
+	select {
+	case <-e.done:
+		return e.result
+	default:
+		return nil
+	}
+}
+
+// slot is one command's private transport: an io_uring on its own
+// /dev/ublk-control fd and an mmap'd scratch buffer. The kernel reads and
+// writes ctrl_cmd.addr after io_uring_enter returns (every sleeping command
+// runs on io-wq), so the buffer must never move or be freed while a command
+// may be in flight: Go heap memory can move with a goroutine stack (it did,
+// Critical Bug #21) and is freed by the GC, mmap'd memory is neither.
+type slot struct {
+	ring  uring.Ring
+	fd    int
+	mem   []byte
+	unmap func([]byte) error
+}
+
+func (s *slot) close() error {
+	err := s.ring.Close()
+	if s.fd >= 0 {
+		err = errors.Join(err, syscall.Close(s.fd))
+	}
+	return errors.Join(err, s.unmap(s.mem))
+}
+
+// retire releases a slot whose last command failed in transport. The kernel
+// may still own that command (a timed-out wait), so the ring and fd are
+// closed but the scratch page is leaked: a late kernel write must land in
+// memory nobody else will ever use.
+func (s *slot) retire() {
+	_ = s.ring.Close()
+	if s.fd >= 0 {
+		_ = syscall.Close(s.fd)
+	}
+}
+
+func newSlot() (*slot, error) {
+	fd, err := syscall.Open(UblkControlPath, syscall.O_RDWR|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", UblkControlPath, err)
 	}
-
-	config := uring.Config{
-		Entries: 32,
-		FD:      int32(fd),
-		Flags:   0,
-	}
-
-	ring, err := uring.NewRing(config)
+	// No fixed cap: the caller's context bounds STOP_DEV and DEL_DEV, and
+	// SubmitCtrlCmdContext cancels the command when it ends.
+	ring, err := uring.NewRing(uring.Config{Entries: 4, FD: int32(fd), CtrlTimeout: -1})
 	if err != nil {
 		syscall.Close(fd)
 		return nil, fmt.Errorf("failed to create io_uring: %w", err)
 	}
-
-	return &Controller{
-		controlFd: fd,
-		ring:      ring,
-		logger:    logging.Default(),
-	}, nil
-}
-
-func (c *Controller) Close() error {
-	var ringErr, fdErr error
-	if c.ring != nil {
-		ring := c.ring
-		c.ring = nil
-		ringErr = ring.Close()
-	}
-	if c.controlFd >= 0 {
-		fd := c.controlFd
-		c.controlFd = -1
-		fdErr = syscall.Close(fd)
-	}
-	return errors.Join(ringErr, fdErr)
-}
-
-// controlResultError preserves both transport errors and negative kernel CQEs
-// for errors.Is/errors.As, including callers' structured errno classification.
-func controlResultError(op string, result uring.Result, err error) error {
+	mem, err := unix.Mmap(-1, 0, scratchSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
 	if err != nil {
-		return fmt.Errorf("%s submit failed: %w", op, err)
+		ring.Close()
+		syscall.Close(fd)
+		return nil, fmt.Errorf("failed to map control buffer: %w", err)
 	}
-	if result.Value() < 0 {
-		return fmt.Errorf("%s failed: %w", op, syscall.Errno(-int64(result.Value())))
-	}
-	return nil
+	return &slot{ring: ring, fd: fd, mem: mem, unmap: unix.Munmap}, nil
 }
 
-func (c *Controller) AddDevice(params *DeviceParams) (*uapi.UblksrvCtrlDevInfo, error) {
-	// Auto-detect number of queues if not specified
-	numQueues := params.NumQueues
-	if numQueues <= 0 {
-		numQueues = 1 // Start with 1 queue for simplicity
-	}
+// Controller issues ublk control commands. It is safe for concurrent use;
+// up to defaultMaxInFlight commands run at once, each on its own ring.
+type Controller struct {
+	logger  *logging.Logger
+	newSlot func() (*slot, error)
+	sem     chan struct{}
 
-	// Create and populate device info structure
-	devInfo := &uapi.UblksrvCtrlDevInfo{
-		NrHwQueues:    uint16(numQueues),
-		QueueDepth:    uint16(params.QueueDepth),
-		State:         0, // UBLK_S_DEV_INIT
-		MaxIOBufBytes: uint32(params.MaxIOSize),
-		DevID:         uint32(params.DeviceID),
-		UblksrvPID:    int32(os.Getpid()),
-		// Negotiate features up front
-		Flags:        c.buildFeatureFlags(params),
-		UblksrvFlags: 0,
-		OwnerUID:     uint32(os.Getuid()),
-		OwnerGID:     uint32(os.Getgid()),
-	}
+	mu     sync.Mutex
+	idle   []*slot
+	closed bool
 
-	c.logger.Debug("submitting ADD_DEV",
-		"queues", devInfo.NrHwQueues,
-		"depth", devInfo.QueueDepth,
-		"max_io", devInfo.MaxIOBufBytes,
-		"flags", fmt.Sprintf("0x%x", devInfo.UblksrvFlags),
-		"dev_id", devInfo.DevID)
+	featMu   sync.Mutex
+	features *FeatureSet
+}
 
-	// Marshal device info (64-byte format matches kernel 6.6+)
-	deviceInfoBytes := uapi.Marshal(devInfo)
+// NewController opens /dev/ublk-control. The first ring is created eagerly
+// so open and permission errors surface here.
+func NewController() (*Controller, error) {
+	return newController(newSlot)
+}
 
-	// Build the 32-byte control header.
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      devInfo.DevID,
-		QueueID:    0xFFFF,
-		Len:        uint16(len(deviceInfoBytes)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&deviceInfoBytes[0]))),
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-	c.logger.Debug("submitting control command",
-		"dev_id", cmd.DevID,
-		"queue_id", cmd.QueueID,
-		"len", cmd.Len,
-		"addr", fmt.Sprintf("0x%x", cmd.Addr))
-
-	c.logger.Debug("device info buffer", "size", len(deviceInfoBytes), "data", fmt.Sprintf("%x", deviceInfoBytes))
-
-	// Use ioctl encoding - required by modern kernels (6.11+)
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	runtime.KeepAlive(deviceInfoBytes)
-	if err := controlResultError("ADD_DEV", result, err); err != nil {
+func newController(factory func() (*slot, error)) (*Controller, error) {
+	s, err := factory()
+	if err != nil {
 		return nil, err
 	}
-
-	c.logger.Info("ADD_DEV completed", "result", result.Value())
-
-	info := uapi.UnmarshalCtrlDevInfo(deviceInfoBytes)
-	c.logger.Info("device created", "dev_id", info.DevID,
-		"queues", info.NrHwQueues, "max_io", info.MaxIOBufBytes)
-	return info, nil
-}
-
-// basicAttrs maps the caller-visible device attributes onto UBLK_ATTR_* bits.
-// The kernel only honors what we actually send here: read-only, for example, is
-// applied by ublk_dev_param_basic_apply -> set_disk_ro(), so dropping the bit
-// silently hands the caller a writable device.
-//
-// EnableFUA is deliberately NOT advertised. Nothing consumes the per-IO
-// UBLK_IO_F_FUA flag yet, and claiming FUA support we do not honor would turn a
-// power cut into silent corruption. Advertising a volatile cache without FUA is
-// safe: the block layer then emulates FUA as write + post-flush, so a caller
-// asking for FUA still gets those semantics, just via a flush we do implement.
-func basicAttrs(params *DeviceParams) uint32 {
-	var attrs uint32
-	if params.ReadOnly {
-		attrs |= uapi.UBLK_ATTR_READ_ONLY
+	c := &Controller{
+		logger:  logging.Default(),
+		newSlot: factory,
+		sem:     make(chan struct{}, defaultMaxInFlight),
+		idle:    []*slot{s},
 	}
-	if params.Rotational {
-		attrs |= uapi.UBLK_ATTR_ROTATIONAL
-	}
-	if params.VolatileCache {
-		attrs |= uapi.UBLK_ATTR_VOLATILE_CACHE
-	}
-	return attrs
-}
-
-// discardParams builds the discard limits to advertise, and reports whether
-// they should be sent at all. See the call site in SetParams for why this is
-// gated on the backend implementing DiscardBackend.
-func discardParams(params *DeviceParams) (uapi.UblkParamDiscard, bool) {
-	// Discard and write-zeroes share one param block but are separate
-	// capabilities, and each is advertised only if the backend can service it —
-	// the runner dispatches them through these two interfaces. MaxDiscardSectors
-	// doubles as the write-zeroes limit; nothing has yet needed them to differ.
-	_, canDiscard := params.Backend.(interfaces.DiscardBackend)
-	_, canWriteZeroes := params.Backend.(interfaces.WriteZeroesBackend)
-	if params.MaxDiscardSectors == 0 || (!canDiscard && !canWriteZeroes) {
-		return uapi.UblkParamDiscard{}, false
-	}
-
-	// ublk_validate_params() rejects the whole SET_PARAMS with -EINVAL unless
-	// max_discard_segments is exactly 1 ("So far, only support single segment
-	// discard") and discard_granularity is non-zero. Neither is expressible any
-	// other way, so normalize rather than let a caller's value fail device
-	// creation outright. Granularity is required even when only write-zeroes is
-	// advertised.
-	granularity := params.DiscardGranularity
-	if granularity == 0 {
-		granularity = uint32(params.LogicalBlockSize)
-	}
-
-	discard := uapi.UblkParamDiscard{
-		DiscardAlignment:   params.DiscardAlignment,
-		DiscardGranularity: granularity,
-	}
-	if canDiscard {
-		discard.MaxDiscardSectors = params.MaxDiscardSectors
-		discard.MaxDiscardSegments = 1
-	}
-	if canWriteZeroes {
-		discard.MaxWriteZeroesSectors = params.MaxDiscardSectors
-	}
-	return discard, true
-}
-
-func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
-	c.logger.Debug("setting device parameters",
-		"logical_bs", params.LogicalBlockSize,
-		"max_io", params.MaxIOSize,
-		"backend_size", params.Backend.Size())
-
-	if params.EnableFUA {
-		c.logger.Warn("EnableFUA requested but not advertised: per-IO FUA is not implemented; " +
-			"set VolatileCache to get FUA semantics via block-layer post-flush emulation")
-	}
-
-	ublkParams := &uapi.UblkParams{
-		Types: uapi.UBLK_PARAM_TYPE_BASIC,
-		Basic: uapi.UblkParamBasic{
-			Attrs:           basicAttrs(params),
-			LogicalBSShift:  uint8(sizeToShift(params.LogicalBlockSize)),
-			PhysicalBSShift: uint8(sizeToShift(params.LogicalBlockSize)),
-			IOOptShift:      0,
-			IOMinShift:      uint8(sizeToShift(params.LogicalBlockSize)),
-			// Both of these count 512-byte sectors, NOT logical blocks: the
-			// kernel checks max_sectors against max_io_buf_bytes >> 9 and
-			// derives capacity from dev_sectors << 9.
-			MaxSectors:       uint32(params.MaxIOSize / uapi.SectorSize),
-			ChunkSectors:     0,
-			DevSectors:       uint64(params.Backend.Size() / uapi.SectorSize),
-			VirtBoundaryMask: 0,
-		},
-	}
-
-	c.logger.Debug("calculated basic parameters",
-		"logical_bs_shift", ublkParams.Basic.LogicalBSShift,
-		"max_sectors", ublkParams.Basic.MaxSectors,
-		"dev_sectors", ublkParams.Basic.DevSectors)
-
-	// Limits are only advertised for operations the backend can actually
-	// service, since advertising one we drop invites silent data loss.
-	// MaxDiscardSectors == 0 means the caller opted out of both.
-	if discard, ok := discardParams(params); ok {
-		if params.MaxDiscardSegments != 1 && discard.MaxDiscardSectors != 0 {
-			c.logger.Warn("clamping MaxDiscardSegments to 1: ublk only supports single-segment discard",
-				"requested", params.MaxDiscardSegments)
-		}
-		ublkParams.Types |= uapi.UBLK_PARAM_TYPE_DISCARD
-		ublkParams.Discard = discard
-		c.logger.Debug("advertising discard limits",
-			"max_discard_sectors", params.MaxDiscardSectors,
-			"granularity", params.DiscardGranularity,
-			"max_segments", params.MaxDiscardSegments)
-	}
-
-	// Marshal params - the Len field is set automatically by the marshal function
-	buf := uapi.Marshal(ublkParams)
-
-	// Pad buffer to minimum 128 bytes if needed
-	if len(buf) < 128 {
-		padded := make([]byte, 128)
-		copy(padded, buf)
-		buf = padded
-		binary.LittleEndian.PutUint32(buf[0:4], 128)
-		c.logger.Debug("padded parameter buffer", "size", 128)
-	}
-
-	c.logger.Debug("parameter buffer prepared",
-		"size", len(buf),
-		"addr", fmt.Sprintf("%p", &buf[0]),
-		"first_16_bytes", fmt.Sprintf("%x", buf[:16]))
-
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      deviceID,
-		QueueID:    0xFFFF,
-		Len:        uint16(len(buf)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_SET_PARAMS)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	runtime.KeepAlive(buf)
-	if err := controlResultError("SET_PARAMS", result, err); err != nil {
-		return err
-	}
-
-	c.logger.Info("SET_PARAMS completed", "result", result.Value())
-
-	return nil
-}
-
-func (c *Controller) StartDevice(deviceID uint32) error {
-	c.logger.Debug("starting device", "dev_id", deviceID)
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      deviceID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       uint64(os.Getpid()),
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err := controlResultError("START_DEV", result, err); err != nil {
-		return err
-	}
-
-	c.logger.Info("START_DEV completed", "result", result.Value())
-
-	return nil
-}
-
-func (c *Controller) StopDevice(deviceID uint32) error {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      deviceID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_STOP_DEV)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	return controlResultError("STOP_DEV", result, err)
-}
-
-func (c *Controller) DeleteDevice(deviceID uint32) error {
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      deviceID,
-		QueueID:    0xFFFF,
-		Len:        0,
-		Addr:       0,
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_DEL_DEV)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	return controlResultError("DEL_DEV", result, err)
-}
-
-func (c *Controller) GetDeviceInfo(deviceID uint32) (*uapi.UblksrvCtrlDevInfo, error) {
-	buf := make([]byte, 80)
-
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      deviceID,
-		QueueID:    0xFFFF,
-		Len:        uint16(len(buf)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_DEV_INFO)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	runtime.KeepAlive(buf)
-	if err := controlResultError("GET_DEV_INFO", result, err); err != nil {
-		return nil, err
-	}
-
-	devInfo := uapi.UnmarshalCtrlDevInfo(buf)
-	return devInfo, nil
-}
-
-// GetParams retrieves current device parameters (including devt majors/minors when available)
-func (c *Controller) GetParams(deviceID uint32) (*uapi.UblkParams, error) {
-	// GET_PARAMS reads this input header before copying the kernel's fixed
-	// layout back. Reserve room for newer appended blocks; decode known types.
-	buf := make([]byte, 256)
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(buf)))
-
-	cmd := &uapi.UblksrvCtrlCmd{
-		DevID:      deviceID,
-		QueueID:    0xFFFF,
-		Len:        uint16(len(buf)),
-		Addr:       uint64(uintptr(unsafe.Pointer(&buf[0]))),
-		Data:       0,
-		DevPathLen: 0,
-		Pad:        0,
-		Reserved:   0,
-	}
-
-	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_PARAMS)
-	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	runtime.KeepAlive(buf)
-	if err := controlResultError("GET_PARAMS", result, err); err != nil {
-		return nil, err
-	}
-	params := &uapi.UblkParams{}
-	if err := uapi.UnmarshalParamsResponse(buf, params); err != nil {
-		return nil, fmt.Errorf("GET_PARAMS decode failed: %w", err)
-	}
-	return params, nil
-}
-
-func (c *Controller) buildFeatureFlags(params *DeviceParams) uint64 {
-	var flags uint64
-
-	// Prefer completions in task context for control plane, as seen in
-	// working reference setups (flags 0x42 = COMP_IN_TASK | IOCTL_ENCODE).
-	// This is generally safe for control cmds and improves compatibility.
-	flags |= uapi.UBLK_F_URING_CMD_COMP_IN_TASK
-
-	if params.EnableZeroCopy {
-		flags |= uapi.UBLK_F_SUPPORT_ZERO_COPY
-	}
-
-	if params.EnableUnprivileged {
-		flags |= uapi.UBLK_F_UNPRIVILEGED_DEV
-	}
-
-	if params.EnableUserCopy {
-		flags |= uapi.UBLK_F_USER_COPY
-	}
-
-	if params.EnableIoctlEncode {
-		flags |= uapi.UBLK_F_CMD_IOCTL_ENCODE
-	}
-
-	return flags
+	return c, nil
 }
 
 // SetLogger sets the logger for this controller
@@ -443,11 +198,228 @@ func (c *Controller) SetLogger(logger *logging.Logger) {
 	}
 }
 
-// sizeToShift converts a size to its shift value (log2)
-func sizeToShift(size int) int {
-	shift := 0
-	for s := size; s > 1; s >>= 1 {
-		shift++
+// Close releases idle rings and makes further commands fail with ErrClosed.
+// It does not wait for commands still running: a command in flight (or
+// abandoned by its context) releases its ring when the kernel completes it.
+func (c *Controller) Close() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
 	}
-	return shift
+	c.closed = true
+	idle := c.idle
+	c.idle = nil
+	c.mu.Unlock()
+	var err error
+	for _, s := range idle {
+		err = errors.Join(err, s.close())
+	}
+	return err
+}
+
+func (c *Controller) acquire(ctx context.Context) (*slot, error) {
+	select {
+	case c.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		<-c.sem
+		return nil, ErrClosed
+	}
+	if n := len(c.idle); n > 0 {
+		s := c.idle[n-1]
+		c.idle = c.idle[:n-1]
+		c.mu.Unlock()
+		return s, nil
+	}
+	c.mu.Unlock()
+	s, err := c.newSlot()
+	if err != nil {
+		<-c.sem
+		return nil, err
+	}
+	return s, nil
+}
+
+// release returns a slot after its command completed (in transport terms).
+func (c *Controller) release(s *slot, transportErr error) {
+	if transportErr != nil {
+		s.retire()
+		return
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = s.close()
+		return
+	}
+	c.idle = append(c.idle, s)
+	c.mu.Unlock()
+}
+
+// request describes one control command.
+type request struct {
+	name    string
+	op      uint32 // UBLK_U_CMD_*
+	devID   uint32
+	data    uint64
+	devPath string // prefixed to the buffer when non-empty (dev_path_len)
+	payload int    // payload bytes after the path; 0 means no buffer
+	fill    func(p []byte)
+	// read decodes the payload after a successful (res >= 0) completion,
+	// while the slot is still owned.
+	read func(p []byte, res int32) error
+	// late runs on the reaper goroutine if the caller abandoned the command
+	// and it later succeeded (ADD_DEV uses it to delete the orphan).
+	late func(p []byte, res int32)
+}
+
+type outcome struct {
+	res int32
+	err error
+}
+
+// exec runs req on a private slot and returns the kernel's CQE result.
+func (c *Controller) exec(ctx context.Context, req request) (int32, error) {
+	if req.payload > maxPayload || len(req.devPath)+1 > maxDevPathArea {
+		return 0, &Error{Op: req.name, DevID: req.devID, Err: syscall.E2BIG}
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, &Error{Op: req.name, DevID: req.devID, Err: err}
+	}
+	s, err := c.acquire(ctx)
+	if err != nil {
+		return 0, &Error{Op: req.name, DevID: req.devID, Err: err}
+	}
+	defer func() { <-c.sem }()
+
+	cmd, payload := layout(s.mem, req)
+	if ctx.Done() == nil {
+		res, terr := s.ring.SubmitCtrlCmd(req.op, &cmd, 0)
+		o := c.finish(s, req, res, terr, payload, false)
+		return o.res, o.err
+	}
+
+	// The submit runs on its own goroutine, which owns the slot until the
+	// kernel completes the command, whether or not anyone is still waiting.
+	var (
+		mu        sync.Mutex
+		finished  bool
+		result    outcome
+		abandoned *InFlightError
+		done      = make(chan struct{})
+	)
+	go func() {
+		var res uring.Result
+		var terr error
+		if cr, ok := s.ring.(ctxRing); ok {
+			res, terr = cr.SubmitCtrlCmdContext(ctx, req.op, &cmd, 0)
+		} else {
+			res, terr = s.ring.SubmitCtrlCmd(req.op, &cmd, 0)
+		}
+		mu.Lock()
+		result = c.finish(s, req, res, terr, payload, abandoned != nil)
+		finished = true
+		if abandoned != nil {
+			abandoned.result = result.err
+			close(abandoned.done)
+		}
+		mu.Unlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return result.res, result.err
+	case <-ctx.Done():
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if finished {
+		return result.res, result.err
+	}
+	abandoned = &InFlightError{Op: req.name, DevID: req.devID, Err: ctx.Err(), done: make(chan struct{})}
+	c.logger.Warn("control command abandoned by context, still running in the kernel",
+		"op", req.name, "dev_id", req.devID, "err", ctx.Err())
+	return 0, abandoned
+}
+
+// ctxRing is a ring that can cancel an in-flight control command when its
+// context ends: it submits IORING_OP_ASYNC_CANCEL, which signals the io-wq
+// worker so interruptible kernel waits (START_DEV and END_USER_RECOVERY
+// waiting for FETCHes, DEL_DEV waiting for the last reference, QUIESCE_DEV)
+// return EINTR, and it reaps the command's own completion before returning.
+// It then returns a non-nil Result together with an error wrapping the
+// context's; a nil Result with an error means the completion was not reaped
+// and the command may still be running. Rings without it are only waited on.
+type ctxRing interface {
+	SubmitCtrlCmdContext(ctx context.Context, cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (uring.Result, error)
+}
+
+// finish turns a completion into an outcome, decodes the payload (read for a
+// waiting caller, late for an abandoned one) and only then releases the slot.
+// A non-nil Result is the kernel's verdict even when it comes with an error
+// (a reaped cancellation); only a nil Result with an error leaves the
+// command's fate unknown and retires the slot.
+func (c *Controller) finish(s *slot, req request, res uring.Result, terr error, payload []byte, late bool) outcome {
+	var cancelled error
+	if res != nil && terr != nil {
+		c.logger.Debug("control command cancelled and reaped", "op", req.name, "dev_id", req.devID, "res", res.Value(), "err", terr)
+		cancelled, terr = terr, nil
+	}
+	o := outcome{err: terr}
+	if terr == nil {
+		o.res = res.Value()
+		switch {
+		case o.res < 0:
+			o.err = syscall.Errno(-o.res)
+			if cancelled != nil {
+				o.err = errors.Join(o.err, cancelled) // keeps errors.Is(err, ctx.Err())
+			}
+		case late && req.late != nil:
+			req.late(payload, o.res)
+		case !late && req.read != nil:
+			o.err = req.read(payload, o.res)
+		}
+	}
+	c.release(s, terr)
+	if o.err != nil {
+		o.err = &Error{Op: req.name, DevID: req.devID, Err: o.err}
+	}
+	if late {
+		c.logger.Info("abandoned control command completed", "op", req.name, "dev_id", req.devID, "res", o.res, "err", o.err)
+	}
+	return o
+}
+
+// layout clears the scratch buffer and builds the command header. With a
+// device path the buffer is [path NUL pad-to-8][payload] and dev_path_len
+// covers the padded path; the driver strips it before reading the payload
+// (ublk_ctrl_uring_cmd_permission).
+func layout(mem []byte, req request) (uapi.UblksrvCtrlCmd, []byte) {
+	pathArea := 0
+	if req.devPath != "" {
+		pathArea = (len(req.devPath) + 1 + 7) &^ 7
+	}
+	total := pathArea + req.payload
+	clear(mem[:total])
+	copy(mem, req.devPath)
+	payload := mem[pathArea:total]
+	if req.fill != nil {
+		req.fill(payload)
+	}
+	cmd := uapi.UblksrvCtrlCmd{
+		DevID:      req.devID,
+		QueueID:    0xFFFF,
+		Len:        uint16(total),
+		Data:       req.data,
+		DevPathLen: uint16(pathArea),
+	}
+	if total > 0 {
+		cmd.Addr = uint64(uintptr(unsafe.Pointer(&mem[0])))
+	}
+	return cmd, payload
 }

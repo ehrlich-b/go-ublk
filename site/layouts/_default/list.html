@@ -1,0 +1,32 @@
+{{ define "main" }}
+<details class="mobile-nav">
+  <summary>Menu</summary>
+  <nav aria-label="Site (mobile)">{{ partial "nav.html" . }}</nav>
+</details>
+<div class="layout">
+  <aside class="sidebar">
+    <nav aria-label="Site">{{ partial "nav.html" . }}</nav>
+  </aside>
+  <main id="main" class="content">
+    <article class="prose">
+      <header class="page-header">
+        <h1>{{ .Title }}</h1>
+        {{- with .Description }}<p class="lede">{{ . }}</p>{{ end }}
+      </header>
+      {{ .Content }}
+      {{- if not .Params.nolist }}
+      <ol class="chapter-list">
+        {{- range .Pages.ByWeight }}
+        <li>
+          <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+          {{- with .Description }}<p>{{ . }}</p>{{ end }}
+        </li>
+        {{- end }}
+      </ol>
+      {{- end }}
+      <p class="edit-link"><a href="{{ site.Params.editBase }}{{ .File.Path }}">Edit this page on GitHub</a></p>
+    </article>
+    {{ partial "pager.html" . }}
+  </main>
+</div>
+{{ end }}

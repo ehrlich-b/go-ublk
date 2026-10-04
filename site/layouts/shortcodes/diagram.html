@@ -1,0 +1,10 @@
+{{- /* Hand-written inline SVG from layouts/partials/diagrams/NAME.svg: {{< diagram "architecture" "Caption" >}} */ -}}
+{{- $name := .Get 0 -}}
+<figure class="diagram">
+<div class="diagram-scroll" tabindex="0" role="region" aria-label="Diagram, scrolls horizontally">
+{{ partial (printf "diagrams/%s.svg" $name) . }}
+</div>
+{{- with .Get 1 }}
+<figcaption>{{ . | markdownify }}</figcaption>
+{{- end }}
+</figure>

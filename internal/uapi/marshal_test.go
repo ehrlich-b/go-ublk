@@ -42,18 +42,49 @@ func TestUnitUAPISizes(t *testing.T) {
 		t.Errorf("sizeof(ublk_param_zoned) = %d, want 32", got)
 	}
 
-	// Both Go and C round this version of ublk_params (108 bytes of fields)
-	// up to 112 for alignment. The marshaler may send the 108-byte prefix
-	// through the last selected field, omitting only tail padding.
-	if got := unsafe.Sizeof(UblkParams{}); got != 112 {
-		t.Errorf("sizeof(UblkParams) = %d, want 112 (Go alignment pad, see below)", got)
+	if got := unsafe.Sizeof(UblkParamDMAAlign{}); got != 8 {
+		t.Errorf("sizeof(ublk_param_dma_align) = %d, want 8", got)
+	}
+	if got := unsafe.Sizeof(UblkParamSegment{}); got != 16 {
+		t.Errorf("sizeof(ublk_param_segment) = %d, want 16", got)
+	}
+	if got := unsafe.Sizeof(UblkParamIntegrity{}); got != 16 {
+		t.Errorf("sizeof(ublk_param_integrity) = %d, want 16", got)
+	}
+
+	// v7.3 ublk_params is 152 bytes on LP64 with no tail padding, but a
+	// 4-byte hole at 116 before the 8-byte-aligned segment block. The Go
+	// struct only matches that on 64-bit targets; the wire format never
+	// depends on it (marshal.go copies blocks to fixed offsets).
+	if unsafe.Sizeof(uintptr(0)) == 8 {
+		if got := unsafe.Sizeof(UblkParams{}); got != 152 {
+			t.Errorf("sizeof(UblkParams) = %d, want 152", got)
+		}
 	}
 	full := &UblkParams{
 		Types: UBLK_PARAM_TYPE_BASIC | UBLK_PARAM_TYPE_DISCARD |
 			UBLK_PARAM_TYPE_DEVT | UBLK_PARAM_TYPE_ZONED,
 	}
 	if got := len(Marshal(full)); got != 108 {
-		t.Errorf("marshaled ublk_params wire size = %d, want 108", got)
+		t.Errorf("marshaled pre-v6.15 ublk_params wire size = %d, want 108", got)
+	}
+	full.Types |= UBLK_PARAM_TYPE_DMA_ALIGN | UBLK_PARAM_TYPE_SEGMENT | UBLK_PARAM_TYPE_INTEGRITY
+	if got := len(Marshal(full)); got != UblkParamsSize || UblkParamsSize != 152 {
+		t.Errorf("marshaled v7.3 ublk_params wire size = %d (UblkParamsSize %d), want 152", got, UblkParamsSize)
+	}
+	for _, s := range []struct {
+		name string
+		got  uintptr
+		want uintptr
+	}{
+		{"ublk_elem_header", unsafe.Sizeof(UblkElemHeader{}), 8},
+		{"ublk_batch_io", unsafe.Sizeof(UblkBatchIO{}), 16},
+		{"ublk_auto_buf_reg", unsafe.Sizeof(UblkAutoBufReg{}), 8},
+		{"ublk_shmem_buf_reg", unsafe.Sizeof(UblkShmemBufReg{}), 24},
+	} {
+		if s.got != s.want {
+			t.Errorf("sizeof(%s) = %d, want %d", s.name, s.got, s.want)
+		}
 	}
 }
 
@@ -114,11 +145,73 @@ func TestUnitParamBlockOffsets(t *testing.T) {
 		{"Discard", unsafe.Offsetof(p.Discard), 40},
 		{"Devt", unsafe.Offsetof(p.Devt), 60},
 		{"Zoned", unsafe.Offsetof(p.Zoned), 76},
+		{"DMA", unsafe.Offsetof(p.DMA), 108},
+		{"Seg", unsafe.Offsetof(p.Seg), 120},
+		{"Integrity", unsafe.Offsetof(p.Integrity), 136},
 	}
 	for _, f := range params {
+		if unsafe.Sizeof(uintptr(0)) != 8 && f.want > 108 {
+			continue // 32-bit Go aligns uint64 to 4; the wire offsets are fixed constants
+		}
 		if f.offset != f.want {
 			t.Errorf("ublk_params.%s offset = %d, want %d", f.name, f.offset, f.want)
 		}
+	}
+	// The marshaler's wire offsets, independent of the Go layout.
+	wire := []struct {
+		name       string
+		start, end int
+		want       [2]int
+	}{
+		{"basic", paramsBasicOffset, paramsBasicEnd, [2]int{8, 40}},
+		{"discard", paramsDiscardOffset, paramsDiscardEnd, [2]int{40, 60}},
+		{"devt", paramsDevtOffset, paramsDevtEnd, [2]int{60, 76}},
+		{"zoned", paramsZonedOffset, paramsZonedEnd, [2]int{76, 108}},
+		{"dma", paramsDMAOffset, paramsDMAEnd, [2]int{108, 116}},
+		{"seg", paramsSegOffset, paramsSegEnd, [2]int{120, 136}},
+		{"integrity", paramsIntegrityOffset, paramsIntegrityEnd, [2]int{136, 152}},
+	}
+	for _, w := range wire {
+		if [2]int{w.start, w.end} != w.want {
+			t.Errorf("wire %s block = [%d,%d), want %v", w.name, w.start, w.end, w.want)
+		}
+	}
+}
+
+// TestGoldenUblkParamsV73Blocks pins the three v6.15+/v7.0 blocks, including
+// the zero hole at 116..120 that the C compiler inserts before seg.
+func TestGoldenUblkParamsV73Blocks(t *testing.T) {
+	p := &UblkParams{
+		Types:     UBLK_PARAM_TYPE_DMA_ALIGN | UBLK_PARAM_TYPE_SEGMENT | UBLK_PARAM_TYPE_INTEGRITY,
+		Basic:     UblkParamBasic{Attrs: 0xffffffff}, // not selected: must not appear
+		DMA:       UblkParamDMAAlign{Alignment: 0x1ff, Pad: [4]uint8{1, 2, 3, 4}},
+		Seg:       UblkParamSegment{SegBoundaryMask: 0x0102030405060708, MaxSegmentSize: 0x11223344, MaxSegments: 0x5566, Pad: [2]uint8{7, 8}},
+		Integrity: UblkParamIntegrity{Flags: LBMD_PI_CAP_INTEGRITY | LBMD_PI_CAP_REFTAG, MaxIntegritySegments: 0x0a0b, IntervalExp: 12, MetadataSize: 8, PIOffset: 0, CsumType: LBMD_PI_CSUM_CRC16_T10DIF, TagSize: 2, Pad: [5]uint8{9, 9, 9, 9, 9}},
+	}
+	want := make([]byte, 152)
+	want[0] = 152 // Len
+	want[4] = 0x70
+	// dma @108: alignment LE, then pad bytes.
+	copy(want[108:116], []byte{0xff, 0x01, 0, 0, 1, 2, 3, 4})
+	// 116..120 stays zero.
+	// seg @120: mask LE, max_segment_size LE, max_segments LE, pad.
+	copy(want[120:136], []byte{8, 7, 6, 5, 4, 3, 2, 1, 0x44, 0x33, 0x22, 0x11, 0x66, 0x55, 7, 8})
+	// integrity @136: flags LE, max_integrity_segments LE, interval_exp,
+	// metadata_size, pi_offset, csum_type, tag_size, pad[5].
+	copy(want[136:152], []byte{3, 0, 0, 0, 0x0b, 0x0a, 12, 8, 0, 2, 2, 9, 9, 9, 9, 9})
+	got := Marshal(p)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("Marshal = %x\nwant      %x", got, want)
+	}
+	assertMarshalIntoMatches(t, p, got)
+	var back UblkParams
+	if err := Unmarshal(got, &back); err != nil {
+		t.Fatal(err)
+	}
+	p.Basic = UblkParamBasic{}
+	p.Len = 152
+	if back != *p {
+		t.Fatalf("round trip = %+v, want %+v", back, *p)
 	}
 }
 
@@ -288,7 +381,7 @@ func TestGoldenUblksrvCtrlDevInfo(t *testing.T) {
 				0x00, 0x01,
 				// State uint16 @4 (LE), UBLK_S_DEV_LIVE = 1
 				0x01, 0x00,
-				// Pad0 uint16 @6 (LE)
+				// IODescSize uint16 @6 (LE), formerly pad0
 				0x00, 0x00,
 				// MaxIOBufBytes uint32 @8 (LE)
 				0x00, 0x00, 0x10, 0x00,
@@ -323,7 +416,7 @@ func TestGoldenUblksrvCtrlDevInfo(t *testing.T) {
 				NrHwQueues:    ^uint16(0),
 				QueueDepth:    ^uint16(0),
 				State:         ^uint16(0),
-				Pad0:          ^uint16(0),
+				IODescSize:    ^uint16(0),
 				MaxIOBufBytes: ^uint32(0),
 				DevID:         ^uint32(0),
 				UblksrvPID:    0x7FFFFFFF,
@@ -336,7 +429,7 @@ func TestGoldenUblksrvCtrlDevInfo(t *testing.T) {
 				Reserved2:     ^uint64(0),
 			},
 			want: []byte{
-				// NrHwQueues..Pad0 @0..8 (4x uint16 LE, all max)
+				// NrHwQueues..IODescSize @0..8 (4x uint16 LE, all max)
 				0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 				// MaxIOBufBytes uint32 @8, DevID uint32 @12
 				0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -686,7 +779,7 @@ func TestRoundTripUblksrvCtrlDevInfo(t *testing.T) {
 	}{
 		{"distinct", distinct},
 		{"zero", &UblksrvCtrlDevInfo{}},
-		{"max", &UblksrvCtrlDevInfo{NrHwQueues: ^uint16(0), QueueDepth: ^uint16(0), State: ^uint16(0), Pad0: ^uint16(0), MaxIOBufBytes: ^uint32(0), DevID: ^uint32(0), UblksrvPID: 0x7FFFFFFF, Pad1: ^uint32(0), Flags: ^uint64(0), UblksrvFlags: ^uint64(0), OwnerUID: ^uint32(0), OwnerGID: ^uint32(0), Reserved1: ^uint64(0), Reserved2: ^uint64(0)}},
+		{"max", &UblksrvCtrlDevInfo{NrHwQueues: ^uint16(0), QueueDepth: ^uint16(0), State: ^uint16(0), IODescSize: ^uint16(0), MaxIOBufBytes: ^uint32(0), DevID: ^uint32(0), UblksrvPID: 0x7FFFFFFF, Pad1: ^uint32(0), Flags: ^uint64(0), UblksrvFlags: ^uint64(0), OwnerUID: ^uint32(0), OwnerGID: ^uint32(0), Reserved1: ^uint64(0), Reserved2: ^uint64(0)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

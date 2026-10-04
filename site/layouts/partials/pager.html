@@ -1,0 +1,18 @@
+{{- /* Previous/next follow the sidebar order: each section page, then its pages by weight. */ -}}
+{{- $flat := slice -}}
+{{- range site.Home.Sections.ByWeight -}}
+  {{- $flat = $flat | append . -}}
+  {{- range .Pages.ByWeight }}{{ $flat = $flat | append . }}{{ end -}}
+{{- end -}}
+{{- $idx := -1 -}}
+{{- range $i, $p := $flat }}{{ if eq $p.RelPermalink $.RelPermalink }}{{ $idx = $i }}{{ end }}{{ end -}}
+{{- if ge $idx 0 -}}
+<nav class="pager" aria-label="Previous and next pages">
+  {{- if gt $idx 0 }}{{ with index $flat (sub $idx 1) }}
+  <a class="pager-prev" href="{{ .RelPermalink }}"><span class="pager-label">Previous</span><span class="pager-title">{{ .LinkTitle }}</span></a>
+  {{- end }}{{ else }}<span></span>{{ end }}
+  {{- if lt (add $idx 1) (len $flat) }}{{ with index $flat (add $idx 1) }}
+  <a class="pager-next" href="{{ .RelPermalink }}"><span class="pager-label">Next</span><span class="pager-title">{{ .LinkTitle }}</span></a>
+  {{- end }}{{ end }}
+</nav>
+{{- end -}}

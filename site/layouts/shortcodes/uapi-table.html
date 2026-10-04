@@ -1,0 +1,78 @@
+{{- /*
+  The kernel ublk UAPI surface from site/data/uapi.json as a filterable table.
+    {{< uapi-table >}}                 every item, with kind and status filters
+    {{< uapi-table kind="feature" >}}  only one kind
+  Filtering is pure CSS (radio inputs + :has), so it works without JavaScript;
+  site.js adds a text search box on top. One table per page (the filter ids
+  are fixed).
+*/ -}}
+{{- $data := site.Data.uapi -}}
+{{- $kind := .Get "kind" -}}
+{{- $items := $data.items -}}
+{{- if $kind }}{{ $items = where $items "kind" $kind }}{{ end -}}
+{{- $kinds := slice "ctrl_cmd" "io_cmd" "feature" "param_type" "io_op" "io_flag" "dev_state" "attr" "struct" "struct_field" "constant" -}}
+{{- $labels := dict
+  "ctrl_cmd" "Control commands" "io_cmd" "I/O commands" "feature" "Feature flags"
+  "param_type" "Parameter types" "io_op" "I/O operations" "io_flag" "I/O flags"
+  "dev_state" "Device states" "attr" "Attributes" "struct" "Structures"
+  "struct_field" "Structure fields" "constant" "Constants" -}}
+{{- $statuses := slice "supported" "partial" "missing" "not-applicable" -}}
+{{- $known := slice }}{{ range $data.items }}{{ $known = $known | append .name }}{{ end -}}
+<div class="uapi">
+{{- if $data.sample }}
+<div class="callout callout-warning" role="note"><p class="callout-title">Sample data</p><p>This table is rendering the small sample in <code>site/data/uapi.json</code>, not the full generated surface. The real file replaces it before publication.</p></div>
+{{- end }}
+<p class="uapi-source">
+{{- with $data.source }}Generated from <code>{{ .header }}</code> at Linux {{ .kernel }}{{ with .generated }} on {{ . }}{{ end }}. {{ end -}}
+{{ len $items }} {{ if $kind }}{{ lower (index $labels $kind) }}{{ else }}items{{ end }}.</p>
+<div class="uapi-filters">
+{{- if not $kind }}
+<fieldset class="filter-group">
+<legend>Kind</legend>
+<input type="radio" name="uapi-kind" id="uk-all" checked><label for="uk-all">All <span class="count">{{ len $items }}</span></label>
+{{- range $kinds }}{{ $n := len (where $items "kind" .) }}{{ if $n }}
+<input type="radio" name="uapi-kind" id="uk-{{ . }}"><label for="uk-{{ . }}">{{ index $labels . }} <span class="count">{{ $n }}</span></label>
+{{- end }}{{ end }}
+</fieldset>
+{{- end }}
+<fieldset class="filter-group">
+<legend>go-ublk</legend>
+<input type="radio" name="uapi-status" id="us-all" checked><label for="us-all">Any</label>
+{{- range $statuses }}{{ $n := len (where $items "go_ublk.status" .) }}{{ if $n }}
+<input type="radio" name="uapi-status" id="us-{{ . }}"><label for="us-{{ . }}">{{ cond (eq . "not-applicable") "n/a" . }} <span class="count">{{ $n }}</span></label>
+{{- end }}{{ end }}
+</fieldset>
+<p class="uapi-search" hidden><label for="uapi-q">Search</label><input type="search" id="uapi-q" placeholder="Name or summary" autocomplete="off"></p>
+</div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="UAPI reference table, scrolls horizontally">
+<table class="uapi-table">
+<thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Since</th><th scope="col">Summary</th><th scope="col">go-ublk</th></tr></thead>
+<tbody>
+{{- range $items }}
+{{- $id := partial "uapi-anchor.html" .name }}
+<tr id="{{ $id }}" data-kind="{{ .kind }}" data-status="{{ .go_ublk.status }}">
+<td class="uapi-name"><a href="#{{ $id }}"><code>{{ .name }}</code></a>{{ if not $kind }}<span class="uapi-kind">{{ index $labels .kind | default .kind }}</span>{{ end }}</td>
+<td class="uapi-value">{{ with .value }}<code>{{ . }}</code>{{ end }}</td>
+<td class="uapi-since">{{ with .introduced }}{{ strings.TrimPrefix "v" (string .) }}{{ else }}<span class="muted">?</span>{{ end }}</td>
+<td class="uapi-summary">{{ .summary | $.Page.RenderString }}
+{{- if or .details .requires .conflicts .notes .commit .go_ublk.notes }}
+<details>
+<summary>Details</summary>
+{{- with .details }}{{ $.Page.RenderString (dict "display" "block") . }}{{ end }}
+<dl class="uapi-meta">
+{{- with .requires }}<dt>Requires</dt><dd>{{ range $i, $r := . }}{{ if $i }}, {{ end }}{{ if in $known $r }}<a href="{{ "/reference/uapi/" | relURL }}#{{ partial "uapi-anchor.html" $r }}"><code>{{ $r }}</code></a>{{ else }}<code>{{ $r }}</code>{{ end }}{{ end }}</dd>{{ end }}
+{{- with .conflicts }}<dt>Conflicts with</dt><dd>{{ range $i, $r := . }}{{ if $i }}, {{ end }}{{ if in $known $r }}<a href="{{ "/reference/uapi/" | relURL }}#{{ partial "uapi-anchor.html" $r }}"><code>{{ $r }}</code></a>{{ else }}<code>{{ $r }}</code>{{ end }}{{ end }}</dd>{{ end }}
+{{- with .notes }}<dt>Notes</dt><dd>{{ $.Page.RenderString . }}</dd>{{ end }}
+{{- with .commit }}<dt>Commit</dt><dd><a href="https://git.kernel.org/linus/{{ . }}"><code>{{ substr . 0 12 }}</code></a></dd>{{ end }}
+{{- with .go_ublk.notes }}<dt>go-ublk</dt><dd>{{ $.Page.RenderString . }}</dd>{{ end }}
+</dl>
+</details>
+{{- end }}</td>
+<td class="uapi-status">{{ partial "status-badge.html" .go_ublk.status }}</td>
+</tr>
+{{- end }}
+</tbody>
+</table>
+</div>
+<p class="uapi-empty" hidden>No items match the current filters.</p>
+</div>

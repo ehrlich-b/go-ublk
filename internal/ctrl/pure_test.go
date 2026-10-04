@@ -77,18 +77,18 @@ func TestSizeToShiftDegenerate(t *testing.T) {
 // buildFeatureFlags only reads its params argument, so a zero-value
 // Controller is enough to exercise it — no /dev/ublk-control needed.
 
-// Every boolean feature flag off: the result must be exactly the unconditional
-// base flag and nothing else.
+// Every boolean feature flag off: nothing is requested. URING_CMD_COMP_IN_TASK
+// is no longer sent (inert since v6.5) and AddDev adds CMD_IOCTL_ENCODE itself.
 func TestBuildFeatureFlagsAllFalse(t *testing.T) {
 	got := (&Controller{}).buildFeatureFlags(&DeviceParams{})
-	want := uint64(uapi.UBLK_F_URING_CMD_COMP_IN_TASK)
+	want := uint64(0)
 	if got != want {
 		t.Errorf("buildFeatureFlags() = %#x, want %#x", got, want)
 	}
 }
 
 func TestBuildFeatureFlagsEachFlagAlone(t *testing.T) {
-	base := uint64(uapi.UBLK_F_URING_CMD_COMP_IN_TASK)
+	base := uint64(0)
 
 	tests := []struct {
 		name   string
@@ -150,8 +150,7 @@ func TestBuildFeatureFlagsAllTrue(t *testing.T) {
 	// The full OR of every bit buildFeatureFlags actually sets. EnableZoned is
 	// included in the input but contributes nothing — see the pinned finding in
 	// TestBuildFeatureFlagsEachFlagAlone.
-	want := uint64(uapi.UBLK_F_URING_CMD_COMP_IN_TASK |
-		uapi.UBLK_F_SUPPORT_ZERO_COPY |
+	want := uint64(uapi.UBLK_F_SUPPORT_ZERO_COPY |
 		uapi.UBLK_F_UNPRIVILEGED_DEV |
 		uapi.UBLK_F_USER_COPY |
 		uapi.UBLK_F_CMD_IOCTL_ENCODE)
