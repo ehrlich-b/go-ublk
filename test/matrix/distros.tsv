@@ -1,0 +1,44 @@
+# Distro kernels for the matrix. One row per kernel.
+# id	family	distro	image	method	spec
+# method apt:       pkg=METAPACKAGE | re=REGEX over linux-image-* names; suite=EXTRA_SUITE
+# method launchpad: kver=EXACT_UBUNTU_KVER;series=CODENAME (fetched from the Launchpad librarian, so superseded builds work)
+# method dnf:       pkgs=P1,P2,... (versions pinned to P1's latest); enable=REPO
+# method zypper:    pkgs=P1,P2,...
+# method pacman:    pkgs=P1
+ubuntu-22.04-ga	ubuntu	Ubuntu 22.04 GA	ubuntu:22.04	apt	pkg=linux-image-generic
+ubuntu-22.04-hwe	ubuntu	Ubuntu 22.04 HWE	ubuntu:22.04	apt	pkg=linux-image-generic-hwe-22.04
+ubuntu-24.04-ga	ubuntu	Ubuntu 24.04 GA	ubuntu:24.04	apt	pkg=linux-image-generic
+ubuntu-24.04-hwe-6.11	ubuntu	Ubuntu 24.04 HWE 6.11	ubuntu:24.04	apt	re=^linux-image-6\.11\.0-[0-9]+-generic$
+ubuntu-24.04-hwe-6.14	ubuntu	Ubuntu 24.04 HWE 6.14	ubuntu:24.04	apt	re=^linux-image-6\.14\.0-[0-9]+-generic$
+ubuntu-24.04-hwe-6.17	ubuntu	Ubuntu 24.04 HWE 6.17	ubuntu:24.04	apt	re=^linux-image-6\.17\.0-[0-9]+-generic$
+ubuntu-24.04-hwe	ubuntu	Ubuntu 24.04 HWE	ubuntu:24.04	apt	pkg=linux-image-generic-hwe-24.04
+ubuntu-24.04-hwe-7.0.0-38	ubuntu	Ubuntu 24.04 HWE 7.0.0-38 (Slide-tested)	ubuntu:24.04	launchpad	kver=7.0.0-38-generic;series=noble
+ubuntu-24.04-hwe-6.17.0-40	ubuntu	Ubuntu 24.04 HWE 6.17.0-40 (known-bad control)	ubuntu:24.04	launchpad	kver=6.17.0-40-generic;series=noble
+ubuntu-24.04-aws	ubuntu	Ubuntu 24.04 linux-aws	ubuntu:24.04	apt	pkg=linux-image-aws
+ubuntu-24.04-azure	ubuntu	Ubuntu 24.04 linux-azure	ubuntu:24.04	apt	pkg=linux-image-azure
+ubuntu-24.04-gcp	ubuntu	Ubuntu 24.04 linux-gcp	ubuntu:24.04	apt	pkg=linux-image-gcp
+ubuntu-25.04	ubuntu	Ubuntu 25.04	ubuntu:25.04	apt	pkg=linux-image-generic
+ubuntu-25.10	ubuntu	Ubuntu 25.10	ubuntu:25.10	apt	pkg=linux-image-generic
+ubuntu-26.04	ubuntu	Ubuntu 26.04	ubuntu:26.04	apt	pkg=linux-image-generic
+debian-12	debian	Debian 12	debian:12	apt	pkg=linux-image-amd64
+debian-12-backports	debian	Debian 12 backports	debian:12	apt	pkg=linux-image-amd64;suite=bookworm-backports
+debian-13	debian	Debian 13	debian:13	apt	pkg=linux-image-amd64
+debian-13-backports	debian	Debian 13 backports	debian:13	apt	pkg=linux-image-amd64;suite=trixie-backports
+fedora-42	fedora	Fedora 42	fedora:42	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+fedora-43	fedora	Fedora 43	fedora:43	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+fedora-44	fedora	Fedora 44	fedora:44	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+centos-stream-9	rhel	CentOS Stream 9	quay.io/centos/centos:stream9	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+centos-stream-10	rhel	CentOS Stream 10	quay.io/centos/centos:stream10	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+almalinux-9	rhel	AlmaLinux 9	almalinux:9	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+almalinux-10	rhel	AlmaLinux 10	almalinux:10	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+rocky-9	rhel	Rocky Linux 9	rockylinux/rockylinux:9	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+rocky-10	rhel	Rocky Linux 10	rockylinux/rockylinux:10	dnf	pkgs=kernel-core,kernel-modules-core,kernel-modules,kernel-modules-extra
+oracle-9-uek8	oracle	Oracle Linux 9 UEK8	oraclelinux:9	dnf	pkgs=kernel-uek-core,kernel-uek-modules-core,kernel-uek-modules,kernel-uek-modules-extra;enable=ol9_UEKR8
+oracle-9-uek7	oracle	Oracle Linux 9 UEK7	oraclelinux:9	dnf	pkgs=kernel-uek-core,kernel-uek-modules,kernel-uek-modules-extra;enable=ol9_UEKR7
+amazon-2023-6.1	amazon	Amazon Linux 2023 (6.1)	amazonlinux:2023	dnf	pkgs=kernel,kernel-modules-extra
+amazon-2023-6.12	amazon	Amazon Linux 2023 (6.12)	amazonlinux:2023	dnf	pkgs=kernel6.12,kernel6.12-modules-extra
+opensuse-leap-15.6	suse	openSUSE Leap 15.6	opensuse/leap:15.6	zypper	pkgs=kernel-default,kernel-default-extra,kernel-default-optional
+opensuse-leap-16.0	suse	openSUSE Leap 16.0	opensuse/leap:16.0	zypper	pkgs=kernel-default,kernel-default-extra,kernel-default-optional
+opensuse-tumbleweed	suse	openSUSE Tumbleweed	opensuse/tumbleweed	zypper	pkgs=kernel-default,kernel-default-extra,kernel-default-optional
+arch	arch	Arch Linux	archlinux:latest	pacman	pkgs=linux
+arch-lts	arch	Arch Linux LTS	archlinux:latest	pacman	pkgs=linux-lts

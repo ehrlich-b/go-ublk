@@ -1,0 +1,246 @@
+#!/bin/bash
+# Guest-side payload runner for the kernel matrix.
+#
+# Contract (anything that honours it can replace this payload):
+#   stdout: one JSON object per line, either a test result
+#             {"test": NAME, "status": "pass|fail|skip|error|timeout",
+#              "duration_s": FLOAT, "detail": STRING}
+#           or metadata to merge into the run record: {"meta": {...}}
+#   stderr: free-form human output; it lands on the guest serial console.
+#   Before each test, "=== RUN NAME" on stderr lets the host name the test that
+#   was in flight if the guest has to be killed.
+#
+# Runs as root in a throwaway guest. The primary payload is ublk-suite (the
+# real-kernel conformance suite, test/suite); the rest adds what the suite does
+# not cover: the GET_FEATURES probe, the unit tests against the guest's real
+# io_uring, the large-I/O integration test, the repo's integrity sweep and the
+# ublk-loop / ublk-mem --zip example e2e.
+#
+# MATRIX_TESTS selects groups (default: all, the suite last because its final
+# tests deliberately risk wedging a device). MATRIX_SCALE scales the suite's
+# run times and iteration counts (0.25 under TCG). MATRIX_PROFILE=quick also
+# shortens the integrity sweep.
+set -u
+exec 3>&1 1>&2
+P=$(cd "$(dirname "$0")" && pwd)
+export PATH=$P/bin:$PATH
+W=/tmp/matrix-work
+mkdir -p "$W"
+PROFILE=${MATRIX_PROFILE:-full}
+SCALE=${MATRIX_SCALE:-1}
+TESTS=${MATRIX_TESTS:-probe unit largeio verify loop suite}
+# Wall-clock cap for the whole suite: generous, and longer when scaled up.
+SUITE_TIMEOUT=$(awk -v s="$SCALE" 'BEGIN { printf "%d", 1800 * (s > 1 ? s : 1) }')
+
+jstr() { printf '%s' "$1" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g' | cut -c1-1500; }
+now() { date +%s.%N; }
+since() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
+result() { # NAME STATUS START DETAIL
+	printf '{"test":"%s","status":"%s","duration_s":%s,"detail":"%s"}\n' \
+		"$1" "$2" "$(since "$3")" "$(jstr "$4")" >&3
+	echo "=== RESULT $1: $2 - $4"
+}
+start() { echo; echo "=== RUN $1"; T0=$(now); }
+have_ublk() { [ -e /dev/ublk-control ]; }
+need_ublk() { # NAME -> 1 (after recording a skip) when there is no ublk
+	have_ublk && return 0
+	start "$1"
+	result "$1" skip "$T0" "no /dev/ublk-control"
+	return 1
+}
+
+# Leave no device, daemon or mount behind for the next test, and report it if
+# there was one: a leak is a failure of the test that just ran.
+hygiene() { # NAME
+	local t0 leaked="" dstate="" i n
+	t0=$(now)
+	for n in ublk-mem ublk-loop ublk-suite; do
+		if pgrep -x "$n" >/dev/null; then leaked="$leaked $n-process"; pkill -9 -x "$n"; fi
+	done
+	sleep 0.5
+	if ls /dev/ublkb* >/dev/null 2>&1; then
+		leaked="$leaked $(ls /dev/ublkb* | tr '\n' ' ')"
+		# On a wedged control plane the reaper itself can get stuck in the
+		# kernel, where no signal reaches it: never wait on it for long.
+		ublk-mem --del=all >/dev/null 2>&1 3>&- &
+		local rp=$!
+		for i in $(seq 1 60); do [ -e "/proc/$rp" ] || break; sleep 1; done
+		[ -e "/proc/$rp" ] && { leaked="$leaked reaper-stuck"; kill -9 "$rp" 2>/dev/null; }
+	fi
+	# A real wedge is in D state in every sample; workqueue threads dip in and out.
+	dstate=$(ps -eo pid=,stat=,comm= | awk '$2 ~ /^D/ { print $1 ":" $3 }' | sort)
+	for i in 1 2 3; do
+		[ -z "$dstate" ] && break
+		sleep 1
+		dstate=$(comm -12 <(echo "$dstate") <(ps -eo pid=,stat=,comm= | awk '$2 ~ /^D/ { print $1 ":" $3 }' | sort))
+	done
+	if [ -n "$leaked" ] || [ -n "$dstate" ]; then
+		result "$1/hygiene" fail "$t0" "leaked:${leaked:- none} D-state:${dstate:- none}"
+	fi
+}
+
+# Go test binary -> one result. Counts top-level tests from -test.v output.
+gotest() { # NAME BINARY TIMEOUT ARGS...
+	local name=$1 bin=$2 to=$3 rc log pass fail skip st detail
+	shift 3
+	start "$name"
+	log=$W/${name//\//_}.log
+	mkdir -p "$W/run-$$" && cd "$W/run-$$" || return
+	timeout -k 10 "$to" "$bin" -test.v -test.count=1 -test.timeout="$((to - 15))s" "$@" >"$log" 2>&1 3>&-
+	rc=$?
+	cd "$W" || return
+	pass=$(grep -c '^--- PASS' "$log")
+	fail=$(grep -c '^--- FAIL' "$log")
+	skip=$(grep -c '^--- SKIP' "$log")
+	detail="$pass pass, $fail fail, $skip skip"
+	if [ $rc -eq 0 ]; then
+		st=pass
+		[ "$pass" -eq 0 ] && [ "$skip" -gt 0 ] && st=skip && detail="$detail: $(grep -m1 -A1 '^--- SKIP' "$log" | tail -1 | sed 's/^ *//')"
+	elif [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+		st=timeout
+		detail="$detail; killed after ${to}s; last: $(tail -3 "$log" | tr '\n' ' ')"
+	else
+		st=fail
+		detail="$detail; failed: $(grep '^--- FAIL' "$log" | awk '{print $3}' | tr '\n' ' ')$(grep -m3 -E '^panic:|_test.go:[0-9]+:' "$log" | tr '\n' ' ')"
+	fi
+	[ "$st" = pass ] || { echo "--- $name output ---"; cat "$log"; }
+	result "$name" "$st" "$T0" "$detail"
+}
+
+t_probe() {
+	local out st=pass
+	echo "uname -r: $(uname -r)"
+	need_ublk probe || return
+	start probe
+	out=$(timeout 60 ublk-probe 2>"$W/probe.err" 3>&- | grep '^{' | tail -1)
+	cat "$W/probe.err"
+	echo "$out"
+	if [ "${out:0:1}" = "{" ]; then
+		printf '{"meta":{"probe":%s}}\n' "$out" >&3
+		echo "$out" | grep -q '"error"' && st=fail
+	else
+		st=fail
+		out="no JSON from ublk-probe: $(tail -3 "$W/probe.err")"
+	fi
+	result probe "$st" "$T0" "$(echo "$out" | sed 's/"names":\[[^]]*\],*//')"
+}
+
+# ublk-suite streams its own result lines; they are relayed as they appear.
+# The suite abandons a hung test and moves on, but a thread stuck in the kernel
+# can keep the process from ever exiting, so this never waits on the process
+# itself: it stops once every listed test has reported (plus a grace period),
+# or at SUITE_TIMEOUT, and reports a process that will not die.
+t_suite() {
+	local list total spid sent=0 n t hung="" t_all="" state
+	need_ublk suite || return
+	start suite
+	# MATRIX_SUITE_RUN / MATRIX_SUITE_SKIP pass through as -run / -skip; -list
+	# ignores them, so the expected list is filtered here the same way.
+	local args=(-scale "$SCALE")
+	list=$(ublk-suite -list 2>/dev/null)
+	if [ -n "${MATRIX_SUITE_RUN:-}" ]; then
+		args+=(-run "$MATRIX_SUITE_RUN")
+		list=$(echo "$list" | grep -E "$MATRIX_SUITE_RUN")
+	fi
+	if [ -n "${MATRIX_SUITE_SKIP:-}" ]; then
+		args+=(-skip "$MATRIX_SUITE_SKIP")
+		list=$(echo "$list" | grep -vE "$MATRIX_SUITE_SKIP")
+	fi
+	list=$(echo "$list" | tr '\n' ' ')
+	total=$(echo "$list" | wc -w)
+	printf '{"meta":{"suite_tests":"%s","suite_scale":%s}}\n' "$list" "$SCALE" >&3
+	: >"$W/suite.jsonl"
+	ublk-suite "${args[@]}" >"$W/suite.jsonl" 3>&- &
+	spid=$!
+	while :; do
+		n=$(wc -l <"$W/suite.jsonl")
+		[ "$n" -gt "$sent" ] && { sed -n "$((sent + 1)),${n}p" "$W/suite.jsonl" >&3; sent=$n; }
+		[ -e "/proc/$spid" ] && ! grep -q '^State:.*zombie' "/proc/$spid/status" 2>/dev/null || break
+		if [ "$n" -ge "$total" ]; then
+			t_all=${t_all:-$(now)}
+			awk -v a="$t_all" -v b="$(now)" 'BEGIN { exit !(b - a > 30) }' && break
+		fi
+		awk -v a="$T0" -v b="$(now)" -v m="$SUITE_TIMEOUT" 'BEGIN { exit !(b - a > m) }' && break
+		sleep 1
+	done
+	n=$(wc -l <"$W/suite.jsonl")
+	[ "$n" -gt "$sent" ] && sed -n "$((sent + 1)),${n}p" "$W/suite.jsonl" >&3
+	if [ -e "/proc/$spid" ] && ! grep -q '^State:.*zombie' "/proc/$spid/status" 2>/dev/null; then
+		state="$(grep '^State' "/proc/$spid/status" | tr -s '\t ' ' ') wchan=$(cat "/proc/$spid/wchan" 2>/dev/null)"
+		echo "--- ublk-suite pid $spid did not exit: $state"
+		cat "/proc/$spid/stack" 2>/dev/null
+		for t in /proc/$spid/task/*; do
+			echo "  task $(basename "$t"): $(grep '^State' "$t/status" | tr -s '\t ' ' ') wchan=$(cat "$t/wchan" 2>/dev/null)"
+		done
+		if [ "$n" -lt "$total" ]; then
+			for t in $list; do
+				grep -q "\"test\":\"$t\"" "$W/suite.jsonl" || { hung=$t; break; }
+			done
+			result "${hung:-suite}" timeout "$T0" "no result within ${SUITE_TIMEOUT}s; ublk-suite $state"
+		else
+			result suite/exit fail "$T0" "ublk-suite reported every test but did not exit within 30s: $state"
+		fi
+		kill -9 "$spid" 2>/dev/null
+	fi
+	hygiene suite
+}
+
+t_unit() {
+	local t
+	for t in "$P"/tests/*.test; do
+		gotest "unit/$(basename "$t" .test)" "$t" 600
+	done
+}
+
+t_largeio() {
+	need_ublk integration/large-io || return
+	GO_UBLK_DISPOSABLE_TEST=1 gotest integration/large-io "$P/integration/integration.test" 300 \
+		-test.run '^TestDisposableLargeIOPublicRunnerPaths$'
+	hygiene integration/large-io
+}
+
+# The repo's own VM scripts, unmodified: they find ./ublk-mem etc. in the cwd
+# and call sudo, which the userland provides as a pass-through shim.
+repo_script() { # NAME SCRIPT TIMEOUT ARGS...
+	local name=$1 script=$2 to=$3 rc log st detail
+	shift 3
+	need_ublk "$name" || return
+	start "$name"
+	mkdir -p "$W/$name" && cd "$W/$name" || return
+	ln -sf "$P"/bin/* .
+	log=$W/$name.log
+	timeout -k 10 "$to" bash "$P/scripts/$script" "$@" >"$log" 2>&1 3>&-
+	rc=$?
+	cd "$W" || return
+	cat "$log"
+	detail=$(grep -E 'PASS=[0-9]+ FAIL=[0-9]+' "$log" | tail -1 | sed 's/^[ =]*//')
+	case $rc in
+	0) st=pass ;;
+	124 | 137) st=timeout; detail="killed after ${to}s; $detail" ;;
+	*) st=fail; detail="$detail; $(grep -E 'FAIL|failed:' "$log" | grep -v 'FAIL=0' | head -8 | tr '\n' ' ')" ;;
+	esac
+	result "$name" "$st" "$T0" "${detail:-exit $rc}"
+	hygiene "$name"
+}
+
+t_verify() {
+	if [ "$PROFILE" = quick ]; then
+		repo_script verify-sweep vm-verify.sh 900 32M 1
+	else
+		repo_script verify-sweep vm-verify.sh 1200 64M 3
+	fi
+}
+
+t_loop() { repo_script loop-e2e vm-loop-e2e.sh 900; }
+
+for t in $TESTS; do
+	case $t in
+	probe) t_probe ;;
+	suite) t_suite ;;
+	unit) t_unit ;;
+	largeio) t_largeio ;;
+	verify) t_verify ;;
+	loop) t_loop ;;
+	*) start "$t"; result "$t" error "$T0" "unknown test group" ;;
+	esac
+done
