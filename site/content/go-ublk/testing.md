@@ -11,9 +11,11 @@ A block device that returns the wrong bytes is worse than one that returns error
 
 | Layer | What it covers | Where it runs |
 |---|---|---|
-| Unit tests | UAPI struct layouts and marshaling against offsets taken from the real kernel headers; ioctl encoding; SQE128/CQE32 field offsets; ring index wraparound; the per-tag state machine; the descriptor mmap stride; request dispatch and result codes; lifecycle and teardown ordering with fakes; real io_uring round trips (no ublk); metrics percentiles; both example backends | `make test-unit`, any Linux box; CI on every push |
+| Unit tests | UAPI struct layouts and every constant against fixtures compiled from the 7.3-rc5 C header; ioctl encodings; the io_uring core (SQE layouts, real rings, registration, CQ overflow, a 500-ring leak test); every control command against a fake driver; the queue engine against a fake-kernel model of ublk_drv (copy, user copy, NEED_GET_DATA, zero copy with auto and manual registration, batch I/O with partial commits, shared memory, stop and abandon, errno mapping, a deterministic lost-wakeup test); both example backends | `make test-unit`, any Linux box; CI on every push |
 | Race and static checks | `go test -race`, `gofmt`, `go vet` | CI |
-| Fuzzing | Bounded fuzzing of the fixed-layout UAPI decoders and the parameter decoder | CI (15 s per target), `make test-uapi-fuzz` |
+| Fuzzing | The UAPI decoders, the control-plane decoders, and `FuzzEngine`, which drives the real engine through random request, completion and shutdown scripts against the fake kernel | CI (15 s per target), `make test-uapi-fuzz` |
+| Conformance suite | `ublk-suite`: about 60 real-kernel tests — integrity across queue/depth/block-size combinations, boundaries, flush, FUA, discard and write-zeroes up to 5 GiB, errno propagation, ext4 and xfs, every feature (recovery after SIGKILL, Detach/Recover handoff, zero copy, batch I/O, zoned, integrity, shared memory, unprivileged, resize, safe stop, partition scan), teardown under load, leaks, concurrent creates, chaos. One JSON result per test | `make suite`, then run the binary as root on a disposable machine |
+| Kernel matrix | `test/matrix` boots `ublk-suite` under mainline kernels 6.0–7.3-rc and the current kernels of Ubuntu, Debian, Fedora, RHEL-family, openSUSE, Arch and Amazon Linux, in QEMU (TCG locally, KVM in CI) | [compatibility matrix](/reference/matrix/) |
 | Kernel integration | Device creation through the public API on a real kernel, including full-size (1 MiB) requests on both startup paths | disposable VM, root, `GO_UBLK_DISPOSABLE_TEST=1 make test-large-io-kernel` |
 | End to end | I/O through `/dev/ublkbN` with `dd` and `fio` | `make vm-simple-e2e`, `make vm-e2e` |
 | Integrity sweep | A shadow-copy oracle drives random reads and writes and compares every byte, across queues 1/2/4/8 × depth 1/64/128 × buffered/O_DIRECT (24 combinations) | `make vm-verify` |
@@ -50,17 +52,18 @@ Nine "product hangs" in this project's history were test-harness accidents, incl
 | 2026-08-22 | `6.17.0-41-generic` | arm64 | Lima VM | Re-verified: unit, simple e2e, sweep 24/24, loop e2e 14/14, crash 6/6, 40-cycle churn; shutdown storm (23 reboots) |
 | 2026-08-22 | `7.0.0-30-generic` (`linux-hwe-7.0`) | arm64 | Lima VM | Unit, simple e2e, sweep 24/24, loop e2e 14/14, crash 6/6 |
 | 2026-10-03 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | Unit 9/9 packages, full-size I/O test, sweep 24/24, loop e2e 14/14, 1-8 GiB discards and a 3 GiB write-zeroes |
+| 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | v0.2.0 engine: `ublk-suite` 54/54 applicable tests (2 skipped: features newer than 7.0); systemd recovery under a verifying fio — 2 upgrade handoffs and 1 SIGKILL, 0 I/O errors |
 
 All runs show no oops, no stuck tasks and no leaked devices unless noted. Timings and IOPS from the emulated (TCG) run are meaningless.
 
-The documented minimum is Linux 6.8. Kernels from 6.4 (the first with ioctl-encoded commands) through 6.16 are expected to work but have not been verified. The [compatibility matrix](/reference/matrix/) collects broader automated runs across distributions and kernel versions as they complete.
+These are the hand-run verifications; the [compatibility matrix](/reference/matrix/) has the automated runs of the conformance suite across mainline and distribution kernels. The minimum is Linux 6.4, the first kernel with ioctl-encoded commands; kernels before 6.11 needed the write-zeroes limit fix in v0.2.0 (Critical Bug #24).
 
 ## What is not covered
 
 - A real host power cut. The guest hard reset drops the guest's page cache, not the host's cache of the virtual disk.
 - Long soak tests, memory-pressure and GC-pressure fault injection.
-- Real hardware outside VMs, and continuous testing against a real kernel in CI (CI runs unit tests only).
-- Kernel features go-ublk does not use yet (see the [roadmap](/go-ublk/roadmap/)).
+- Real hardware outside VMs: the v0.2.0 runs used emulated CPUs, so they say nothing about performance.
+- Batch-I/O recovery: the kernel's batch recovery fixes landed in 7.0–7.3-rc3, and go-ublk's recovery tests use the default data path.
 
 ## Running the tests
 
