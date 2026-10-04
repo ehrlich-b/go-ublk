@@ -36,16 +36,18 @@
 <td>{{ .arch }}</td>
 <td>{{ .boot }}{{ with .accel }}<span class="sub">{{ . }}</span>{{ end }}</td>
 <td>{{ partial "status-badge.html" .status }}{{ if .oops }} <span class="badge badge-bad" title="The kernel logged an oops during this run">oops</span>{{ end }}</td>
-<td class="num">{{ .summary.pass | default 0 }}</td>
-<td class="num">{{ .summary.fail | default 0 }}</td>
-<td class="num">{{ .summary.skip | default 0 }}</td>
-<td class="num">{{ .summary.error | default 0 }}</td>
+{{- $sum := .summary | default dict }}
+<td class="num">{{ index $sum "pass" | default 0 }}</td>
+<td class="num">{{ index $sum "fail" | default 0 }}</td>
+<td class="num">{{ index $sum "skip" | default 0 }}</td>
+<td class="num">{{ index $sum "error" | default 0 }}</td>
 <td class="nowrap">{{ .date }}</td>
 </tr>
 <tr class="run-detail">
 <td colspan="10">
 <details>
-<summary>{{ len .results }} {{ cond (eq (len .results) 1) "test" "tests" }}{{ if not .ublk_drv }}, no <code>ublk_drv</code>{{ end }}{{ with .features }}, features <code>{{ . }}</code>{{ end }}</summary>
+{{- $n := len (.results | default slice) }}
+<summary>{{ $n }} {{ cond (eq $n 1) "test" "tests" }}{{ if not .ublk_drv }}, no <code>ublk_drv</code>{{ end }}{{ with .features }}, features <code>{{ . }}</code>{{ end }}</summary>
 {{- with .features }}{{ $f := partial "feature-names.html" . }}{{ if $f }}
 <p class="run-features"><span class="muted">Feature flags:</span> {{ range $i, $n := $f }}{{ if $i }} {{ end }}<code>{{ $n }}</code>{{ end }}</p>
 {{- end }}{{ end }}
