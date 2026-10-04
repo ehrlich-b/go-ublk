@@ -352,6 +352,8 @@ h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 1
 .prose ul, .prose ol { padding-left: 1.4rem; }
 .prose li { margin: 0.3rem 0; }
 .prose li > p { margin: 0.3rem 0; }
+.prose li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.3rem; }
+.prose li > input[type="checkbox"] { margin: 0 0.5rem 0 0; vertical-align: -0.1em; }
 .prose dt { font-weight: 600; margin-top: 0.75rem; }
 .prose dd { margin: 0.2rem 0 0 1.25rem; }
 .prose strong { font-weight: 650; }

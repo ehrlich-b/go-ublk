@@ -1,6 +1,6 @@
 <svg viewBox="0 0 800 400" role="img" aria-labelledby="dev-title dev-desc" xmlns="http://www.w3.org/2000/svg">
 <title id="dev-title">ublk device state machine</title>
-<desc id="dev-desc">ADD_DEV creates a device in state DEAD. START_DEV moves it to LIVE once every tag is fetched. STOP_DEV, or a server exit without a recovery flag, removes the disk and returns to DEAD. With USER_RECOVERY, a server exit or QUIESCE_DEV moves a live device to QUIESCED, or to FAIL_IO with USER_RECOVERY_FAIL_IO. START_USER_RECOVERY, fetching every tag and END_USER_RECOVERY return it to LIVE. DEL_DEV deletes the device.</desc>
+<desc id="dev-desc">ADD_DEV creates a device in state DEAD. START_DEV moves it to LIVE once every tag is fetched. STOP_DEV, or a server exit without a recovery flag, removes the disk and returns to DEAD. With USER_RECOVERY, a server exit (after QUIESCE_DEV, for a planned hand-off) moves a live device to QUIESCED, or to FAIL_IO with USER_RECOVERY_FAIL_IO. START_USER_RECOVERY, fetching every tag and END_USER_RECOVERY return it to LIVE. DEL_DEV deletes the device.</desc>
 <defs>
 <marker id="ah-dev" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
 <marker id="ah-dev-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-accent"/></marker>
@@ -38,9 +38,8 @@
 <line x1="700" y1="150" x2="700" y2="76" class="line" marker-end="url(#ah-dev)"/>
 <text x="710" y="118" class="t-mono">DEL_DEV</text>
 <line x1="400" y1="210" x2="400" y2="286" class="line" marker-end="url(#ah-dev)"/>
-<text x="410" y="240" class="t-small">server exits with USER_RECOVERY,</text>
-<text x="410" y="255" class="t-small">or</text>
-<text x="428" y="255" class="t-mono t-small">QUIESCE_DEV</text>
+<text x="410" y="240" class="t-small">server exits with USER_RECOVERY</text>
+<text x="410" y="255" class="t-small">(after <tspan class="t-mono">QUIESCE_DEV</tspan> for a planned hand-off)</text>
 <polyline points="200,286 200,194 286,194" class="line-accent" marker-end="url(#ah-dev-a)"/>
 <text x="190" y="232" text-anchor="end" class="t-mono t-small">START_USER_RECOVERY</text>
 <text x="190" y="247" text-anchor="end" class="t-small">new server fetches every tag</text>

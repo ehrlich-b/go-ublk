@@ -125,9 +125,9 @@ close io_urings, munmap descriptors, close /dev/ublkcN
 DEL_DEV
 ```
 
-### TRY_STOP_DEV {{< since "7.0" >}}
+### TRY_STOP_DEV
 
-Stops the device only if nothing has `/dev/ublkbN` open, and fails with `EBUSY` otherwise. Requires `UBLK_F_SAFE_STOP_DEV`. Useful for "detach if idle" without yanking a disk out from under a mounted filesystem. <!-- VERIFY: TRY_STOP_DEV semantics and error code against the 7.0 driver; the header only says "stop the device only if there are no openers" -->
+{{< since "7.0" >}} Stops the device only if nothing has `/dev/ublkbN` open, and fails with `EBUSY` otherwise. Requires `UBLK_F_SAFE_STOP_DEV`. Useful for "detach if idle" without yanking a disk out from under a mounted filesystem. <!-- VERIFY: TRY_STOP_DEV semantics and error code against the 7.0 driver; the header only says "stop the device only if there are no openers" -->
 
 ### DEL_DEV and DEL_DEV_ASYNC
 
@@ -147,21 +147,21 @@ Copy the device's current `ublksrv_ctrl_dev_info` to `addr` (`len` at least 64).
 
 Returns the set of CPUs that blk-mq maps to queue `data[0]`, as a CPU bitmask in the buffer at `addr`. `len` must be a multiple of `sizeof(unsigned long)` and large enough for every possible CPU ID. A server uses it to pin each queue thread to the CPUs whose I/O lands on that queue, so a request is served on the CPU that issued it.
 
-### GET_FEATURES {{< since "6.5" >}}
+### GET_FEATURES
 
-Writes the 64-bit set of `UBLK_F_*` features this kernel supports into an 8-byte buffer (`len` must be exactly `UBLK_FEATURES_LEN`, 8). It does not take a device, so it is the way to probe a kernel before creating one. On kernels before 6.5 it fails, and the fallback is to request the flags you want in `ADD_DEV` and inspect what comes back.
+{{< since "6.5" >}} Writes the 64-bit set of `UBLK_F_*` features this kernel supports into an 8-byte buffer (`len` must be exactly `UBLK_FEATURES_LEN`, 8). It does not take a device, so it is the way to probe a kernel before creating one. On kernels before 6.5 it fails, and the fallback is to request the flags you want in `ADD_DEV` and inspect what comes back.
 
-### UPDATE_SIZE {{< since "6.16" >}}
+### UPDATE_SIZE
 
-Changes the capacity of a started device to `data[0]` 512-byte sectors and notifies the block layer, which emits a resize uevent. Requires `UBLK_F_UPDATE_SIZE`. The server must be ready to serve the new range before it grows the device and must stop relying on the old range only after it shrinks it. <!-- VERIFY: behavior of UPDATE_SIZE on a device that is not started (6.17 dereferences ub_disk unconditionally); whether later kernels reject it -->
+{{< since "6.16" >}} Changes the capacity of a started device to `data[0]` 512-byte sectors and notifies the block layer, which emits a resize uevent. Requires `UBLK_F_UPDATE_SIZE`. The server must be ready to serve the new range before it grows the device and must stop relying on the old range only after it shrinks it. <!-- VERIFY: behavior of UPDATE_SIZE on a device that is not started (6.17 dereferences ub_disk unconditionally); whether later kernels reject it -->
 
 ### QUIESCE_DEV, START_USER_RECOVERY, END_USER_RECOVERY
 
 The recovery commands move a device whose server has exited, or is about to be replaced, back to a live server without removing `/dev/ublkbN`. `QUIESCE_DEV` (6.16, needs `UBLK_F_QUIESCE`) takes a timeout in milliseconds in `data[0]` and parks a live device so that a new server can take over; `START_USER_RECOVERY` and `END_USER_RECOVERY` (6.1, need `UBLK_F_USER_RECOVERY`) bracket the takeover. They are covered with the states they produce in [User recovery and quiesce](/guide/recovery/).
 
-### REG_BUF and UNREG_BUF {{< since "7.1" >}}
+### REG_BUF and UNREG_BUF
 
-Register and unregister a shared-memory buffer for `UBLK_F_SHMEM_ZC`. `REG_BUF` takes a `struct ublk_shmem_buf_reg` (address, length, flags) through `addr` and returns the buffer index; `UNREG_BUF` takes the index in `data[0]`. See [Data copy modes](/guide/data-copy/).
+{{< since "7.1" >}} Register and unregister a shared-memory buffer for `UBLK_F_SHMEM_ZC`. `REG_BUF` takes a `struct ublk_shmem_buf_reg` (address, length, flags) through `addr` and returns the buffer index; `UNREG_BUF` takes the index in `data[0]`. See [Data copy modes](/guide/data-copy/).
 
 ## Device states
 

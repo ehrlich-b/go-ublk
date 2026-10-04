@@ -41,11 +41,15 @@ def target_file(root, page, path):
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else "site/public").resolve()
     pages = {}
-    for f in sorted(root.rglob("*.html")):
-        p = Page()
-        p.feed(f.read_text(encoding="utf-8"))
-        pages[f.resolve()] = p
     problems = []
+    for f in sorted(root.rglob("*.html")):
+        text = f.read_text(encoding="utf-8")
+        if "HAHAHUGOSHORTCODE" in text:
+            # A shortcode inside a heading leaks Hugo's placeholder into the TOC.
+            problems.append(f"{f.relative_to(root)}: unexpanded shortcode placeholder")
+        p = Page()
+        p.feed(text)
+        pages[f.resolve()] = p
     for f, p in pages.items():
         rel = f.relative_to(root)
         seen = set()
