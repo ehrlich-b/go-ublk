@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk"
 )
@@ -727,5 +728,219 @@ func testZeroCopy(t *T) error {
 		return fmt.Errorf("O_DSYNC write: %w", err)
 	}
 	t.Logf("%d zero-copy ops verified against the backing file", ops)
+	return nil
+}
+
+func init() {
+	register("features/zoned", 3*time.Minute, testZoned)
+}
+
+// Zoned block device ioctls (include/uapi/linux/blkzoned.h).
+const (
+	blkReportZone = 0xc0101282 // _IOWR(0x12, 130, struct blk_zone_report)
+	blkResetZone  = 0x40101283 // _IOW(0x12, 131, struct blk_zone_range)
+	blkOpenZone   = 0x40101286 // _IOW(0x12, 134, ...)
+	blkCloseZone  = 0x40101287 // _IOW(0x12, 135, ...)
+	blkFinishZone = 0x40101288 // _IOW(0x12, 136, ...)
+)
+
+// zonedMem is a host-managed zoned device in RAM: sequential-write-required
+// zones with write pointers, served through the raw Handler interface.
+type zonedMem struct {
+	mu       sync.Mutex
+	data     []byte
+	zoneSize int64
+	wp       []int64 // absolute byte offsets
+	cond     []uint8
+}
+
+func newZonedMem(size, zoneSize int64) *zonedMem {
+	n := size / zoneSize
+	z := &zonedMem{data: make([]byte, size), zoneSize: zoneSize, wp: make([]int64, n), cond: make([]uint8, n)}
+	for i := range z.wp {
+		z.wp[i] = int64(i) * zoneSize
+		z.cond[i] = ublk.ZoneCondEmpty
+	}
+	return z
+}
+
+func (z *zonedMem) zone(off int64) int { return int(off / z.zoneSize) }
+
+func (z *zonedMem) HandleRequest(r *ublk.Request) {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	i := z.zone(r.Offset)
+	end := func(i int) int64 { return int64(i+1) * z.zoneSize }
+	switch r.Op {
+	case ublk.OpRead:
+		copy(r.Data, z.data[r.Offset:])
+		r.Complete(nil)
+	case ublk.OpWrite, ublk.OpZoneAppend:
+		off := r.Offset
+		if r.Op == ublk.OpZoneAppend {
+			off = z.wp[i]
+		}
+		if off != z.wp[i] || off+r.Length > end(i) {
+			r.Complete(syscall.EIO) // not at the write pointer, or past the zone
+			return
+		}
+		copy(z.data[off:], r.Data)
+		z.wp[i] += r.Length
+		z.cond[i] = ublk.ZoneCondImpOpen
+		if z.wp[i] == end(i) {
+			z.cond[i] = ublk.ZoneCondFull
+		}
+		if r.Op == ublk.OpZoneAppend {
+			r.CompleteZoneAppend(uint64(off>>9), nil)
+		} else {
+			r.Complete(nil)
+		}
+	case ublk.OpZoneReset:
+		z.wp[i], z.cond[i] = int64(i)*z.zoneSize, ublk.ZoneCondEmpty
+		r.Complete(nil)
+	case ublk.OpZoneResetAll:
+		for j := range z.wp {
+			z.wp[j], z.cond[j] = int64(j)*z.zoneSize, ublk.ZoneCondEmpty
+		}
+		r.Complete(nil)
+	case ublk.OpZoneOpen:
+		z.cond[i] = ublk.ZoneCondExpOpen
+		r.Complete(nil)
+	case ublk.OpZoneClose:
+		if z.wp[i] == int64(i)*z.zoneSize {
+			z.cond[i] = ublk.ZoneCondEmpty
+		} else {
+			z.cond[i] = ublk.ZoneCondClosed
+		}
+		r.Complete(nil)
+	case ublk.OpZoneFinish:
+		z.wp[i], z.cond[i] = end(i), ublk.ZoneCondFull
+		r.Complete(nil)
+	case ublk.OpReportZones:
+		var zones []ublk.BlkZone
+		for j := i; j < len(z.wp) && len(zones) < int(r.NrZones); j++ {
+			zones = append(zones, ublk.BlkZone{Start: int64(j) * z.zoneSize, Len: z.zoneSize,
+				WritePointer: z.wp[j], Type: ublk.ZoneTypeSeqWriteReq, Cond: z.cond[j]})
+		}
+		r.ReportZones(zones)
+	case ublk.OpFlush:
+		r.Complete(nil)
+	default:
+		r.Complete(syscall.EOPNOTSUPP)
+	}
+}
+
+type zoneInfo struct {
+	start, len, wp uint64 // sectors
+	cond           uint8
+}
+
+func reportZones(fd int, sector uint64, n int) ([]zoneInfo, error) {
+	buf := make([]byte, 16+64*n)
+	*(*uint64)(unsafe.Pointer(&buf[0])) = sector
+	*(*uint32)(unsafe.Pointer(&buf[8])) = uint32(n)
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), blkReportZone, uintptr(unsafe.Pointer(&buf[0]))); e != 0 {
+		return nil, e
+	}
+	got := int(*(*uint32)(unsafe.Pointer(&buf[8])))
+	out := make([]zoneInfo, got)
+	for i := range out {
+		b := buf[16+64*i:]
+		out[i] = zoneInfo{
+			start: *(*uint64)(unsafe.Pointer(&b[0])), len: *(*uint64)(unsafe.Pointer(&b[8])),
+			wp: *(*uint64)(unsafe.Pointer(&b[16])), cond: b[25],
+		}
+	}
+	return out, nil
+}
+
+func zoneOp(fd int, req uintptr, sector, nr uint64) error {
+	r := [2]uint64{sector, nr}
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), req, uintptr(unsafe.Pointer(&r[0]))); e != 0 {
+		return e
+	}
+	return nil
+}
+
+func testZoned(t *T) error {
+	if err := needFeatures(ublk.FeatureZoned | ublk.FeatureUserCopy); err != nil {
+		return err
+	}
+	const size, zoneSize = 64 << 20, 4 << 20
+	zsec := uint64(zoneSize >> 9)
+	z := newZonedMem(size, zoneSize)
+	params := ublk.DefaultParams(nil)
+	params.Backend, params.Handler, params.Size = nil, z, size
+	params.EnableZoned = true
+	params.Zoned = ublk.ZonedParams{ZoneSize: zoneSize, MaxOpenZones: 8, MaxActiveZones: 8}
+	params.NumQueues, params.QueueDepth = 1, 32
+	params.Inline = true
+	dev, err := newDevice(t, params)
+	if err != nil {
+		return err
+	}
+	if v, err := sysfsQueue(dev.Path, "zoned"); err != nil || v != "host-managed" {
+		return fmt.Errorf("queue/zoned = %q (%v), want host-managed", v, err)
+	}
+	if n, err := sysfsInt(dev.Path, "nr_zones"); err != nil || n != size/zoneSize {
+		return fmt.Errorf("queue/nr_zones = %d (%v), want %d", n, err, size/zoneSize)
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fd := int(f.Fd())
+
+	zones, err := reportZones(fd, 0, 64)
+	if err != nil {
+		return fmt.Errorf("BLKREPORTZONE: %w", err)
+	}
+	if len(zones) != size/zoneSize || zones[3].start != 3*zsec || zones[3].wp != 3*zsec || zones[3].cond != ublk.ZoneCondEmpty {
+		return fmt.Errorf("initial report: %d zones, zone 3 = %+v", len(zones), zones[3])
+	}
+
+	// Sequential writes at zone 2's write pointer succeed and advance it.
+	p := alignedBuf(64 << 10)
+	newRNG(5).fill(p)
+	for k := int64(0); k < 3; k++ {
+		if err := pwriteFull(fd, p, 2*zoneSize+k*int64(len(p))); err != nil {
+			return fmt.Errorf("sequential write %d: %w", k, err)
+		}
+	}
+	zones, _ = reportZones(fd, 2*zsec, 1)
+	if len(zones) != 1 || zones[0].wp != 2*zsec+3*uint64(len(p))>>9 {
+		return fmt.Errorf("after 3 writes zone 2 = %+v", zones)
+	}
+	// A write that is not at the write pointer fails (in the block layer or
+	// in the handler).
+	if err := pwriteFull(fd, p, 5*zoneSize+4096); err == nil {
+		return fmt.Errorf("a write not at the write pointer succeeded")
+	}
+	q := alignedBuf(len(p))
+	if err := preadFull(fd, q, 2*zoneSize+int64(len(p))); err != nil || !bytes.Equal(p, q) {
+		return fmt.Errorf("read back of zone 2: %v", err)
+	}
+
+	// Zone management.
+	for _, c := range []struct {
+		name string
+		req  uintptr
+		zone uint64
+		cond uint8
+	}{
+		{"reset", blkResetZone, 2, ublk.ZoneCondEmpty},
+		{"open", blkOpenZone, 4, ublk.ZoneCondExpOpen},
+		{"close", blkCloseZone, 4, ublk.ZoneCondEmpty},
+		{"finish", blkFinishZone, 6, ublk.ZoneCondFull},
+	} {
+		if err := zoneOp(fd, c.req, c.zone*zsec, zsec); err != nil {
+			return fmt.Errorf("zone %s: %w", c.name, err)
+		}
+		zones, err := reportZones(fd, c.zone*zsec, 1)
+		if err != nil || len(zones) != 1 || zones[0].cond != c.cond {
+			return fmt.Errorf("after zone %s: %+v (%v), want cond %#x", c.name, zones, err, c.cond)
+		}
+	}
 	return nil
 }

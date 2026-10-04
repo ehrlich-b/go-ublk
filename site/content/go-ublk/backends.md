@@ -172,6 +172,7 @@ A `Request` carries the operation (`OpRead`, `OpWrite`, `OpFlush`, `OpDiscard`, 
 - `Data` and the `Request` itself are valid only until that call; the next request on the same tag reuses them.
 - Only a read can complete partially (the kernel resubmits the rest). A short write must be reported as an error, because the kernel treats any non-negative result for a write as complete success; `CompleteN` enforces this.
 - Discard and write-zeroes are only sent if you set `HandlerDiscard` / `HandlerWriteZeroes`; FUA only if you set `EnableFUA`.
+- For a zoned device (`EnableZoned`), the handler also gets the zone operations: answer `OpReportZones` with `r.ReportZones(zones)` (a short list ends the report), and `OpZoneAppend` with `r.CompleteZoneAppend(sector, err)` giving where the data landed. The conformance suite's `zonedMem` (`test/suite/tests_v1.go`) is a complete host-managed example in about eighty lines.
 
 ## Memory
 

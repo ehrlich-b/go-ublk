@@ -56,6 +56,13 @@ type DeviceParams struct {
 	SegmentBoundaryMask uint64 // the three segment limits are sent together
 	MaxSegmentSize      uint32 // as UBLK_PARAM_TYPE_SEGMENT when any is nonzero
 	MaxSegments         uint16
+
+	// Zoned devices (EnableZoned): zone size in sectors (sent as
+	// chunk_sectors) and the UBLK_PARAM_TYPE_ZONED limits.
+	ZoneSectors          uint32
+	MaxOpenZones         uint32
+	MaxActiveZones       uint32
+	MaxZoneAppendSectors uint32
 }
 
 // DeviceSize is the device size in bytes.

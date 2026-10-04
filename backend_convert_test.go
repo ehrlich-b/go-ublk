@@ -59,6 +59,7 @@ func TestConvertFieldSetCompleteness(t *testing.T) {
 		"Tag":                "UblksrvFlags",
 		"HandlerDiscard":     "CanDiscard",
 		"HandlerWriteZeroes": "CanWriteZeroes",
+		"Zoned":              "ZoneSectors and the zoned limits",
 	}
 	for f := range pubFields {
 		if _, ok := elsewhere[f]; ok {

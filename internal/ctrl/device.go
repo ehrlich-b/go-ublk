@@ -65,6 +65,13 @@ func deviceUblkParams(params *DeviceParams) *uapi.UblkParams {
 			VirtBoundaryMask: params.VirtBoundaryMask,
 		},
 	}
+	if params.EnableZoned {
+		p.Types |= uapi.UBLK_PARAM_TYPE_ZONED
+		p.Basic.ChunkSectors = params.ZoneSectors
+		p.Zoned.MaxOpenZones = params.MaxOpenZones
+		p.Zoned.MaxActiveZones = params.MaxActiveZones
+		p.Zoned.MaxZoneAppendSectors = params.MaxZoneAppendSectors
+	}
 	if params.DMAAlignment != 0 {
 		p.Types |= uapi.UBLK_PARAM_TYPE_DMA_ALIGN
 		p.DMA.Alignment = params.DMAAlignment
@@ -173,6 +180,10 @@ func (c *Controller) buildFeatureFlags(params *DeviceParams) uint64 {
 
 	if params.EnableIoctlEncode {
 		flags |= uapi.UBLK_F_CMD_IOCTL_ENCODE
+	}
+
+	if params.EnableZoned {
+		flags |= uapi.UBLK_F_ZONED
 	}
 
 	return flags | params.Flags

@@ -409,8 +409,11 @@ func (e *engine) dispatch(i int) {
 		return
 	}
 	if r.Op == OpReportZones {
+		// nr_sectors carries the number of zones asked for; the report is
+		// that many 64-byte struct blk_zone entries, pre-zeroed so a short
+		// report ends with a zero-length zone as the kernel expects.
 		r.NrZones = d.NrSectors
-		r.Length = int64(e.cfg.bufSize)
+		r.Length = min(int64(d.NrSectors)*BlkZoneSize, int64(e.cfg.bufSize))
 	}
 	if r.Op.carriesData() {
 		if r.Length > int64(e.cfg.bufSize) {
@@ -420,6 +423,9 @@ func (e *engine) dispatch(i int) {
 			return
 		}
 		r.Data = unsafe.Slice((*byte)(e.buffer(tag)), int(r.Length))
+		if r.Op == OpReportZones {
+			clear(r.Data)
+		}
 	}
 
 	if e.cfg.inline {

@@ -95,3 +95,21 @@ type ZeroCopyBackend interface {
 	Backend
 	ZeroCopyFile() (fd int, base int64)
 }
+
+// BlkZone is one zone in a zone report; see Request.ReportZones.
+type BlkZone = queue.BlkZone
+
+// Zone types and conditions for BlkZone (include/uapi/linux/blkzoned.h).
+const (
+	ZoneTypeConventional = queue.ZoneTypeConventional
+	ZoneTypeSeqWriteReq  = queue.ZoneTypeSeqWriteReq
+	ZoneTypeSeqWritePref = queue.ZoneTypeSeqWritePref
+	ZoneCondNotWP        = queue.ZoneCondNotWP
+	ZoneCondEmpty        = queue.ZoneCondEmpty
+	ZoneCondImpOpen      = queue.ZoneCondImpOpen
+	ZoneCondExpOpen      = queue.ZoneCondExpOpen
+	ZoneCondClosed       = queue.ZoneCondClosed
+	ZoneCondReadOnly     = queue.ZoneCondReadOnly
+	ZoneCondFull         = queue.ZoneCondFull
+	ZoneCondOffline      = queue.ZoneCondOffline
+)

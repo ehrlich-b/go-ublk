@@ -106,9 +106,15 @@ type DeviceParams struct {
 	EnableZeroCopy     bool // Serve requests zero-copy against a ZeroCopyBackend's file (kernel 6.15+)
 	EnableUnprivileged bool // Create the device as an unprivileged user (UBLK_F_UNPRIVILEGED_DEV)
 	EnableUserCopy     bool // Move data with pread/pwrite on /dev/ublkcN (UBLK_F_USER_COPY)
-	EnableZoned        bool // Unsupported for now: creation returns ErrNotImplemented
+	EnableZoned        bool // A zoned block device served by a Handler (kernel 6.6+); see Zoned
 	// Deprecated: ioctl-encoded commands are always used; this has no effect.
 	EnableIoctlEncode bool
+
+	// Zoned configures a zoned device (EnableZoned). The Handler serves the
+	// zone operations (OpZoneOpen ... OpZoneReset, OpZoneAppend with
+	// CompleteZoneAppend, OpReportZones with Request.ReportZones). Zoned
+	// devices always use user copy.
+	Zoned ZonedParams
 
 	// NeedGetData makes the kernel ask for a write's buffer before copying its
 	// data (UBLK_F_NEED_GET_DATA). Supported for completeness; it costs a round
@@ -170,6 +176,18 @@ type DeviceParams struct {
 	// Deprecated: ublk devices have no names; this has no effect.
 	DeviceName  string
 	CPUAffinity []int // CPU affinity mask for queue threads
+}
+
+// ZonedParams describes a zoned device's zones.
+type ZonedParams struct {
+	// ZoneSize is the size of every zone in bytes: a power of two and a
+	// multiple of LogicalBlockSize. The device size must be a multiple of it.
+	ZoneSize int64
+	// MaxOpenZones and MaxActiveZones limit open and active zones (0: no
+	// limit).
+	MaxOpenZones, MaxActiveZones uint32
+	// MaxZoneAppendSize is the largest zone append in bytes (0: MaxIOSize).
+	MaxZoneAppendSize int
 }
 
 // RecoveryMode selects what happens to a device whose server exits without
@@ -240,7 +258,19 @@ func validateParams(params *DeviceParams) error {
 		}
 	}
 	if params.EnableZoned {
-		return fmt.Errorf("%w: EnableZoned", ErrNotImplemented)
+		z := params.Zoned
+		if params.Handler == nil {
+			return fmt.Errorf("EnableZoned needs a Handler: a Backend cannot serve zone operations")
+		}
+		if z.ZoneSize <= 0 || z.ZoneSize&(z.ZoneSize-1) != 0 || z.ZoneSize%int64(params.LogicalBlockSize) != 0 {
+			return fmt.Errorf("Zoned.ZoneSize is %d; must be a power of two and a multiple of LogicalBlockSize", z.ZoneSize)
+		}
+		if params.Size%z.ZoneSize != 0 {
+			return fmt.Errorf("Size %d is not a multiple of Zoned.ZoneSize %d", params.Size, z.ZoneSize)
+		}
+		if params.EnableZeroCopy || params.EnableUnprivileged {
+			return fmt.Errorf("EnableZoned cannot be combined with EnableZeroCopy or EnableUnprivileged")
+		}
 	}
 	if params.Recovery < RecoveryNone || params.Recovery > RecoveryFailIO {
 		return fmt.Errorf("Recovery is %d; not a RecoveryMode", params.Recovery)
@@ -1080,6 +1110,18 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	ctrlParams.IOMinSize = params.IOMinSize
 	ctrlParams.IOOptSize = params.IOOptSize
 	ctrlParams.DMAAlignment = params.DMAAlignment
+
+	if params.EnableZoned {
+		ctrlParams.EnableUserCopy = true // the kernel requires it for zoned devices
+		ctrlParams.ZoneSectors = uint32(params.Zoned.ZoneSize / uapi.SectorSize)
+		ctrlParams.MaxOpenZones = params.Zoned.MaxOpenZones
+		ctrlParams.MaxActiveZones = params.Zoned.MaxActiveZones
+		appendMax := params.Zoned.MaxZoneAppendSize
+		if appendMax <= 0 {
+			appendMax = params.MaxIOSize
+		}
+		ctrlParams.MaxZoneAppendSectors = uint32(appendMax / uapi.SectorSize)
+	}
 
 	flags := params.Recovery.flags()
 	if params.NeedGetData {
