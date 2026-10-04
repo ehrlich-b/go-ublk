@@ -1,0 +1,11 @@
+# Let unprivileged users create ublk devices (DeviceParams.EnableUnprivileged)
+# and hand each device's nodes to the user who created it.
+#
+#   install -m 0755 bin/ublk-chown /usr/local/sbin/ublk-chown
+#   install -m 0644 examples/ublk-chown/99-ublk-unprivileged.rules /etc/udev/rules.d/
+#   udevadm control --reload
+#
+# The kernel limits unprivileged devices with ublk_drv's ublks_max parameter
+# (default 64) and refuses user copy, zero copy and recovery for them.
+KERNEL=="ublk-control", MODE="0666", OPTIONS+="static_node=ublk-control"
+ACTION=="add", KERNEL=="ublk[bc][0-9]*", RUN+="/usr/local/sbin/ublk-chown %k"

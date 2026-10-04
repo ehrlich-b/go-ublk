@@ -627,8 +627,20 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 		_ = controller.DelDev(ctx, deviceID)
 		return nil, err
 	}
-	if err := controller.SetDeviceParams(ctx, deviceID, &ctrlParams); err != nil {
+	err = controller.SetDeviceParams(ctx, deviceID, &ctrlParams)
+	// An unprivileged device's commands are checked against access to its
+	// /dev/ublkcN node, which devtmpfs creates root-owned and udev then hands
+	// to the owner: wait for udev rather than fail the race.
+	for deadline := time.Now().Add(5 * time.Second); params.EnableUnprivileged &&
+		errors.Is(err, syscall.EACCES) && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		err = controller.SetDeviceParams(ctx, deviceID, &ctrlParams)
+	}
+	if err != nil {
 		_ = controller.DelDev(ctx, deviceID)
+		if params.EnableUnprivileged && errors.Is(err, syscall.EACCES) {
+			err = fmt.Errorf("%w (an unprivileged device needs a udev rule giving its owner /dev/ublkcN)", err)
+		}
 		return nil, fmt.Errorf("failed to set parameters: %w", err)
 	}
 
@@ -813,7 +825,10 @@ func openCharDevice(path string) (int, error) {
 		if err == nil {
 			return fd, nil
 		}
-		if err != syscall.ENOENT && err != syscall.EBUSY {
+		// ENOENT: udev has not created the node yet. EBUSY: the previous
+		// holder's release is still running. EACCES: an unprivileged device
+		// whose node udev has not yet handed to its owner.
+		if err != syscall.ENOENT && err != syscall.EBUSY && err != syscall.EACCES {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)

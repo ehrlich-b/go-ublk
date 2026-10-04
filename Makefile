@@ -28,7 +28,7 @@ else
 endif
 
 # Binary targets
-BINARIES = ublk-mem ublk-loop
+BINARIES = ublk-mem ublk-loop ublk-chown
 
 #==============================================================================
 # VM Configuration (override in Makefile.local or environment)
@@ -80,6 +80,11 @@ suite: FORCE
 	@mkdir -p bin
 	@echo "Building ublk-suite..."
 	@CGO_ENABLED=0 GOOS=linux $(GOBUILD) -o bin/ublk-suite ./test/suite
+
+ublk-chown: FORCE
+	@mkdir -p bin
+	@echo "Building ublk-chown..."
+	@$(CGO_SETTING) $(GOBUILD) $(BUILD_FLAGS) -o bin/ublk-chown ./examples/ublk-chown
 
 ublk-loop: FORCE
 	@mkdir -p bin

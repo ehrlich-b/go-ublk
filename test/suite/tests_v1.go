@@ -1229,3 +1229,87 @@ func testIODescSize(t *T) error {
 	}
 	return nil
 }
+
+func init() {
+	register("features/unprivileged", 2*time.Minute, testUnprivileged)
+}
+
+// testUnprivileged runs a server as an unprivileged user (nobody) that
+// creates and serves an unprivileged device, with this process playing udev:
+// /dev/ublk-control opened up and the new char device handed to the owner.
+func testUnprivileged(t *T) error {
+	if err := needFeatures(ublk.FeatureUnprivileged); err != nil {
+		return err
+	}
+	const uid, gid = 65534, 65534
+	st, err := os.Stat("/dev/ublk-control")
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod("/dev/ublk-control", 0o666); err != nil {
+		return err
+	}
+	t.Cleanup(func() { _ = os.Chmod("/dev/ublk-control", st.Mode().Perm()) })
+
+	// udev's job: give each new /dev/ublkcN to the unprivileged owner.
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	before, _ := filepath.Glob("/dev/ublkc*")
+	go func() {
+		known := map[string]bool{}
+		for _, p := range before {
+			known[p] = true
+		}
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+			now, _ := filepath.Glob("/dev/ublkc*")
+			for _, p := range now {
+				if !known[p] {
+					if os.Chown(p, uid, gid) == nil {
+						known[p] = true
+					}
+				}
+			}
+		}
+	}()
+
+	cmd, id, err := startServerAs(t, &syscall.Credential{Uid: uid, Gid: gid}, 16<<20, "-unprivileged")
+	if err != nil {
+		return fmt.Errorf("unprivileged server: %w", err)
+	}
+	info, err := ublk.GetDeviceInfo(id)
+	if err != nil {
+		return err
+	}
+	if !info.Features.Has(ublk.FeatureUnprivileged) || info.OwnerUID != uid {
+		return fmt.Errorf("device %d: features %s owner %d; want UNPRIVILEGED_DEV owned by %d", id, info.Features, info.OwnerUID, uid)
+	}
+	path := fmt.Sprintf("/dev/ublkb%d", id)
+	if err := waitForNode(path, 5*time.Second); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	p, q := alignedBuf(64<<10), alignedBuf(64<<10)
+	newRNG(43).fill(p)
+	err = pwriteFull(int(f.Fd()), p, 1<<20)
+	if err == nil {
+		err = preadFull(int(f.Fd()), q, 1<<20)
+	}
+	f.Close()
+	if err != nil || !bytes.Equal(p, q) {
+		return fmt.Errorf("I/O through the unprivileged server: %v", err)
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	if err := ublk.DeleteDevice(id); err != nil {
+		return fmt.Errorf("root deleting the unprivileged device: %w", err)
+	}
+	return nil
+}

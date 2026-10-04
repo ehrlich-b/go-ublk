@@ -266,6 +266,7 @@ func serverMain(args []string) {
 	file := fs.String("file", "", "back the device with this file instead of RAM")
 	recovery := fs.Bool("recovery", false, "create with RecoveryReissue")
 	detach := fs.Bool("detach-on-usr1", false, "on SIGUSR1, Detach and exit 0")
+	unpriv := fs.Bool("unprivileged", false, "create an unprivileged device (run as a non-root user)")
 	_ = fs.Parse(args)
 
 	var params ublk.DeviceParams
@@ -282,6 +283,9 @@ func serverMain(args []string) {
 	}
 	if *recovery {
 		params.Recovery = ublk.RecoveryReissue
+	}
+	if *unpriv {
+		params.EnableUnprivileged = true
 	}
 	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
 	if err != nil {
@@ -329,8 +333,16 @@ func (b *fileBackend) Flush() error                             { return b.f.Syn
 
 // startServer launches a server subprocess and returns it with its device ID.
 func startServer(t *T, size int64, extra ...string) (*exec.Cmd, uint32, error) {
+	return startServerAs(t, nil, size, extra...)
+}
+
+// startServerAs is startServer with the subprocess's credentials (nil: ours).
+func startServerAs(t *T, cred *syscall.Credential, size int64, extra ...string) (*exec.Cmd, uint32, error) {
 	args := append([]string{serverSubcommand, "-size", strconv.FormatInt(size, 10)}, extra...)
 	cmd := exec.Command("/proc/self/exe", args...)
+	if cred != nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
+	}
 	cmd.Stderr = os.Stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {
