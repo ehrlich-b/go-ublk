@@ -83,6 +83,8 @@ Running one conformance suite under dozens of kernels turned up these. They affe
 
 **`START_DEV` after `STOP_DEV` is not safe.** The control protocol appears to allow starting a stopped device again (see [the control plane](/guide/control-plane/)), but in practice it fails with `EBUSY` (Fedora 6.19 and 7.2.8, mainline 7.0.14), wedges the control plane (6.10 to 6.12), or oopses. On Arch's 7.2.8-arch1-2 the result was a NULL dereference in `ublk_queue_rq` called from `ublk_partition_scan_work`, a partition-scan read reaching a queue whose per-I/O state is gone. Delete a stopped device and add a new one.
 
+**`QUIESCE_DEV` on a batch device before 7.3-rc3.** Draining a `UBLK_F_BATCH_IO` device with `QUIESCE_DEV` before a handoff leaves the queues' `force_abort` set, and I/O issued across the handoff fails: on Ubuntu 7.0.0-38 a writer got `EIO` in every attempt. Fixed by "ublk: clear force_abort in ublk_queue_reset_io_flags()" (`8a14be55bdc6`, 7.3-rc3, stable 7.2.7). On earlier kernels, hand off batch devices without `QUIESCE_DEV`: let go of the device and let `UBLK_F_USER_RECOVERY_REISSUE` requeue what was outstanding.
+
 **UBSAN `array-index-out-of-bounds` in `io_buffer_register_bvec`.** Zero copy, through `UBLK_U_IO_REGISTER_IO_BUF` or automatic buffer registration, logs this on Fedora 42 (6.19.14) and Fedora 43 and 44 (7.2.8):
 
 ```text

@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -89,6 +90,26 @@ func init() {
 	register("lifecycle/ctx-cancel-under-load", 2*time.Minute, testCtxCancelUnderLoad)
 	register("recovery/kill-and-recover", 3*time.Minute, testKillAndRecover)
 	register("recovery/detach-handoff", 3*time.Minute, testDetachHandoff)
+	register("recovery/batch-kill-and-recover", 3*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureBatchIO); err != nil {
+			return err
+		}
+		return killAndRecover(t, "-batch")
+	})
+	register("recovery/batch-detach-handoff", 3*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureBatchIO); err != nil {
+			return err
+		}
+		return detachHandoff(t, "-batch")
+	})
+	// Recover is given no IntegrityParams: a device's features, integrity
+	// format included, come from the kernel.
+	register("recovery/integrity-kill-and-recover", 3*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureIntegrity); err != nil {
+			return err
+		}
+		return killAndRecover(t, "-integrity")
+	})
 }
 
 var (
@@ -508,15 +529,18 @@ func waitKernelState(id uint32, want ublk.KernelDeviceState, timeout time.Durati
 // writer is busy, then takes the device over in this process. The block device
 // must survive, the writer's in-flight and queued I/O must complete without
 // error once recovered, and every acknowledged block must read back intact.
-func testKillAndRecover(t *T) error {
+func testKillAndRecover(t *T) error { return killAndRecover(t) }
+
+// killAndRecover is testKillAndRecover with extra server flags.
+func killAndRecover(t *T, extra ...string) error {
 	if err := needFeatures(ublk.FeatureUserRecovery | ublk.FeatureRecoveryReissue); err != nil {
 		return err
 	}
 	mark := kmsgMark()
 	const size = 32 << 20
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-recover-%d", os.Getpid()))
-	t.Cleanup(func() { _ = os.Remove(path) })
-	cmd, id, err := startServer(t, size, "-file", path, "-recovery")
+	t.Cleanup(func() { _ = os.Remove(path); _ = os.Remove(path + ".meta") })
+	cmd, id, err := startServer(t, size, append([]string{"-file", path, "-recovery"}, extra...)...)
 	if err != nil {
 		return err
 	}
@@ -544,7 +568,7 @@ func testKillAndRecover(t *T) error {
 	}
 	before := w.ops.Load()
 
-	b, err := openFileBackend(path, size)
+	b, err := openRecoveryBackend(path, size, slices.Contains(extra, "-integrity"))
 	if err != nil {
 		return err
 	}
@@ -581,15 +605,18 @@ func testKillAndRecover(t *T) error {
 // testDetachHandoff is a zero-downtime upgrade: the old server Detaches and
 // exits while a writer is busy, and this process Recovers the device. The
 // writer must see no error at all and every block must read back intact.
-func testDetachHandoff(t *T) error {
+func testDetachHandoff(t *T) error { return detachHandoff(t) }
+
+// detachHandoff is testDetachHandoff with extra server flags.
+func detachHandoff(t *T, extra ...string) error {
 	if err := needFeatures(ublk.FeatureUserRecovery | ublk.FeatureRecoveryReissue); err != nil {
 		return err
 	}
 	mark := kmsgMark()
 	const size = 32 << 20
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-handoff-%d", os.Getpid()))
-	t.Cleanup(func() { _ = os.Remove(path) })
-	cmd, id, err := startServer(t, size, "-file", path, "-recovery", "-detach-on-usr1")
+	t.Cleanup(func() { _ = os.Remove(path); _ = os.Remove(path + ".meta") })
+	cmd, id, err := startServer(t, size, append([]string{"-file", path, "-recovery", "-detach-on-usr1"}, extra...)...)
 	if err != nil {
 		return err
 	}
@@ -624,7 +651,7 @@ func testDetachHandoff(t *T) error {
 		t.Logf("Detach under load took %s", took.Round(time.Millisecond))
 	}
 	before := w.ops.Load()
-	b, err := openFileBackend(path, size)
+	b, err := openRecoveryBackend(path, size, slices.Contains(extra, "-integrity"))
 	if err != nil {
 		return err
 	}

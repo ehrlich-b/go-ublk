@@ -432,6 +432,16 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
 
 
 
+25. **[FIXED — 2026-10-04] Two recovery defects, found by new suite tests.** (a) `Recover` took only
+    the geometry and user-copy flag from the kernel, so a recovered integrity device served
+    requests without their metadata (`guard tag error ... rcvd 0000` on the first read); it now
+    takes zero copy, batch I/O, zoned parameters and the integrity format from the kernel too.
+    (b) `Detach` on a batch device sent QUIESCE_DEV, which on kernels without 8a14be55bdc6
+    (7.3-rc3, stable 7.2.7) leaves force_abort set: a writer got EIO across the handoff on
+    7.0.0-38. Batch devices now hand off without QUIESCE; the kernel reissues what was
+    outstanding. `recovery/{batch-kill-and-recover,batch-detach-handoff,integrity-kill-and-recover}`
+    failed before and pass 3/3 after on 7.0.0-38.
+
 24. **[FIXED — 2026-10-04] On kernels before 6.11, a zeroout of 4 GiB or more succeeded but
     zeroed only the length mod 4 GiB.** Found by the kernel matrix: `blkdiscard -z -o 1M -l 5G`
     exited 0, the disk stats showed one 1 GiB write-zeroes, and data planted at 1 GiB, 3 GiB and

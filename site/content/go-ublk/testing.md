@@ -63,7 +63,7 @@ These are the hand-run verifications; the [compatibility matrix](/reference/matr
 - A real host power cut. The guest hard reset drops the guest's page cache, not the host's cache of the virtual disk.
 - Long soak tests, memory-pressure and GC-pressure fault injection.
 - Real hardware outside VMs: the v0.2.0 runs used emulated CPUs, so they say nothing about performance.
-- Batch-I/O recovery: the kernel's batch recovery fixes landed in 7.0–7.3-rc3, and go-ublk's recovery tests use the default data path.
+- Recovery of zero-copy, zoned and shared-memory devices: `Recover` supports the first two, but only the default, batch and integrity configurations are tested; shared-memory regions cannot be served after a recovery.
 
 ## Running the tests
 

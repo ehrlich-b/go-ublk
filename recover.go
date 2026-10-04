@@ -214,8 +214,9 @@ const quiesceTimeout = 30 * time.Second
 // server upgrade: the block device stays, applications keep it open, and a new
 // process takes over with Recover. The device must have been created with a
 // RecoveryMode. On kernels with QUIESCE (6.16+) in-flight I/O is drained
-// first; on older ones it is reissued (RecoveryReissue) or failed
-// (RecoveryQueue) by the kernel once this process lets go.
+// first, except on BatchIO devices; otherwise it is reissued
+// (RecoveryReissue) or failed (RecoveryQueue) by the kernel once this
+// process lets go.
 //
 // After Detach, Close only releases the Device; it does not delete the kernel
 // device.
@@ -231,7 +232,11 @@ func (d *Device) Detach() error {
 	d.leaving.Store(true)
 	close(d.unwatch)
 
-	if d.Features().Has(FeatureQuiesce) {
+	// Not on batch devices: before 7.3-rc3 (stable 7.2.7, "ublk: clear
+	// force_abort in ublk_queue_reset_io_flags()") QUIESCE_DEV leaves a
+	// batch queue failing I/O across the handoff. Without it the kernel
+	// requeues what is outstanding once we let go, as after a crash.
+	if d.Features().Has(FeatureQuiesce) && !d.Features().Has(FeatureBatchIO) {
 		// Best effort: if it fails (EBUSY when no queue goes idle in time),
 		// the kernel still requeues or fails what is outstanding once we let
 		// go.
@@ -265,9 +270,14 @@ const recoverWait = 30 * time.Second
 
 // Recover takes over a device whose server crashed or called Detach, and
 // serves it with params' Backend or Handler. The device's geometry and
-// features come from the kernel; params supplies the backend and the
-// data-plane options (Inline, ThreadsPerQueue, CPUAffinity). The backend's
-// size must equal the device's. Like CreateAndServe, cancelling ctx later
+// features (zero copy, batch I/O, zoned, integrity format) come from the
+// kernel; params supplies the backend and the data-plane options (Inline,
+// ThreadsPerQueue, CPUAffinity). The backend's size must equal the device's,
+// and it must implement what the device needs (ZeroCopyBackend,
+// IntegrityBackend, or a Handler for a zoned device). Shared-memory regions
+// stay registered in the kernel until the device is deleted, but the new
+// process has no mapping for them, so a SharedMemoryZeroCopy device's
+// requests in those regions fail after Recover. Like CreateAndServe, cancelling ctx later
 // stops the device gracefully.
 func Recover(ctx context.Context, id uint32, params DeviceParams, options *Options) (*Device, error) {
 	if ctx == nil {
@@ -308,6 +318,32 @@ func Recover(ctx context.Context, id uint32, params DeviceParams, options *Optio
 	params.Rotational = kp.Basic.Attrs&uapi.UBLK_ATTR_ROTATIONAL != 0
 	params.VolatileCache = kp.Basic.Attrs&uapi.UBLK_ATTR_VOLATILE_CACHE != 0
 	params.EnableUserCopy = info.Flags&uapi.UBLK_F_USER_COPY != 0
+	// So are the modes that decide how requests are served, so validation
+	// below holds the backend to the device it is taking over.
+	params.EnableZeroCopy = info.Flags&uapi.UBLK_F_SUPPORT_ZERO_COPY != 0
+	params.BatchIO = info.Flags&uapi.UBLK_F_BATCH_IO != 0
+	params.EnableZoned = info.Flags&uapi.UBLK_F_ZONED != 0
+	if params.EnableZoned {
+		params.Zoned = ZonedParams{
+			ZoneSize:          int64(kp.Basic.ChunkSectors) * uapi.SectorSize,
+			MaxOpenZones:      kp.Zoned.MaxOpenZones,
+			MaxActiveZones:    kp.Zoned.MaxActiveZones,
+			MaxZoneAppendSize: int(kp.Zoned.MaxZoneAppendSectors) * uapi.SectorSize,
+		}
+	}
+	params.Integrity = nil
+	if info.Flags&uapi.UBLK_F_INTEGRITY != 0 {
+		ki := kp.Integrity
+		params.Integrity = &IntegrityParams{
+			MetadataSize:         int(ki.MetadataSize),
+			IntervalSize:         1 << ki.IntervalExp,
+			Checksum:             IntegrityCsum(ki.CsumType),
+			RefTag:               ki.Flags&uapi.LBMD_PI_CAP_REFTAG != 0,
+			PIOffset:             int(ki.PIOffset),
+			TagSize:              int(ki.TagSize),
+			MaxIntegritySegments: ki.MaxIntegritySegments,
+		}
+	}
 	params.Tag = info.UblksrvFlags
 	devSize := int64(kp.Basic.DevSectors) * uapi.SectorSize
 	if params.Handler != nil && params.Size == 0 {

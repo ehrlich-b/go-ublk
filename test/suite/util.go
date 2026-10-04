@@ -267,11 +267,13 @@ func serverMain(args []string) {
 	recovery := fs.Bool("recovery", false, "create with RecoveryReissue")
 	detach := fs.Bool("detach-on-usr1", false, "on SIGUSR1, Detach and exit 0")
 	unpriv := fs.Bool("unprivileged", false, "create an unprivileged device (run as a non-root user)")
+	batch := fs.Bool("batch", false, "serve with BatchIO")
+	integ := fs.Bool("integrity", false, "T10-DIF integrity, metadata kept in FILE.meta (needs -file)")
 	_ = fs.Parse(args)
 
 	var params ublk.DeviceParams
 	if *file != "" {
-		b, err := openFileBackend(*file, *size)
+		b, err := openRecoveryBackend(*file, *size, *integ)
 		if err != nil {
 			fmt.Printf("ERROR %v\n", err)
 			os.Exit(1)
@@ -280,6 +282,13 @@ func serverMain(args []string) {
 		params.NumQueues, params.QueueDepth = 2, 32
 	} else {
 		params, _ = memParams(*size)
+	}
+	if *integ {
+		params.Integrity = &ublk.IntegrityParams{MetadataSize: integMetaSize, IntervalSize: integInterval,
+			Checksum: ublk.IntegrityCsumCRC16, RefTag: true}
+	}
+	if *batch {
+		params.BatchIO = true
 	}
 	if *recovery {
 		params.Recovery = ublk.RecoveryReissue
@@ -330,6 +339,64 @@ func (b *fileBackend) WriteAt(p []byte, off int64) (int, error) { return b.f.Wri
 func (b *fileBackend) Size() int64                              { return b.size }
 func (b *fileBackend) Close() error                             { return b.f.Close() }
 func (b *fileBackend) Flush() error                             { return b.f.Sync() }
+
+// The integrity format of the recovery tests: T10-DIF, 8 bytes per 512.
+const integInterval, integMetaSize = 512, 8
+
+// fileIntegBackend is a fileBackend that also keeps integrity metadata, in
+// PATH.meta, so the metadata outlives the server like the data does.
+// Intervals never written read as 0xff, the T10 escape.
+type fileIntegBackend struct {
+	*fileBackend
+	meta *os.File
+}
+
+func openFileIntegBackend(path string, size int64) (*fileIntegBackend, error) {
+	b, err := openFileBackend(path, size)
+	if err != nil {
+		return nil, err
+	}
+	m, err := os.OpenFile(path+".meta", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		b.Close()
+		return nil, err
+	}
+	msize := size / integInterval * integMetaSize
+	if st, err := m.Stat(); err == nil && st.Size() != msize {
+		ff := bytes.Repeat([]byte{0xff}, 1<<20)
+		for off := int64(0); off < msize; off += int64(len(ff)) {
+			if _, err := m.WriteAt(ff[:min(int64(len(ff)), msize-off)], off); err != nil {
+				m.Close()
+				b.Close()
+				return nil, err
+			}
+		}
+	}
+	return &fileIntegBackend{fileBackend: b, meta: m}, nil
+}
+
+func (b *fileIntegBackend) ReadIntegrity(meta []byte, off int64) error {
+	_, err := b.meta.ReadAt(meta, off/integInterval*integMetaSize)
+	return err
+}
+
+func (b *fileIntegBackend) WriteIntegrity(meta []byte, off int64) error {
+	_, err := b.meta.WriteAt(meta, off/integInterval*integMetaSize)
+	return err
+}
+
+func (b *fileIntegBackend) Close() error {
+	b.meta.Close()
+	return b.fileBackend.Close()
+}
+
+// openRecoveryBackend opens the file backend a recovery test's server uses.
+func openRecoveryBackend(path string, size int64, integrity bool) (ublk.Backend, error) {
+	if integrity {
+		return openFileIntegBackend(path, size)
+	}
+	return openFileBackend(path, size)
+}
 
 // startServer launches a server subprocess and returns it with its device ID.
 func startServer(t *T, size int64, extra ...string) (*exec.Cmd, uint32, error) {
