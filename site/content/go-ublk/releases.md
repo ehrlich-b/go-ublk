@@ -24,7 +24,7 @@ A rebuild of everything under the public API, aimed at production use: a new I/O
 - **Errnos pass through.** A backend error that is a `syscall.Errno` reaches the application as that errno (on kernels that translate them) instead of always `EIO`. A panicking backend fails the request with `EIO` instead of crashing the server.
 - **`Stop`/`Close` keep serving if `STOP_DEV` fails** and return the error (#18); the wait is `Options.StopTimeout` (default one minute) instead of a fixed 10 s.
 - **Missing kernel features fail creation** with an error listing them, instead of being silently dropped.
-- `EnableUserCopy` works (it was rejected in v0.1.0's last commits); `EnableFUA` works with a `FUABackend` or `Handler`; `EnableIoctlEncode` and `DeviceName` are documented no-ops.
+- `EnableUserCopy` works (v0.1.0 accepted it but produced a device that could not serve I/O); `EnableFUA` works with a `FUABackend` or `Handler`; `EnableIoctlEncode` and `DeviceName` are documented no-ops.
 
 **New**
 
