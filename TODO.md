@@ -167,7 +167,9 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
    was never closed; the io_uring fixed-file registration wasn't unregistered before close.
    DEL_DEV blocked forever, masked by the example's 1s watchdog + `os.Exit(0)`.
 
-4. **[OPEN — low, debug-only] Verbose logging stalls I/O under load.**
+4. **[OBSOLETE — 2026-10-04] Verbose logging stalls I/O under load.** The v0.2.0 engine makes no
+   per-request log calls at any level (it logs only errors and handler panics), so debug logging
+   no longer sits on the data path. Original entry:
    `logging.Logger` holds one mutex across a blocking `write()`; `-v` + multi-queue starves
    the I/O goroutines. But `log()` filters by level BEFORE taking the lock, and the data-plane
    hot loop (`WaitForCompletion`→`handleCompletion`→…→`FlushSubmissions`) makes no log calls,
@@ -175,7 +177,8 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
    The wrapped stdlib `log.Logger` is already concurrent-safe, so the wrapper mutex is largely
    redundant. Real fix (async/buffered logging) is Phase 5 polish, not a prod blocker.
 
-5. **[OPEN — minor] Memory fences use one shared global** (`barrierDummy`, `atomic.AddInt64(...,0)`)
+5. **[OBSOLETE — 2026-10-04] Memory fences use one shared global** — gone with the io_uring core
+   rewrite, which orders ring indices with `sync/atomic` loads and stores. Original entry: (`barrierDummy`, `atomic.AddInt64(...,0)`)
    hammered by every queue — correct (a `LOCK`/`LDADDAL` RMW is a full hardware fence regardless
    of the address it touches), just a contention point. The multi-queue data path is now proven
    correct WITH this barrier, so changing it is pure perf with real memory-ordering risk on arm64.

@@ -39,7 +39,6 @@ None: as of v0.2.0 go-ublk implements every `UBLK_F_*` feature, control command,
 | # | Defect | Impact |
 |---|---|---|
 | 15 | The shutdown-ordering wedge is solved by deployment (a systemd unit), and the examples now handle SIGHUP — the likeliest trigger — but the fix has not been re-run through the shutdown-storm test | Run the server as a systemd unit as documented |
-| 4 | Debug logging holds one lock across a blocking write | Only with `Options.Debug` |
 
 ## Performance
 
