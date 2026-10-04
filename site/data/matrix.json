@@ -1,0 +1,126 @@
+{
+  "sample": true,
+  "generated": "SAMPLE (hand-written; replace with the harness output)",
+  "go_ublk_commit": "90fe0f2000000000000000000000000000000000",
+  "runs": [
+    {
+      "id": "sample-ubuntu-hwe70-x86",
+      "family": "Ubuntu 24.04 HWE",
+      "distro": "Ubuntu 24.04",
+      "kernel": "7.0.0-38-generic",
+      "upstream": "7.0",
+      "arch": "x86_64",
+      "boot": "qemu",
+      "accel": "tcg",
+      "date": "2026-10-03",
+      "ublk_drv": true,
+      "features": "0x7fff",
+      "oops": false,
+      "status": "pass",
+      "results": [
+        { "test": "unit", "status": "pass", "duration_s": 41.2, "detail": "9/9 packages" },
+        { "test": "simple-e2e", "status": "pass", "duration_s": 12.8, "detail": "" },
+        { "test": "verify-sweep", "status": "pass", "duration_s": 610.4, "detail": "24/24 combos byte-exact" },
+        { "test": "loop-e2e", "status": "pass", "duration_s": 95.0, "detail": "14/14" },
+        { "test": "crash", "status": "skip", "duration_s": 0, "detail": "not run under TCG" }
+      ],
+      "summary": { "pass": 4, "fail": 0, "skip": 1, "error": 0 }
+    },
+    {
+      "id": "sample-ubuntu-hwe617-41-arm64",
+      "family": "Ubuntu 24.04 HWE",
+      "distro": "Ubuntu 24.04",
+      "kernel": "6.17.0-41-generic",
+      "upstream": "6.17",
+      "arch": "arm64",
+      "boot": "lima",
+      "accel": "vz",
+      "date": "2026-08-22",
+      "ublk_drv": true,
+      "features": "0x7fff",
+      "oops": false,
+      "status": "pass",
+      "results": [
+        { "test": "unit", "status": "pass", "duration_s": 38.0, "detail": "6/6 packages" },
+        { "test": "verify-sweep", "status": "pass", "duration_s": 402.1, "detail": "24/24 combos byte-exact" },
+        { "test": "crash", "status": "pass", "duration_s": 300.5, "detail": "6/6 cycles, 0 lost / 0 torn / 0 aliased" }
+      ],
+      "summary": { "pass": 3, "fail": 0, "skip": 0, "error": 0 }
+    },
+    {
+      "id": "sample-ubuntu-617-40-x86",
+      "family": "Ubuntu 24.04 HWE",
+      "distro": "Ubuntu 24.04",
+      "kernel": "6.17.0-40-generic",
+      "upstream": "6.17",
+      "arch": "x86_64",
+      "boot": "qemu",
+      "accel": "tcg",
+      "date": "2026-10-04",
+      "ublk_drv": true,
+      "features": "",
+      "oops": true,
+      "status": "fail",
+      "results": [
+        { "test": "simple-e2e", "status": "fail", "duration_s": 120.0, "detail": "ADD_DEV never returned: NULL dereference in ublk_init_queues" }
+      ],
+      "summary": { "pass": 0, "fail": 1, "skip": 0, "error": 0 }
+    },
+    {
+      "id": "sample-mainline-73rc5-x86",
+      "family": "Mainline",
+      "distro": "Ubuntu 24.04 + kernel.ubuntu.com mainline",
+      "kernel": "7.3.0-070300rc5-generic",
+      "upstream": "7.3-rc5",
+      "arch": "x86_64",
+      "boot": "qemu",
+      "accel": "tcg",
+      "date": "2026-10-04",
+      "ublk_drv": true,
+      "features": "0x1fffff",
+      "oops": false,
+      "status": "pass",
+      "results": [
+        { "test": "simple-e2e", "status": "pass", "duration_s": 14.1, "detail": "" },
+        { "test": "verify-sweep", "status": "pass", "duration_s": 655.0, "detail": "24/24" }
+      ],
+      "summary": { "pass": 2, "fail": 0, "skip": 0, "error": 0 }
+    },
+    {
+      "id": "sample-debian12-x86",
+      "family": "Debian",
+      "distro": "Debian 12",
+      "kernel": "6.1.0-40-amd64",
+      "upstream": "6.1",
+      "arch": "x86_64",
+      "boot": "qemu",
+      "accel": "tcg",
+      "date": "2026-10-04",
+      "ublk_drv": true,
+      "features": "",
+      "oops": false,
+      "status": "fail",
+      "results": [
+        { "test": "simple-e2e", "status": "fail", "duration_s": 3.2, "detail": "ADD_DEV: EOPNOTSUPP (kernel predates ioctl-encoded commands)" }
+      ],
+      "summary": { "pass": 0, "fail": 1, "skip": 0, "error": 0 }
+    },
+    {
+      "id": "sample-wsl2",
+      "family": "Other",
+      "distro": "WSL2",
+      "kernel": "6.6.87.2-microsoft-standard-WSL2",
+      "upstream": "6.6",
+      "arch": "x86_64",
+      "boot": "host",
+      "accel": "",
+      "date": "2026-10-04",
+      "ublk_drv": false,
+      "features": "",
+      "oops": false,
+      "status": "no-ublk",
+      "results": [],
+      "summary": { "pass": 0, "fail": 0, "skip": 0, "error": 0 }
+    }
+  ]
+}

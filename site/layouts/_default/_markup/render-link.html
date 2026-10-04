@@ -1,0 +1,24 @@
+{{- /*
+  Internal links are resolved at build time: a link to a page that does not
+  exist fails the build. Internal links must be absolute site paths
+  ("/guide/data-plane/#tags"). Fragments are checked by site/check-links.py.
+*/ -}}
+{{- $dest := .Destination -}}
+{{- $u := urls.Parse $dest -}}
+{{- $href := $dest -}}
+{{- if and (not $u.Scheme) (not $u.Host) $u.Path -}}
+  {{- if not (hasPrefix $u.Path "/") -}}
+    {{- errorf "%s: internal link %q must be an absolute site path" .Page.File.Path $dest -}}
+  {{- end -}}
+  {{- $lookup := strings.TrimSuffix "/" $u.Path | default "/" -}}
+  {{- with site.GetPage $lookup -}}
+    {{- $href = .RelPermalink -}}
+    {{- with $u.Fragment }}{{ $href = printf "%s#%s" $href . }}{{ end -}}
+  {{- else -}}
+    {{- if not (fileExists (path.Join "static" $u.Path)) -}}
+      {{- errorf "%s: broken internal link %q" .Page.File.Path $dest -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+<a href="{{ $href }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text }}</a>
+{{- /* chomp trailing newline */ -}}

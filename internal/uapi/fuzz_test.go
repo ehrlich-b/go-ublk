@@ -10,7 +10,7 @@ import (
 // The fuzz inputs are synthetic bytes only: no syscalls, device data, pointer
 // dereferences from the payload, or unbounded sizes. Both targets cap at 512 B.
 func FuzzFixedUAPI(f *testing.F) {
-	for kind := uint8(0); kind < 4; kind++ {
+	for kind := uint8(0); kind < 8; kind++ {
 		f.Add(kind, []byte{}, uint16(0))
 		f.Add(kind, bytes.Repeat([]byte{0xff}, 80), uint16(80))
 		f.Add(kind, []byte{0, 1, 2, 3, 4, 5, 6, 7}, uint16(16))
@@ -22,6 +22,8 @@ func FuzzFixedUAPI(f *testing.F) {
 		values := []interface{}{
 			&UblksrvCtrlCmd{DevID: 42}, &UblksrvIOCmd{Result: -5},
 			&UblksrvCtrlDevInfo{DevID: 42}, &UblksrvIODesc{NrSectors: 8},
+			&UblkElemHeader{Tag: 7, Result: -5}, &UblkBatchIO{QID: 1, NrElem: 2},
+			&UblkAutoBufReg{Index: 3}, &UblkShmemBufReg{Addr: 4096, Len: 4096},
 		}
 		value := values[int(kind)%len(values)]
 		before := reflect.ValueOf(value).Elem().Interface()
@@ -43,7 +45,7 @@ func FuzzFixedUAPI(f *testing.F) {
 }
 
 func FuzzParamsUAPI(f *testing.F) {
-	for types := uint32(0); types < 16; types++ {
+	for types := uint32(0); types <= allParamTypes; types++ {
 		p := fixtureParams(types)
 		data := Marshal(&p)
 		f.Add(data, uint16(len(data)))
@@ -57,7 +59,7 @@ func FuzzParamsUAPI(f *testing.F) {
 		if len(data) > 512 {
 			data = data[:512]
 		}
-		before := fixtureParams(15)
+		before := fixtureParams(allParamTypes)
 		got := before
 		input := bytes.Clone(data)
 		err := Unmarshal(data, &got)
@@ -124,6 +126,54 @@ func FuzzParamsUAPI(f *testing.F) {
 		}
 		if !bytes.Equal(data, input) {
 			t.Fatal("response decoder modified input")
+		}
+	})
+}
+
+// FuzzUAPIEncodings checks the packed encodings against their inverses and an
+// independent bit-level reading of the header: auto-buf-reg SQE addr,
+// shared-memory zero-copy addr, and user-copy pread/pwrite positions.
+func FuzzUAPIEncodings(f *testing.F) {
+	f.Add(uint64(0), uint16(0), uint16(0), uint32(0))
+	f.Add(^uint64(0), ^uint16(0), ^uint16(0), ^uint32(0))
+	f.Add(uint64(0x0123456789abcdef), uint16(4095), uint16(4095), uint32(1<<25-1))
+	f.Fuzz(func(t *testing.T, addr uint64, qid, tag uint16, offset uint32) {
+		r := AutoBufRegFromSQEAddr(addr)
+		if r.SQEAddr() != addr {
+			t.Fatalf("auto-buf-reg round trip %#x -> %+v -> %#x", addr, r, r.SQEAddr())
+		}
+		if uint64(r.Index) != addr&0xffff || uint64(r.Flags) != addr>>16&0xff ||
+			uint64(r.Reserved0) != addr>>24&0xff || uint64(r.Reserved1) != addr>>32 {
+			t.Fatalf("auto-buf-reg fields %+v from %#x", r, addr)
+		}
+
+		z := ShmemZCAddr(qid, offset)
+		if ShmemZCIndex(z) != qid || ShmemZCOffset(z) != offset || z>>48 != 0 {
+			t.Fatalf("shmem zc %d/%d -> %#x", qid, offset, z)
+		}
+		if ShmemZCIndex(addr) != uint16(addr>>32) || ShmemZCOffset(addr) != uint32(addr) {
+			t.Fatalf("shmem zc decode %#x", addr)
+		}
+
+		pos, ok := UserCopyOffset(qid, tag, offset)
+		if ok != (qid < 1<<12 && offset < 1<<25) {
+			t.Fatalf("UserCopyOffset(%d,%d,%d) ok=%v", qid, tag, offset, ok)
+		}
+		if !ok {
+			return
+		}
+		if want := int64(0x80000000) + int64(qid)<<41 + int64(tag)<<25 + int64(offset); pos != want || pos >= 1<<62 {
+			t.Fatalf("pos %#x want %#x", pos, want)
+		}
+		ipos, _ := UserCopyIntegrityOffset(qid, tag, offset)
+		for _, c := range []struct {
+			pos       int64
+			integrity bool
+		}{{pos, false}, {ipos, true}} {
+			q, tg, off, integ := DecodeUserCopyOffset(c.pos)
+			if q != qid || tg != tag || off != offset || integ != c.integrity {
+				t.Fatalf("decode %#x = %d/%d/%d/%v", c.pos, q, tg, off, integ)
+			}
 		}
 	})
 }

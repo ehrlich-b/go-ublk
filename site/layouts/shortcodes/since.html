@@ -1,0 +1,4 @@
+{{- /* Kernel version badge: {{< since "6.16" >}} */ -}}
+{{- $v := strings.TrimPrefix "v" (.Get 0) -}}
+<span class="badge badge-since" title="Introduced in Linux {{ $v }}">Linux {{ $v }}+</span>
+{{- /* chomp */ -}}

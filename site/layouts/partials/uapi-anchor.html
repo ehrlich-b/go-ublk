@@ -1,0 +1,2 @@
+{{- /* Stable fragment id for a UAPI reference item: lower-case name; dots, spaces and other punctuation become dashes. */ -}}
+{{- return replaceRE "[^a-z0-9_-]+" "-" (lower .) -}}

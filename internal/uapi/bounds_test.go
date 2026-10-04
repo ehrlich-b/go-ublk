@@ -15,15 +15,49 @@ var paramBlocks = []struct {
 }{
 	{UBLK_PARAM_TYPE_BASIC, 8, 40}, {UBLK_PARAM_TYPE_DISCARD, 40, 60},
 	{UBLK_PARAM_TYPE_DEVT, 60, 76}, {UBLK_PARAM_TYPE_ZONED, 76, 108},
+	{UBLK_PARAM_TYPE_DMA_ALIGN, 108, 116}, {UBLK_PARAM_TYPE_SEGMENT, 120, 136},
+	{UBLK_PARAM_TYPE_INTEGRITY, 136, 152},
 }
+
+// allParamTypes selects every known parameter block; loops over param type
+// combinations run to allParamTypes+1.
+const allParamTypes = 1<<7 - 1
 
 func fixtureParams(types uint32) UblkParams {
 	return UblkParams{
 		Len: 123, Types: types,
-		Basic:   UblkParamBasic{Attrs: 0x12345678, LogicalBSShift: 9, PhysicalBSShift: 12, MaxSectors: 0x87654321, DevSectors: 0x1122334455667788},
-		Discard: UblkParamDiscard{DiscardAlignment: 0x11223344, DiscardGranularity: 4096, MaxDiscardSegments: 1},
-		Devt:    UblkParamDevt{CharMajor: 0x11223344, CharMinor: 0x55667788, DiskMajor: 0x99aabbcc, DiskMinor: 0xddeeff00},
-		Zoned:   UblkParamZoned{MaxOpenZones: 0x12345678, Reserved: [20]uint8{1, 2, 3}},
+		Basic:     UblkParamBasic{Attrs: 0x12345678, LogicalBSShift: 9, PhysicalBSShift: 12, MaxSectors: 0x87654321, DevSectors: 0x1122334455667788},
+		Discard:   UblkParamDiscard{DiscardAlignment: 0x11223344, DiscardGranularity: 4096, MaxDiscardSegments: 1},
+		Devt:      UblkParamDevt{CharMajor: 0x11223344, CharMinor: 0x55667788, DiskMajor: 0x99aabbcc, DiskMinor: 0xddeeff00},
+		Zoned:     UblkParamZoned{MaxOpenZones: 0x12345678, Reserved: [20]uint8{1, 2, 3}},
+		DMA:       UblkParamDMAAlign{Alignment: 0x1ff, Pad: [4]uint8{4, 5}},
+		Seg:       UblkParamSegment{SegBoundaryMask: 0xffffffff, MaxSegmentSize: 0x10000, MaxSegments: 0x80, Pad: [2]uint8{6}},
+		Integrity: UblkParamIntegrity{Flags: LBMD_PI_CAP_INTEGRITY, MaxIntegritySegments: 3, IntervalExp: 9, MetadataSize: 8, CsumType: LBMD_PI_CSUM_IP, TagSize: 2, Pad: [5]uint8{7}},
+	}
+}
+
+// clearUnselected zeroes the blocks a decoder must not populate for types.
+func clearUnselected(p *UblkParams, types uint32) {
+	if types&UBLK_PARAM_TYPE_BASIC == 0 {
+		p.Basic = UblkParamBasic{}
+	}
+	if types&UBLK_PARAM_TYPE_DISCARD == 0 {
+		p.Discard = UblkParamDiscard{}
+	}
+	if types&UBLK_PARAM_TYPE_DEVT == 0 {
+		p.Devt = UblkParamDevt{}
+	}
+	if types&UBLK_PARAM_TYPE_ZONED == 0 {
+		p.Zoned = UblkParamZoned{}
+	}
+	if types&UBLK_PARAM_TYPE_DMA_ALIGN == 0 {
+		p.DMA = UblkParamDMAAlign{}
+	}
+	if types&UBLK_PARAM_TYPE_SEGMENT == 0 {
+		p.Seg = UblkParamSegment{}
+	}
+	if types&UBLK_PARAM_TYPE_INTEGRITY == 0 {
+		p.Integrity = UblkParamIntegrity{}
 	}
 }
 
@@ -38,9 +72,9 @@ func paramPrefix(types uint32) int {
 }
 
 func TestSparseParamsFixedOffsets(t *testing.T) {
-	full := fixtureParams(15)
+	full := fixtureParams(allParamTypes)
 	fullBytes := Marshal(&full)
-	for types := uint32(0); types < 16; types++ {
+	for types := uint32(0); types <= allParamTypes; types++ {
 		t.Run(fmt.Sprintf("types_%x", types), func(t *testing.T) {
 			p := fixtureParams(types)
 			size := paramPrefix(types)
@@ -74,18 +108,7 @@ func TestSparseParamsFixedOffsets(t *testing.T) {
 			if decoded.Len != uint32(size) || decoded.Types != types {
 				t.Fatalf("bad header: %+v", decoded)
 			}
-			if types&1 == 0 {
-				p.Basic = UblkParamBasic{}
-			}
-			if types&2 == 0 {
-				p.Discard = UblkParamDiscard{}
-			}
-			if types&4 == 0 {
-				p.Devt = UblkParamDevt{}
-			}
-			if types&8 == 0 {
-				p.Zoned = UblkParamZoned{}
-			}
+			clearUnselected(&p, types)
 			p.Len = uint32(size)
 			if decoded != p {
 				t.Fatalf("fixed-offset decode = %+v, want %+v", decoded, p)
@@ -95,12 +118,12 @@ func TestSparseParamsFixedOffsets(t *testing.T) {
 }
 
 func TestParamsDeclaredLengthAndAtomicFailure(t *testing.T) {
-	for types := uint32(0); types < 16; types++ {
-		for length := uint32(0); length <= 128; length++ {
-			data := bytes.Repeat([]byte{0xa5}, 128)
+	for types := uint32(0); types <= allParamTypes; types++ {
+		for length := uint32(0); length <= 160; length++ {
+			data := bytes.Repeat([]byte{0xa5}, 160)
 			binary.LittleEndian.PutUint32(data[:4], length)
 			binary.LittleEndian.PutUint32(data[4:8], types)
-			before := fixtureParams(15)
+			before := fixtureParams(allParamTypes)
 			got := before
 			err := Unmarshal(data, &got)
 			if length < uint32(paramPrefix(types)) {
@@ -112,10 +135,10 @@ func TestParamsDeclaredLengthAndAtomicFailure(t *testing.T) {
 			}
 		}
 	}
-	for _, length := range []uint32{129, 0x80000000, 0xffffffff} {
-		data := make([]byte, 128)
+	for _, length := range []uint32{161, 0x80000000, 0xffffffff} {
+		data := make([]byte, 160)
 		binary.LittleEndian.PutUint32(data, length)
-		got := fixtureParams(15)
+		got := fixtureParams(allParamTypes)
 		before := got
 		if err := Unmarshal(data, &got); err != ErrInsufficientData || got != before {
 			t.Fatalf("Len=%d: err=%v mutated=%v", length, err, got != before)
@@ -125,15 +148,18 @@ func TestParamsDeclaredLengthAndAtomicFailure(t *testing.T) {
 
 func TestParamsFutureTailAndDestinationReuse(t *testing.T) {
 	p := fixtureParams(UBLK_PARAM_TYPE_BASIC)
-	data := make([]byte, 160) // newer kernels append fields after the known prefix
+	data := make([]byte, 200) // newer kernels append fields after the known prefix
 	copy(data, Marshal(&p))
 	binary.LittleEndian.PutUint32(data[:4], uint32(len(data)))
 	binary.LittleEndian.PutUint32(data[4:8], p.Types|1<<30)
-	got := fixtureParams(15)
+	got := fixtureParams(allParamTypes)
 	if err := Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Len != 160 || got.Types != p.Types|1<<30 || got.Basic != p.Basic || got.Discard != (UblkParamDiscard{}) || got.Devt != (UblkParamDevt{}) || got.Zoned != (UblkParamZoned{}) {
+	want := p
+	want.Len, want.Types = 200, p.Types|1<<30
+	clearUnselected(&want, p.Types)
+	if got != want {
 		t.Fatalf("unknown tail or reused destination: %+v", got)
 	}
 }
@@ -150,12 +176,53 @@ func TestParamsKernelResponseUsesCapacity(t *testing.T) {
 			t.Fatalf("kernel retained Len=%d: %+v err=%v", reportedLen, got, err)
 		}
 		for size := 0; size < 76; size++ {
-			before := fixtureParams(15)
+			before := fixtureParams(allParamTypes)
 			got := before
 			if err := UnmarshalParamsResponse(data[:size], &got); err != ErrInsufficientData || got != before {
 				t.Fatalf("response truncated at %d: %+v err=%v", size, got, err)
 			}
 		}
+	}
+}
+
+// GET_PARAMS copies min(capacity, sizeof(kernel's ublk_params)) bytes: 112 on
+// v6.6-v6.14, 136 on v6.15-v6.19, 152 on v7.0+, and possibly more on a future
+// kernel that appends a block with a type bit we do not know.
+func TestParamsKernelResponseOlderAndNewerKernels(t *testing.T) {
+	full := fixtureParams(allParamTypes)
+	image := Marshal(&full)
+	for _, kernel := range []struct {
+		name   string
+		size   int
+		types  uint32
+		future bool
+	}{
+		{"v6.8", 112, UBLK_PARAM_TYPE_BASIC | UBLK_PARAM_TYPE_DISCARD | UBLK_PARAM_TYPE_DEVT | UBLK_PARAM_TYPE_ZONED, false},
+		{"v6.15", 136, UBLK_PARAM_TYPE_BASIC | UBLK_PARAM_TYPE_DEVT | UBLK_PARAM_TYPE_DMA_ALIGN | UBLK_PARAM_TYPE_SEGMENT, false},
+		{"v7.0", 152, allParamTypes, false},
+		{"future", 200, allParamTypes | 1<<7, true},
+	} {
+		t.Run(kernel.name, func(t *testing.T) {
+			buf := make([]byte, 512) // the capacity ctrl passes to GET_PARAMS
+			n := copy(buf, image[:min(kernel.size, len(image))])
+			if kernel.future {
+				for i := n; i < kernel.size; i++ {
+					buf[i] = 0xee // the unknown appended block
+				}
+			}
+			binary.LittleEndian.PutUint32(buf[0:4], 4096) // retained SET_PARAMS length
+			binary.LittleEndian.PutUint32(buf[4:8], kernel.types)
+			var got UblkParams
+			if err := UnmarshalParamsResponse(buf, &got); err != nil {
+				t.Fatal(err)
+			}
+			want := full
+			want.Len, want.Types = 4096, kernel.types
+			clearUnselected(&want, kernel.types)
+			if got != want {
+				t.Fatalf("decoded %+v\nwant    %+v", got, want)
+			}
+		})
 	}
 }
 

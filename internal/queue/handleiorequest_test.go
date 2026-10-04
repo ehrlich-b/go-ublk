@@ -43,6 +43,12 @@ func (f *ioReqFakeRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, 
 	return nil, nil
 }
 
+func (f *ioReqFakeRing) SubmitCtrlCmdContext(
+	_ context.Context, cmd uint32, c *uapi.UblksrvCtrlCmd, ud uint64,
+) (uring.Result, error) {
+	return f.SubmitCtrlCmd(cmd, c, ud)
+}
+
 func (f *ioReqFakeRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (*uring.AsyncHandle, error) {
 	return nil, nil
 }

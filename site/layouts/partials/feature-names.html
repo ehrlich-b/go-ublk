@@ -1,0 +1,23 @@
+{{- /*
+  Decode a UBLK_F_* bitmask (a "0x..." string or a number) into flag names,
+  using the bit assignments from the 7.3-rc5 ublk_cmd.h. Unknown bits come back
+  as "bit N".
+*/ -}}
+{{- $names := slice
+  "SUPPORT_ZERO_COPY" "URING_CMD_COMP_IN_TASK" "NEED_GET_DATA" "USER_RECOVERY"
+  "USER_RECOVERY_REISSUE" "UNPRIVILEGED_DEV" "CMD_IOCTL_ENCODE" "USER_COPY"
+  "ZONED" "USER_RECOVERY_FAIL_IO" "UPDATE_SIZE" "AUTO_BUF_REG" "QUIESCE"
+  "PER_IO_DAEMON" "BUF_REG_OFF_DAEMON" "BATCH_IO" "INTEGRITY" "SAFE_STOP_DEV"
+  "NO_AUTO_PART_SCAN" "SHMEM_ZC" "IO_DESC_SIZE" -}}
+{{- $n := int . -}}
+{{- $out := slice -}}
+{{- range $bit := seq 0 62 -}}
+  {{- if eq (mod (div $n (int (math.Pow 2 $bit))) 2) 1 -}}
+    {{- if lt $bit (len $names) -}}
+      {{- $out = $out | append (index $names $bit) -}}
+    {{- else -}}
+      {{- $out = $out | append (printf "bit %d" $bit) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- return $out -}}

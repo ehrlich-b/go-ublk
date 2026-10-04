@@ -141,34 +141,59 @@ func unmarshalIOCmd(data []byte, cmd *UblksrvIOCmd) error {
 }
 
 // Linux keeps parameter blocks at fixed offsets, even if preceding types are
-// absent. Send the prefix through the last selected block, without C tail padding.
+// absent. Send the prefix through the last selected block, without C tail
+// padding. These are the LP64 offsets of struct ublk_params (v7.3); note the
+// 4-byte hole at 116 before the 8-byte-aligned segment block.
 const (
-	paramsHeaderSize    = 8
-	paramsBasicOffset   = 8
-	paramsDiscardOffset = 40
-	paramsDevtOffset    = 60
-	paramsZonedOffset   = 76
-	paramsBasicEnd      = 40
-	paramsDiscardEnd    = 60
-	paramsDevtEnd       = 76
-	paramsZonedEnd      = 108
+	paramsHeaderSize      = 8
+	paramsBasicOffset     = 8
+	paramsDiscardOffset   = 40
+	paramsDevtOffset      = 60
+	paramsZonedOffset     = 76
+	paramsDMAOffset       = 108
+	paramsSegOffset       = 120
+	paramsIntegrityOffset = 136
+	paramsBasicEnd        = 40
+	paramsDiscardEnd      = 60
+	paramsDevtEnd         = 76
+	paramsZonedEnd        = 108
+	paramsDMAEnd          = 116
+	paramsSegEnd          = 136
+	paramsIntegrityEnd    = 152
+
+	// UblkParamsSize is sizeof(struct ublk_params) in v7.0+ headers. Older
+	// kernels have a shorter struct (112 bytes v6.6-v6.14, 136 v6.15-v6.19):
+	// SET_PARAMS copies only that much and masks unknown types, GET_PARAMS
+	// returns only that much; see UnmarshalParamsResponse.
+	UblkParamsSize = paramsIntegrityEnd
 )
+
+// paramBlock describes one parameter block's type bit, wire range and Go field.
+type paramBlock struct {
+	bit        uint32
+	start, end int
+	field      func(*UblkParams) unsafe.Pointer
+}
+
+var paramBlockTable = [...]paramBlock{
+	{UBLK_PARAM_TYPE_BASIC, paramsBasicOffset, paramsBasicEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.Basic) }},
+	{UBLK_PARAM_TYPE_DISCARD, paramsDiscardOffset, paramsDiscardEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.Discard) }},
+	{UBLK_PARAM_TYPE_DEVT, paramsDevtOffset, paramsDevtEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.Devt) }},
+	{UBLK_PARAM_TYPE_ZONED, paramsZonedOffset, paramsZonedEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.Zoned) }},
+	{UBLK_PARAM_TYPE_DMA_ALIGN, paramsDMAOffset, paramsDMAEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.DMA) }},
+	{UBLK_PARAM_TYPE_SEGMENT, paramsSegOffset, paramsSegEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.Seg) }},
+	{UBLK_PARAM_TYPE_INTEGRITY, paramsIntegrityOffset, paramsIntegrityEnd, func(p *UblkParams) unsafe.Pointer { return unsafe.Pointer(&p.Integrity) }},
+}
 
 // paramsSize returns the prefix length needed for all selected known blocks.
 func paramsSize(params *UblkParams) int {
-	if params.HasZoned() {
-		return paramsZonedEnd
+	size := paramsHeaderSize
+	for _, b := range paramBlockTable {
+		if params.Types&b.bit != 0 {
+			size = b.end
+		}
 	}
-	if params.HasDevt() {
-		return paramsDevtEnd
-	}
-	if params.HasDiscard() {
-		return paramsDiscardEnd
-	}
-	if params.HasBasic() {
-		return paramsBasicEnd
-	}
-	return paramsHeaderSize
+	return size
 }
 
 // marshalParams handles the complex UblkParams structure
@@ -192,17 +217,10 @@ func marshalParamsInto(params *UblkParams, buf []byte) (int, error) {
 
 	// Copy each selected block to its fixed kernel offset. These individual
 	// Go block layouts have no internal padding on supported architectures.
-	if params.HasBasic() {
-		rawCopy(buf[paramsBasicOffset:paramsBasicEnd], unsafe.Pointer(&params.Basic), 32)
-	}
-	if params.HasDiscard() {
-		rawCopy(buf[paramsDiscardOffset:paramsDiscardEnd], unsafe.Pointer(&params.Discard), 20)
-	}
-	if params.HasDevt() {
-		rawCopy(buf[paramsDevtOffset:paramsDevtEnd], unsafe.Pointer(&params.Devt), 16)
-	}
-	if params.HasZoned() {
-		rawCopy(buf[paramsZonedOffset:paramsZonedEnd], unsafe.Pointer(&params.Zoned), 32)
+	for _, b := range paramBlockTable {
+		if params.Types&b.bit != 0 {
+			rawCopy(buf[b.start:b.end], b.field(params), b.end-b.start)
+		}
 	}
 
 	return size, nil
@@ -242,17 +260,10 @@ func decodeParams(data []byte, params *UblkParams, kernelResponse bool) error {
 	if !kernelResponse && (uint64(decoded.Len) > uint64(len(data)) || decoded.Len < uint32(required)) {
 		return ErrInsufficientData
 	}
-	if decoded.HasBasic() {
-		_ = directUnmarshal(data[paramsBasicOffset:paramsBasicEnd], &decoded.Basic)
-	}
-	if decoded.HasDiscard() {
-		_ = directUnmarshal(data[paramsDiscardOffset:paramsDiscardEnd], &decoded.Discard)
-	}
-	if decoded.HasDevt() {
-		_ = directUnmarshal(data[paramsDevtOffset:paramsDevtEnd], &decoded.Devt)
-	}
-	if decoded.HasZoned() {
-		_ = directUnmarshal(data[paramsZonedOffset:paramsZonedEnd], &decoded.Zoned)
+	for _, b := range paramBlockTable {
+		if decoded.Types&b.bit != 0 {
+			rawCopyOut(b.field(&decoded), data[b.start:b.end])
+		}
 	}
 	*params = decoded
 	return nil
@@ -270,6 +281,12 @@ func directMarshal(v interface{}) []byte {
 	copy(buf, src[:size])
 
 	return buf
+}
+
+// rawCopyOut copies len(src) raw bytes into the struct at dst.
+func rawCopyOut(dst unsafe.Pointer, src []byte) {
+	to := (*[1 << 20]byte)(dst)
+	copy(to[:len(src)], src)
 }
 
 // rawCopy copies size raw bytes from src into dst without allocating.
@@ -317,7 +334,7 @@ func (e MarshalError) Error() string {
 
 // marshalCtrlDevInfo manually marshals UblksrvCtrlDevInfo
 func marshalCtrlDevInfo(info *UblksrvCtrlDevInfo) []byte {
-	buf := make([]byte, 64)                  // Now exactly 64 bytes to match kernel 6.6+
+	buf := make([]byte, 64)
 	_, _ = marshalCtrlDevInfoInto(info, buf) // buffer is exactly 64 bytes, cannot fail
 	return buf
 }
@@ -331,7 +348,7 @@ func marshalCtrlDevInfoInto(info *UblksrvCtrlDevInfo, buf []byte) (int, error) {
 	binary.LittleEndian.PutUint16(buf[0:2], info.NrHwQueues)
 	binary.LittleEndian.PutUint16(buf[2:4], info.QueueDepth)
 	binary.LittleEndian.PutUint16(buf[4:6], info.State)
-	binary.LittleEndian.PutUint16(buf[6:8], info.Pad0)
+	binary.LittleEndian.PutUint16(buf[6:8], info.IODescSize)
 	binary.LittleEndian.PutUint32(buf[8:12], info.MaxIOBufBytes)
 	binary.LittleEndian.PutUint32(buf[12:16], info.DevID)
 	binary.LittleEndian.PutUint32(buf[16:20], uint32(info.UblksrvPID))
@@ -348,7 +365,7 @@ func marshalCtrlDevInfoInto(info *UblksrvCtrlDevInfo, buf []byte) (int, error) {
 
 // unmarshalCtrlDevInfo manually unmarshals UblksrvCtrlDevInfo
 func unmarshalCtrlDevInfo(data []byte, info *UblksrvCtrlDevInfo) error {
-	// Support both 64-byte and 80-byte layouts seen across kernels.
+	// The struct has been 64 bytes since v6.0; longer input is ignored.
 	if len(data) < 64 {
 		return ErrInsufficientData
 	}
@@ -356,7 +373,7 @@ func unmarshalCtrlDevInfo(data []byte, info *UblksrvCtrlDevInfo) error {
 	info.NrHwQueues = binary.LittleEndian.Uint16(data[0:2])
 	info.QueueDepth = binary.LittleEndian.Uint16(data[2:4])
 	info.State = binary.LittleEndian.Uint16(data[4:6])
-	info.Pad0 = binary.LittleEndian.Uint16(data[6:8])
+	info.IODescSize = binary.LittleEndian.Uint16(data[6:8])
 	info.MaxIOBufBytes = binary.LittleEndian.Uint32(data[8:12])
 	info.DevID = binary.LittleEndian.Uint32(data[12:16])
 	info.UblksrvPID = int32(binary.LittleEndian.Uint32(data[16:20]))
@@ -364,17 +381,10 @@ func unmarshalCtrlDevInfo(data []byte, info *UblksrvCtrlDevInfo) error {
 	info.Flags = binary.LittleEndian.Uint64(data[24:32])
 	info.UblksrvFlags = binary.LittleEndian.Uint64(data[32:40])
 
-	// OwnerUID/GID are at bytes 40-48 in the 64-byte struct
-	if len(data) >= 48 {
-		info.OwnerUID = binary.LittleEndian.Uint32(data[40:44])
-		info.OwnerGID = binary.LittleEndian.Uint32(data[44:48])
-	}
-
-	// Reserved fields at bytes 48-64
-	if len(data) >= 64 {
-		info.Reserved1 = binary.LittleEndian.Uint64(data[48:56])
-		info.Reserved2 = binary.LittleEndian.Uint64(data[56:64])
-	}
+	info.OwnerUID = binary.LittleEndian.Uint32(data[40:44])
+	info.OwnerGID = binary.LittleEndian.Uint32(data[44:48])
+	info.Reserved1 = binary.LittleEndian.Uint64(data[48:56])
+	info.Reserved2 = binary.LittleEndian.Uint64(data[56:64])
 
 	return nil
 }

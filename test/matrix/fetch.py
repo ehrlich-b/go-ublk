@@ -280,8 +280,11 @@ zypper -q --non-interactive --gpg-auto-import-keys refresh >/dev/null
 for p in $(echo "$PKGS" | tr ',' ' '); do
   zypper -q --non-interactive download "$p" >/dev/null 2>&1 || echo "MISSING $p"
 done
-# Newer openSUSE images have no find(1); zypper keeps packages at <repo>/<arch>/.
-for f in /var/cache/zypp/packages/*/*/*.rpm; do [ -e "$f" ] && cp "$f" /out/; done
+# Newer openSUSE images have no find(1); zypper keeps packages at
+# <repo>/<arch>/ or, on Leap 16, <repo>/%2E%2E/<arch>/.
+for f in /var/cache/zypp/packages/*/*/*.rpm /var/cache/zypp/packages/*/*/*/*.rpm; do
+  [ -e "$f" ] && cp "$f" /out/
+done
 ls /out/*.rpm >/dev/null
 '''
 
