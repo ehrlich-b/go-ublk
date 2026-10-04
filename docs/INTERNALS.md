@@ -1,215 +1,121 @@
 # go-ublk Internals
 
-Project-specific reference for ublk and io_uring structures used in this codebase.
+How the library is put together, for people changing it. The kernel side of ublk
+is documented on the site's guide (site/content/guide/); this file covers
+go-ublk's own structure. Kernel facts cited here are from
+`drivers/block/ublk_drv.c` at v7.3-rc5 unless noted.
 
-## Device Lifecycle
+## Packages
 
-```
-1. ADD_DEV       → Creates /dev/ublkcN (character device)
-2. SET_PARAMS    → Configure size, block size, etc.
-3. START_DEV     → Creates /dev/ublkbN (block device), starts I/O
-4. [I/O loop runs]
-5. STOP_DEV      → Stops I/O, removes /dev/ublkbN
-6. DEL_DEV       → Removes /dev/ublkcN
-```
+| Package | Role |
+|---|---|
+| `ublk` (root) | Public API: `Device`, `DeviceParams`, `Create`/`Start`/`Stop`/`Close`, `Detach`/`Recover`, `Handler`/`Request`, feature probing |
+| `internal/ctrl` | One typed method per control command on `/dev/ublk-control`; feature negotiation; unprivileged dev-path handling; off-heap command buffers |
+| `internal/queue` | The data plane: `Queue` (one per hardware queue) and `engine` (one OS thread + io_uring per tag range) |
+| `internal/uring` | A small, allocation-free io_uring core (`IoUring`) plus the older `Ring` wrapper the control plane uses |
+| `internal/uapi` | Every constant and struct of the 7.3-rc5 `ublk_cmd.h`, with C-fixture layout parity tests |
 
-## io_uring Setup
-
-We use extended SQE/CQE sizes for ublk's URING_CMD operations:
-
-```go
-flags := IORING_SETUP_SQE128 | IORING_SETUP_CQE32
-```
-
-- `IORING_SETUP_SQE128` (1 << 10): 128-byte SQEs (standard 64 + 64 extra for cmd data)
-- `IORING_SETUP_CQE32` (1 << 11): 32-byte CQEs (standard 16 + 16 extra)
-
-### mmap Regions
-
-Three memory regions are mapped from the ring fd:
-
-| Offset | Content | Size |
-|--------|---------|------|
-| `0x00000000` | SQ ring (head, tail, array) | ~1 page |
-| `0x08000000` | CQ ring (head, tail, cqes) | ~1 page |
-| `0x10000000` | SQE array | entries × 128 bytes |
-
-### SQE Layout (128 bytes total)
+## Device lifecycle
 
 ```
-Bytes 0-63:   Standard io_uring_sqe fields
-Bytes 64-79:  ublksrv_ctrl_cmd OR ublksrv_io_cmd (16 bytes used)
-Bytes 80-127: Padding (48 bytes, zeroed)
+Create:  GET_FEATURES -> ADD_DEV -> SET_PARAMS (read back with GET_PARAMS)
+Start:   open /dev/ublkcN -> per queue: mmap descriptors, start engines (FETCH every tag)
+         -> START_DEV (waits until every tag has a FETCH outstanding)
+Stop:    STOP_DEV (the kernel drains in-flight I/O through the running engines)
+         -> engines see ABORT on every tag and exit -> free mappings -> close /dev/ublkcN
+Close:   Stop -> DEL_DEV (waits for the last /dev/ublkcN reference)
+Detach:  QUIESCE_DEV (6.16+) -> abandon engines (commit what handlers hold, close rings)
+         -> close /dev/ublkcN; the kernel moves the device to QUIESCED or FAIL_IO
+Recover: GET_DEV_INFO + GET_PARAMS -> START_USER_RECOVERY (retried while EBUSY)
+         -> start engines -> END_USER_RECOVERY (waits for every FETCH) -> LIVE
 ```
 
-For URING_CMD, the key fields are:
-- `opcode` (byte 0): `IORING_OP_URING_CMD` = 46
-- `fd` (bytes 4-7): `/dev/ublk-control` or `/dev/ublkcN` fd
-- `cmd_op` (bytes 8-11): ioctl-encoded command
-- `user_data` (bytes 24-31): tag identifier (returned in CQE)
-- `cmd[80]` (bytes 48-127): command-specific data
+Ordering rules that cost real bugs to learn:
 
-## Kernel Structures
+- `STOP_DEV` must be sent while the engines still run: `del_gendisk` waits for
+  in-flight requests that only they can complete (Critical Bug #8). Cancelling
+  the serving context therefore triggers `Stop`, never a raw engine shutdown
+  (#22).
+- `DEL_DEV` blocks until every reference to `/dev/ublkcN` is gone: every ring
+  that registered it, every dup, every mapping. Engines close their rings on
+  their own thread before signalling exit.
+- A stopped device is never started again (`ErrStopped`); kernels oops or wedge
+  (#23).
+- Memory the kernel or a handler may still touch is leaked, never freed: a
+  `Queue` unmaps only after every engine has exited and no handler holds a
+  request (#19).
 
-### UblksrvCtrlCmd (32 bytes)
+## The engine (internal/queue)
 
-Used in SQE cmd area for control operations:
+An engine serves a contiguous range of one queue's tags (the whole queue unless
+`ThreadsPerQueue` > 1, which uses `UBLK_F_PER_IO_DAEMON`). It is a goroutine
+locked to its OS thread for life — never unlocked, so the thread dies with it,
+which is how kernels without uring_cmd cancellation notice a dead server — owning
+one io_uring set up with `COOP_TASKRUN | SINGLE_ISSUER | DEFER_TASKRUN` where
+available (the flags the kernel's kublk selftest server uses).
 
-```go
-type UblksrvCtrlCmd struct {
-    DevID      uint32  // 0xFFFFFFFF for new device
-    QueueID    uint16  // 0xFFFF for control ops
-    Len        uint16  // data length at Addr
-    Addr       uint64  // userspace buffer address
-    Data       uint64  // inline payload
-    DevPathLen uint16  // unprivileged mode only
-    Pad        uint16
-    Reserved   uint32
-}
-```
+Per-tag states: `Fetching` (kernel owns), `GetData` (NEED_GET_DATA in flight),
+`Registering` / `FileIO` (zero copy), `Handling` (server owns), `Aborted`,
+`Orphaned` (arrived while abandoning; left for the kernel).
 
-### UblksrvCtrlDevInfo (64 bytes)
+The loop: drain the completion list, flush batch commits, then
+`SubmitAndWait(1)` and dispatch CQEs by the kind in the top byte of user_data:
+`IO` (FETCH / COMMIT_AND_FETCH / NEED_GET_DATA results), `Wake` (the eventfd
+read), `Reg`/`ZC`/`Unreg` (zero copy), `Prep`/`Fetch`/`Batch` (batch I/O).
 
-Returned by ADD_DEV, describes the created device:
+**Dispatch.** Inline mode calls the handler on the engine thread; otherwise each
+request runs on its own goroutine. `Request.Complete` finishes through an atomic
+state machine (`dispatching -> done` commits inline without a syscall;
+`async -> queued` pushes onto a lock-free stack). A completer that pushes and
+sees the engine `sleeping` writes an eventfd whose read is always armed in the
+engine's ring. The engine sets `sleeping` and then re-checks the stack before
+blocking, so a push between drain and sleep is never lost
+(`TestEngineNoLostWakeup` fails without that re-check).
 
-```go
-type UblksrvCtrlDevInfo struct {
-    NrHwQueues    uint16  // number of queues
-    QueueDepth    uint16  // depth per queue
-    State         uint16  // UBLK_S_DEV_*
-    Pad0          uint16
-    MaxIOBufBytes uint32  // max I/O buffer
-    DevID         uint32  // assigned device ID
-    UblksrvPID    int32   // our PID
-    Pad1          uint32
-    Flags         uint64  // negotiated feature flags
-    UblksrvFlags  uint64
-    OwnerUID      uint32
-    OwnerGID      uint32
-    Reserved1     uint64
-    Reserved2     uint64
-}
-```
+**Results.** READ/WRITE report bytes; everything else 0. Only a READ in copy
+mode may complete partially (the kernel requeues the rest); in user-copy and
+zero-copy modes, and for writes, the kernel treats any non-negative result as
+complete success, so `CompleteN` fails short transfers with EIO. Errors map to
+errnos (`queue.Errno`), which newer kernels pass through `errno_to_blk_status`.
 
-### UblksrvIODesc (24 bytes)
+**Data modes.**
 
-Per-tag I/O descriptor, lives in shared memory (mmap'd from `/dev/ublkcN`):
+| Mode | FETCH/COMMIT addr | Data path |
+|---|---|---|
+| copy (default) | the tag's buffer (anonymous mmap, `QueueDepth × MaxIOSize` per queue) | kernel copies into/out of it |
+| NEED_GET_DATA | same | a WRITE first completes with RES_NEED_GET_DATA |
+| user copy | 0 | `pread`/`pwrite` on `/dev/ublkcN` at `UBLKSRV_IO_BUF_OFFSET + qid<<41 + tag<<25` (integrity: bit 62) |
+| zero copy | 0; `sqe->addr` = auto-buf-reg slot (tag) | `READ_FIXED`/`WRITE_FIXED` on the backing file from the ring's sparse buffer table; `FSYNC`, `FALLOCATE` |
+| shared memory | as copy | requests flagged `SHMEM_ZC` point into a registered region; no copy |
+| batch | element buffers | PREP_IO_CMDS once; multishot FETCH_IO_CMDS into a provided-buffer ring; COMMIT_IO_CMDS per round |
 
-```go
-type UblksrvIODesc struct {
-    OpFlags     uint32  // op in bits 0-7, flags in bits 8-31
-    NrSectors   uint32  // sector count
-    StartSector uint64  // starting sector
-    Addr        uint64  // buffer address (writes only)
-}
-```
+## Memory safety rules
 
-Memory offset: `UBLKSRV_IO_BUF_OFFSET` (0x80000000)
+- Anything whose address is handed to the kernel lives off-heap (`uring.AllocOffHeap`)
+  or on the heap kept reachable until its CQE; never on a goroutine stack, which
+  the runtime moves. Control-command buffers are mmap'd pages owned by a ring
+  slot and leaked if a command is abandoned (#21).
+- Shared ring indices are touched only through `sync/atomic`; Go's atomics give
+  the release/acquire ordering the io_uring protocol needs (see `ring.go`).
+- `uring.IoUring.Close` unmaps every region (#17); the legacy `Ring` defers it
+  until no caller is inside a method.
 
-Indexing: `desc = base + (queueID * queueDepth + tag) * 24`
+## Tests
 
-### UblksrvIOCmd (16 bytes)
+- `internal/queue/fakekernel_test.go` is a model of ublk_drv's per-tag protocol
+  (including zero copy, batch I/O with partial commits, shared memory) behind the
+  engine's `ring` interface. `FuzzEngine` drives the real engine through random
+  scripts against it.
+- `test/suite` (`make suite`) is the real-kernel conformance suite; `test/matrix`
+  boots it under many kernels. Every finding from those runs is in `TODO.md`.
 
-Used in SQE cmd area for I/O operations:
-
-```go
-type UblksrvIOCmd struct {
-    QID    uint16  // queue ID
-    Tag    uint16  // request tag
-    Result int32   // I/O result (COMMIT ops)
-    Addr   uint64  // buffer address (FETCH ops)
-}
-```
-
-## I/O Flow
-
-### Initial Setup (per tag)
-
-Submit `UBLK_IO_FETCH_REQ` for each tag to prime the queue:
-
-```
-SQE:
-  opcode = IORING_OP_URING_CMD (46)
-  fd = ublkc_fd
-  cmd_op = ioctl_encode(UBLK_IO_FETCH_REQ)
-  user_data = tag
-  cmd[0:16] = UblksrvIOCmd{QID, Tag, 0, buffer_addr}
-```
-
-### Main Loop
-
-1. **Wait for CQE** - kernel signals request available
-2. **Read descriptor** - `atomic.LoadUint32` on OpFlags, then read full descriptor
-3. **Process I/O** - read/write backend based on op
-4. **Submit COMMIT_AND_FETCH** - complete request, fetch next
-
-```
-SQE:
-  opcode = IORING_OP_URING_CMD (46)
-  fd = ublkc_fd
-  cmd_op = ioctl_encode(UBLK_IO_COMMIT_AND_FETCH_REQ)
-  user_data = tag
-  cmd[0:16] = UblksrvIOCmd{QID, Tag, result, buffer_addr}
-```
-
-Result encoding: 0 for success, negative errno for failure.
-
-## Feature Flags
-
-Requested in ADD_DEV, kernel returns negotiated set:
-
-| Flag | Value | Purpose |
-|------|-------|---------|
-| `UBLK_F_URING_CMD_COMP_IN_TASK` | 1 << 1 | Force task_work completion |
-| `UBLK_F_USER_COPY` | 1 << 7 | Use pread/pwrite for data |
-
-We currently request: `UBLK_F_URING_CMD_COMP_IN_TASK`
-
-## ioctl Encoding
-
-Commands sent via `cmd_op` field are ioctl-encoded:
-
-```go
-func IoctlEncode(dir, typ, nr, size uint32) uint32 {
-    return (dir << 30) | (size << 16) | (typ << 8) | nr
-}
-
-// Control commands: type='u', size=32
-cmd_op = IoctlEncode(3, 'u', UBLK_CMD_*, 32)
-
-// I/O commands: type='u', size=16
-cmd_op = IoctlEncode(3, 'u', UBLK_IO_*, 16)
-```
-
-Direction bits: `_IOC_READ=2, _IOC_WRITE=1, both=3`
-
-## Memory Barriers
-
-Critical for shared memory correctness:
-
-```go
-// Before reading descriptor (after CQE received)
-atomic.LoadUint32(&desc.OpFlags)  // acquire semantics
-
-// After writing SQEs: the atomic store is a release (STLR on arm64,
-// XCHG on amd64), so no separate fence is needed
-atomic.StoreUint32(sqTail, newTail)
-```
-
-See the "Memory ordering" comment in `internal/uring/ring.go` for the full SQ/CQ protocol.
-
-## Key Files
+## Key files
 
 | File | Purpose |
-|------|---------|
-| `internal/uapi/structs.go` | Kernel struct definitions with size checks |
-| `internal/uapi/constants.go` | Command codes, flags, limits |
-| `internal/uring/ring.go` | io_uring core: setup, SQ/CQ, submit and wait |
-| `internal/uring/minimal.go` | ublk command ring (`Ring`) on top of the core |
-| `internal/queue/runner.go` | I/O loop state machine |
-| `internal/ctrl/control.go` | Device lifecycle (ADD, START, STOP, DEL) |
-
-## References
-
-- Kernel source: `include/uapi/linux/ublk_cmd.h`
-- Kernel docs: `docs.kernel.org/block/ublk.html`
+|---|---|
+| `backend.go`, `recover.go`, `request.go`, `manage.go` | public API |
+| `internal/queue/engine.go` | per-tag state machine, dispatch, data modes |
+| `internal/queue/queue.go` | per-queue mappings and engine lifecycle |
+| `internal/ctrl/commands.go`, `features.go` | control commands, negotiation |
+| `internal/uring/ring.go`, `prep.go`, `register.go` | io_uring core |
+| `internal/uapi/constants.go`, `structs.go` | kernel UAPI |

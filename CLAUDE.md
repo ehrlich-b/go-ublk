@@ -9,43 +9,24 @@
 - `docs/INTERNALS.md` - io_uring and ublk struct reference
 - `docs/VM_TESTING.md` - VM test setup and troubleshooting
 
-## Project Status: Prototype — approaching usable, not yet production-hardened
+## Project Status: v0.2.0 overhaul (2026-10-04) — production-oriented, verified across a kernel matrix
 
 go-ublk implements Linux ublk in Go without cgo or liburing. It uses `golang.org/x/sys` for Linux syscalls.
-See **`TODO.md` → Critical Bugs** for the full state before relying on this.
+See **`TODO.md` → Critical Bugs** for every defect found and its status, and `docs/INTERNALS.md` for the
+architecture.
 
-**Works (single- AND multi-queue):**
-- Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- Block I/O: Read, Write, Flush, Discard, Write-Zeroes. Flush reaches the backend only if the
-  device advertises a volatile write cache (`VolatileCache`, now the fail-safe default), Discard
-  only if the backend implements `DiscardBackend`, Write-Zeroes only `WriteZeroesBackend`.
-- **Logical block sizes 512 through PAGE_SIZE**, including 4Kn; out-of-range params are
-  rejected at Create rather than producing a device with the wrong capacity.
-- **Multi-queue is now correct** on both arm64 and x86_64: the descriptor-mmap-offset bug that
-  caused data corruption + unkillable D-state hangs is fixed (TODO Critical Bugs #1/#2).
-  Verified Q=1/2/4/8, O_DIRECT, concurrent — 0 hangs / 0 mismatches. Honest O_DIRECT perf is
-  ~1.37M IOPS 4K randread / 816k randwrite (RAM backend, ublk-path ceiling).
-- `ublk-mem --del=all` reaps stuck/zombie devices; failed startup tears down cleanly.
-- Crash / power-fail consistency is tested (`make vm-crash`, `make vm-powerfail`): 8
-  SIGKILL-mid-write cycles and 4 hard resets mid-write, 0 lost / 0 torn / 0 aliased, clean
-  host recovery each time. See TODO.md → Phase 2.
-
-**Verified on `linux-hwe-7.0` (2026-08-22):** full suite green on Ubuntu 24.04.4 arm64 kernel
-`7.0.0-30-generic` — unit 6/6, sweep 24/24, loop-e2e 14/14, crash 6/6, no oops. That is the new
-noble HWE track (`linux-image-generic-hwe-24.04` now resolves to it), so it is what the next box
-cut gets. x86 on 7.0 is still untested.
-
-**Deployment requirement (found 2026-08-22, TODO Critical Bugs #15):** the daemon MUST run as a
-systemd unit with the mount ordered `Requires=`/`After=` it. Run as a bare background process, a
-normal `systemctl reboot` under load loses the unmount's writeback every time and wedges the host's
-reboot roughly one time in five (needs a forced power cycle). Correctly ordered, both are zero.
-`make vm-shutdown-storm` covers this; `STORM_ARM=arm-unit` is the supervised control.
-
-**Still open before prod:**
-- Host power cut (not just a guest `sysrq-b`) — the host's cache of the VM disk is untested.
-- Ship + document the systemd unit above; root-cause the daemon coredump behind #15.
-- Per-IO FUA; `UBLK_F_USER_RECOVERY`; real-kernel coverage outside CI.
-  CI runs unit and race tests, formatting checks, and `go vet`.
+- **Engine:** one locked OS thread + io_uring per queue (or tag range); requests run on a goroutine each
+  (or inline); completions return through an eventfd armed in the ring. Tested against a fake-kernel model
+  of ublk_drv (`internal/queue/fakekernel_test.go`) and fuzzed (`FuzzEngine`).
+- **Kernel surface:** every command, feature and parameter block of the 7.3-rc5 UAPI is implemented:
+  recovery (Detach/Recover), zero copy, shared-memory zero copy, batch I/O, zoned, integrity, user copy,
+  NEED_GET_DATA, unprivileged, per-I/O daemons, resize, safe stop, IO_DESC_SIZE.
+- **Testing:** `make suite` builds the real-kernel conformance suite; `test/matrix` boots it under many
+  kernels/distros (QEMU, TCG on the WSL rig, KVM in CI). Results: `site/data/matrix.json`.
+- **Docs site:** `site/` (Hugo), published at ublk.ehrlich.dev via `site/deploy.sh`.
+- **Deployment:** run the daemon as a systemd unit with the mount ordered after it (`examples/systemd/`);
+  with `-recovery`, crashes and upgrades keep the device and its mount (TODO Critical Bug #15).
+- **Minimum kernel:** 6.4 (ioctl-encoded commands); features need newer kernels and are negotiated.
 
 ## Build and Test Commands
 
@@ -101,10 +82,12 @@ go-ublk/
 
 | File | Purpose |
 |------|---------|
-| `internal/uring/minimal.go` | io_uring implementation (EINTR handling, memory barriers) |
-| `internal/queue/runner.go` | Queue state machine (FETCH_REQ / COMMIT_AND_FETCH) |
+| `internal/queue/engine.go` | Per-tag state machine, dispatch, data modes (copy, user copy, zero copy, batch) |
+| `internal/queue/queue.go` | Per-queue mappings and engine lifecycle |
+| `internal/uring/ring.go` | io_uring core (memory ordering, submit/wait) |
+| `internal/ctrl/commands.go` | One method per control command |
 | `internal/uapi/structs.go` | Kernel UAPI structures |
-| `internal/ctrl/control.go` | Device lifecycle management |
+| `backend.go`, `recover.go` | Public lifecycle, recovery |
 
 ## Development Workflow
 
