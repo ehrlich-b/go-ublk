@@ -13,6 +13,6 @@ const (
 	DefaultMaxDiscardSegments = constants.DefaultMaxDiscardSegments
 	AutoAssignDeviceID        = constants.AutoAssignDeviceID
 	// IOBufferSizePerTag is the legacy 64KiB value kept for compatibility.
-	// Configure per-tag runner capacity with DeviceParams.MaxIOSize.
+	// Configure the per-request buffer size with DeviceParams.MaxIOSize.
 	IOBufferSizePerTag = constants.IOBufferSizePerTag
 )

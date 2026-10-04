@@ -1,4 +1,3 @@
-// Package ublk provides the main API for creating userspace block devices
 package ublk
 
 import (
