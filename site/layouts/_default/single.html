@@ -18,7 +18,7 @@
       {{- if $toc }}
       <details class="toc-inline">
         <summary>On this page</summary>
-        {{ .TableOfContents }}
+        {{ replace .TableOfContents `<nav id="TableOfContents">` `<nav aria-label="On this page">` | safeHTML }}
       </details>
       {{- end }}
       {{ .Content }}
