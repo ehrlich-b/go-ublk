@@ -108,4 +108,6 @@ Because permission is decided by the path the caller presents and by ordinary in
 
 ## go-ublk
 
-go-ublk does not support unprivileged devices. `DeviceParams.EnableUnprivileged` sets `UBLK_F_UNPRIVILEGED_DEV` at `ADD_DEV`, but go-ublk never prepends the char-device path to later commands, so a non-root go-ublk server fails at the first command after `ADD_DEV`, and as root the kernel clears the flag anyway. See the [configuration reference](/go-ublk/configuration/) and the [roadmap](/go-ublk/roadmap/).
+`DeviceParams.EnableUnprivileged` creates an unprivileged device. go-ublk prefixes every control command's payload with the device's char path, and waits up to five seconds for udev to give `/dev/ublkcN` to its owner before `SET_PARAMS`, since the node starts out root-owned. The repository ships the udev side: `examples/ublk-chown`, a small helper that reads the owner with `GET_DEV_INFO` and `chown`s the nodes, and `99-ublk-unprivileged.rules`, which runs it for every new device. Without the rule, `Create` fails with `EACCES` and says so.
+
+Unprivileged devices cannot use zero copy, zoned mode or integrity. The conformance suite creates one as a non-root user and serves verified I/O through it.

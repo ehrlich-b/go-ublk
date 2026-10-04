@@ -180,6 +180,6 @@ Errors from the lifecycle functions wrap the underlying cause with `%w`, and a k
 | `errors.Is(err, syscall.ENODEV)` | `DeleteDevice` or `GetDeviceInfo` on an ID that does not exist; or a kernel older than 6.4, which does not understand ioctl-encoded commands |
 | `errors.Is(err, ublk.ErrDeviceBusy)` | `SafeStop` refused because the device is open |
 | `errors.Is(err, ublk.ErrStopped)` | `Start` on a stopped device |
-| `errors.Is(err, ublk.ErrNotImplemented)` | a feature go-ublk does not implement yet (zero copy, zoned) |
+| `errors.Is(err, ublk.ErrNotImplemented)` | `Resize` on a device the kernel did not grant `UPDATE_SIZE`, or `RegisterSharedMemory` on a device created without `SharedMemoryZeroCopy` |
 
 Parameter validation errors are plain errors naming the field.

@@ -43,7 +43,7 @@ Details that matter:
 - **Memory.** A queue needs `queue_depth × max_io_buf_bytes` of buffer space, 128 MiB for depth 128 at the 1 MiB default. Anonymous mappings cost nothing until touched, but a busy queue touches them all.
 - **Cost.** One `memcpy` per request inside the kernel. For 4 KiB random I/O that is noise next to the round trip; for large sequential I/O it is memory bandwidth you pay twice, once here and once in the backend.
 
-go-ublk uses this mode, with one anonymous mapping per queue sliced into per-tag buffers.
+go-ublk uses this mode by default, with one anonymous mapping per queue sliced into per-tag buffers.
 
 ## NEED_GET_DATA
 
@@ -208,4 +208,14 @@ Start with copy mode. Move to zero copy when the server is a pass-through to a f
 
 ## go-ublk
 
-go-ublk implements copy mode only. Get-data, user copy, both zero-copy variants and shared-memory zero copy are not implemented yet: `EnableUserCopy` is rejected with `ErrNotImplemented`, and `EnableZeroCopy` sets the flag without the data-plane support, which makes the kernel reject every `FETCH_REQ`, so do not set it. Zero copy is on the [roadmap](/go-ublk/roadmap/).
+go-ublk implements every mode on this page:
+
+| Mode | `DeviceParams` | Notes |
+|---|---|---|
+| Copy | the default | One anonymous mapping per queue, sliced into per-tag buffers of `MaxIOSize` |
+| Get-data | `NeedGetData` | Supported for completeness; with fixed per-tag buffers it only adds a round trip per write |
+| User copy | `EnableUserCopy` | `pread`/`pwrite` on `/dev/ublkcN` at the request's offset; turned on automatically for zoned devices and integrity |
+| Zero copy | `EnableZeroCopy` with a `ZeroCopyBackend` (6.15+) | The backend names a file descriptor and base offset; the I/O thread serves each request with `READ_FIXED`/`WRITE_FIXED`, `FSYNC` and `FALLOCATE` on its own ring, from a buffer the kernel registers automatically (`AUTO_BUF_REG`, 6.16+) or that go-ublk registers with `REGISTER_IO_BUF` |
+| Shared-memory zero copy | `SharedMemoryZeroCopy` with `Device.RegisterSharedMemory` (7.1+) | Requests flagged `UBLK_IO_F_SHMEM_ZC` arrive with `Request.Data` pointing into the registered region; nothing is copied |
+
+Zero copy cannot be combined with user copy, get-data, unprivileged devices, zoned devices or integrity, and shared-memory zero copy cannot be combined with zero copy. See [configuration](/go-ublk/configuration/#data-copy-modes) and [backends](/go-ublk/backends/#zero-copy).

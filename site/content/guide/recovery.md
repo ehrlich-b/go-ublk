@@ -145,4 +145,14 @@ On kernels older than 6.16 the only way to hand over is to stop the old server a
 
 ## go-ublk
 
-go-ublk does not implement user recovery yet. It sets none of the recovery flags, so when a go-ublk server is killed the kernel stops its device, and the leftover registration has to be removed with `ublk.DeleteDevice`. Recovery is being built; see the [roadmap](/go-ublk/roadmap/).
+go-ublk implements user recovery. Set `DeviceParams.Recovery`:
+
+| Mode | Flags | In-flight I/O when the server dies | New I/O until recovery |
+|---|---|---|---|
+| `RecoveryReissue` | `USER_RECOVERY \| USER_RECOVERY_REISSUE` | requeued and reissued to the new server | held |
+| `RecoveryQueue` | `USER_RECOVERY` | failed | held |
+| `RecoveryFailIO` | `USER_RECOVERY \| USER_RECOVERY_FAIL_IO` (6.13+) | failed | failed |
+
+`Device.Detach` is the planned handoff: it sends `QUIESCE_DEV` when the kernel has it (6.16+), then lets go of the device without deleting it. A crash leaves the device in the same state. `ublk.Recover(ctx, id, params, opts)` takes a device over: it reads the geometry and features back from the kernel, retries `START_USER_RECOVERY` while it returns `-EBUSY` (until the kernel has released the old server's `/dev/ublkcN`, up to 30 seconds), starts the queues and sends `END_USER_RECOVERY`. `DeviceParams.Tag` is stored in `ublksrv_flags`, so a restarted process finds its devices with `ublk.FindDevices(tag)`.
+
+The `ublk-loop` example's `-recovery` flag and the [systemd units](/go-ublk/deployment/) put this together: a crash restarts the service, a `SIGUSR2` upgrades it, and the filesystem on the device stays mounted throughout. go-ublk's recovery tests use the default data path, not batch I/O.

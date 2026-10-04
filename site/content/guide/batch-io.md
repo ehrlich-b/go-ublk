@@ -140,4 +140,6 @@ Automatic buffer registration needs more care. The kernel registers a request's 
 
 ## go-ublk
 
-go-ublk does not implement batch I/O yet; it uses the per-tag protocol with one thread per queue and batches only at the io_uring level, submitting all prepared `COMMIT_AND_FETCH_REQ`s with a single `io_uring_enter`. Batch I/O is on the [roadmap](/go-ublk/roadmap/).
+`DeviceParams.BatchIO` (kernel 7.0+) serves the device with batch I/O. Each I/O thread sends `PREP_IO_CMDS` once for its tags, keeps one multishot `FETCH_IO_CMDS` armed into a provided-buffer ring of 16 tag buffers (128 tags each, the per-CQE maximum), and sends one `COMMIT_IO_CMDS` per loop round for everything completed since the last, with up to four commit buffers in flight. Tags are treated as returned to the kernel when their commit is submitted, because the multishot fetch can deliver a tag again before the commit's completion arrives.
+
+It works with copy mode (elements carry `UBLK_BATCH_F_HAS_BUF_ADDR`), user copy, and zero copy (elements carry the tag as `buf_index` with `UBLK_BATCH_F_AUTO_BUF_REG_FALLBACK`). It cannot be combined with `NeedGetData`, which the kernel clears for batch devices, or with `ThreadsPerQueue` above 1. See the [configuration reference](/go-ublk/configuration/).

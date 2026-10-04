@@ -73,4 +73,6 @@ The kernel's selftest server `kublk` implements integrity over its user-copy pat
 
 ## go-ublk
 
-go-ublk does not support integrity metadata yet. It also lacks user copy, which integrity requires. See the [roadmap](/go-ublk/roadmap/).
+`DeviceParams.Integrity` (kernel 7.0+) creates a device with integrity metadata: `MetadataSize` and `IntervalSize`, a protection-information `Checksum` (`IntegrityCsumIP`, `IntegrityCsumCRC16` for T10-DIF, `IntegrityCsumCRC64NVMe`, or none), `RefTag`, `PIOffset` and `TagSize`. User copy is turned on automatically, because the metadata moves with `pread`/`pwrite` at the integrity offset. A `Backend` must implement `IntegrityBackend` (`ReadIntegrity`/`WriteIntegrity`); a `Handler` gets the metadata in `Request.Integrity`.
+
+When the kernel generates and verifies protection information, a READ of blocks that were never written must return metadata the kernel accepts. Return `0xff` bytes for unwritten intervals: an all-ones application tag is the T10 escape that disables checking. Integrity cannot be combined with zero copy or unprivileged devices.

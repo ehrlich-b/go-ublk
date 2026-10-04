@@ -123,9 +123,11 @@ Recovery flags are not available for unprivileged devices: the kernel clears `US
 
 ## go-ublk
 
-go-ublk requests `UBLK_F_URING_CMD_COMP_IN_TASK` on every device and `UBLK_F_CMD_IOCTL_ENCODE` when `DeviceParams.EnableIoctlEncode` is set; it always sends encoded opcodes either way. It does not call `GET_FEATURES` and does not check the returned flags against the request.
+go-ublk calls `GET_FEATURES` before every `ADD_DEV` and compares the request against it. A requested feature the kernel does not list fails `Create` with an error that wraps `syscall.EOPNOTSUPP` and names the missing flags, before anything is created. The flags `ADD_DEV` returns are checked again, so a feature the kernel silently clears is an error too, never a quietly weaker device. On kernels without `GET_FEATURES` (before 6.5) the check happens only after `ADD_DEV`.
 
-`EnableZeroCopy`, `EnableUnprivileged` and `EnableUserCopy` exist in `DeviceParams` but none is usable today. `EnableUserCopy` is rejected with `ErrNotImplemented`. `EnableZeroCopy` sets `UBLK_F_SUPPORT_ZERO_COPY`, but the data plane still passes a buffer address in `FETCH_REQ`. The kernel rejects that with `-EINVAL` in zero-copy mode, so the queues never become ready and `START_DEV` cannot complete. `EnableUnprivileged` sets the flag, but go-ublk does not send the device path that unprivileged control commands require. Recovery, batch I/O, zoned devices and integrity are not implemented yet; see the [roadmap](/go-ublk/roadmap/) and the [configuration reference](/go-ublk/configuration/).
+Each `DeviceParams` option maps to its flag: `Recovery` to the `USER_RECOVERY` family, `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (`PER_IO_DAEMON`), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan` and `IODescSize`. Three flags are requested whenever the kernel has them, because they cost nothing: `UPDATE_SIZE` (for `Device.Resize`), `QUIESCE` on recoverable devices (for `Device.Detach`), and `AUTO_BUF_REG` with zero copy. go-ublk always sends ioctl-encoded opcodes and does not request `CMD_IOCTL_ENCODE` or `URING_CMD_COMP_IN_TASK`, which the kernel forces on.
+
+`ublk.Probe()` reports what the running kernel supports, and `Device.Features()` what a device was granted.
 
 ## Reference table
 

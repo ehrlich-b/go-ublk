@@ -5,7 +5,7 @@ description: "Kernel and distribution bugs that bite ublk servers: which builds 
 weight: 140
 ---
 
-ublk is young and the driver changes every release, so the kernel you run matters as much as your server code. This page collects the kernel and distribution problems found while testing go-ublk on Ubuntu 6.17 and 7.0, on arm64 and x86_64, plus the fixes from upstream and Ubuntu changelogs that a server author should know about. None of them is specific to go-ublk: the reference servers hit the same ones. It also lists protocol rules that look like kernel bugs the first time they bite.
+ublk is young and the driver changes every release, so the kernel you run matters as much as your server code. This page collects the kernel and distribution problems found while testing go-ublk, first on Ubuntu 6.17 and 7.0 on arm64 and x86_64 and then across the mainline and distribution kernels of its [compatibility matrix](/reference/matrix/), plus the fixes from upstream and Ubuntu changelogs that a server author should know about. None of them is specific to go-ublk: the reference servers hit the same ones. It also lists protocol rules that look like kernel bugs the first time they bite.
 
 Where something is unknown, this page says so. "Not reproduced" is not "fixed".
 

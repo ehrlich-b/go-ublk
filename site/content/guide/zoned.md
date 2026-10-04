@@ -124,4 +124,4 @@ The kernel's selftest server has no zoned target. The Rust `rublk` server has on
 
 ## go-ublk
 
-go-ublk does not support zoned devices yet. `DeviceParams.EnableZoned` exists but is not wired to anything: it sets no flag and sends no zoned parameters. Zoned support also needs user copy, which go-ublk does not implement either. See the [roadmap](/go-ublk/roadmap/).
+`DeviceParams.EnableZoned` with `DeviceParams.Zoned` (zone size, open and active zone limits, maximum zone-append size) creates a host-managed zoned device (6.6+). User copy is turned on automatically, because the kernel requires it to return a zone append's LBA. Zone operations need a `Handler`: it receives `OpZoneOpen`, `OpZoneClose`, `OpZoneFinish`, `OpZoneReset`, `OpZoneResetAll`, `OpZoneAppend` (complete it with `Request.CompleteZoneAppend(lba)`) and `OpReportZones` (fill it with `Request.ReportZones`). The conformance suite tests this with an in-memory zoned device. Zoned devices cannot use zero copy or be unprivileged.

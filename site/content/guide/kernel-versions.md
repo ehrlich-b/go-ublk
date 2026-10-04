@@ -28,7 +28,7 @@ Distribution kernels backport freely, in both directions. Ubuntu's 6.17 kernels 
 | Shared-memory zero copy (`SHMEM_ZC`, `REG_BUF` / `UNREG_BUF`) | 7.1 |
 | Variable descriptor size (`IO_DESC_SIZE`) | 7.3 |
 
-go-ublk always sends ioctl-encoded commands, so it cannot work below 6.4. Its documented minimum is 6.8, and nothing below that has been verified.
+go-ublk always sends ioctl-encoded commands, so it cannot work below 6.4, its minimum. Newer features are negotiated per device. The [compatibility matrix](/reference/matrix/) shows which kernels the conformance suite has passed on.
 
 ## Release by release
 
