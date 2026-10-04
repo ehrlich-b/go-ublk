@@ -1179,3 +1179,53 @@ func testSharedMemory(t *T) error {
 	t.Logf("%d requests served zero-copy from shared memory", probe.hits.Load())
 	return nil
 }
+
+func init() {
+	register("features/io-desc-size", time.Minute, testIODescSize)
+}
+
+// testIODescSize creates a device with 32-byte descriptors and checks I/O
+// still works and handlers see the 8 extra bytes.
+func testIODescSize(t *T) error {
+	if err := needFeatures(ublk.FeatureIODescSize); err != nil {
+		return err
+	}
+	m := newMemBackend(16 << 20)
+	var extra atomic.Int64
+	h := ublk.HandlerFunc(func(r *ublk.Request) {
+		extra.Store(int64(len(r.DescriptorExtra)))
+		var err error
+		switch r.Op {
+		case ublk.OpRead:
+			_, err = m.ReadAt(r.Data, r.Offset)
+		case ublk.OpWrite:
+			_, err = m.WriteAt(r.Data, r.Offset)
+		}
+		r.Complete(err)
+	})
+	params := ublk.DefaultParams(nil)
+	params.Backend, params.Handler, params.Size = nil, h, 16<<20
+	params.NumQueues, params.QueueDepth = 2, 32
+	params.IODescSize = 32
+	dev, err := newDevice(t, params)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	p, q := alignedBuf(64<<10), alignedBuf(64<<10)
+	newRNG(41).fill(p)
+	if err := pwriteFull(int(f.Fd()), p, 8<<20); err != nil {
+		return err
+	}
+	if err := preadFull(int(f.Fd()), q, 8<<20); err != nil || !bytes.Equal(p, q) {
+		return fmt.Errorf("I/O with 32-byte descriptors: %v", err)
+	}
+	if extra.Load() != 8 {
+		return fmt.Errorf("DescriptorExtra is %d bytes, want 8", extra.Load())
+	}
+	return nil
+}

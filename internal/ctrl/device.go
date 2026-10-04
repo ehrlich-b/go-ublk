@@ -22,6 +22,7 @@ func (c *Controller) AddDevice(ctx context.Context, params *DeviceParams) (*uapi
 		MaxIOBufBytes: uint32(params.MaxIOSize),
 		Flags:         c.buildFeatureFlags(params),
 		UblksrvFlags:  params.UblksrvFlags,
+		IODescSize:    params.IODescSize,
 	})
 }
 
@@ -207,6 +208,10 @@ func (c *Controller) buildFeatureFlags(params *DeviceParams) uint64 {
 
 	if params.Integrity != nil {
 		flags |= uapi.UBLK_F_INTEGRITY
+	}
+
+	if params.IODescSize != 0 {
+		flags |= uapi.UBLK_F_IO_DESC_SIZE
 	}
 
 	return flags | params.Flags

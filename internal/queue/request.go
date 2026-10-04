@@ -100,6 +100,10 @@ type Request struct {
 	// device with integrity parameters): what to store for a write, where to
 	// put the stored metadata for a read. MetadataSize bytes per interval.
 	Integrity []byte
+	// DescriptorExtra is the part of the kernel's I/O descriptor beyond the
+	// standard 24 bytes, on a device created with a larger IODescSize
+	// (UBLK_F_IO_DESC_SIZE, kernel 7.3+); nil otherwise. Read-only.
+	DescriptorExtra []byte
 
 	e      *engine
 	state  atomic.Uint32

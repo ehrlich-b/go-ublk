@@ -682,6 +682,11 @@ func (e *engine) dispatch(i int) {
 	r := &e.reqs[i]
 	r.Op = Op(d.OpFlags & 0xff)
 	r.Flags = RequestFlags(d.OpFlags &^ 0xff)
+	r.DescriptorExtra = nil
+	if e.cfg.descStride > 24 {
+		base := unsafe.Add(e.cfg.desc, uintptr(tag)*e.cfg.descStride+24)
+		r.DescriptorExtra = unsafe.Slice((*byte)(base), int(e.cfg.descStride-24))
+	}
 	r.Offset = int64(d.StartSector) << uapi.SectorShift
 	r.Length = int64(d.NrSectors) << uapi.SectorShift
 	r.NrZones = 0

@@ -321,6 +321,7 @@ func Recover(ctx context.Context, id uint32, params DeviceParams, options *Optio
 	}
 
 	d := newDevice(id, params, options, info.Flags)
+	d.descSize = descSizeOf(info)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 

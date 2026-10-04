@@ -43,6 +43,7 @@ type Device struct {
 	depth     int
 	blockSize int
 	maxIO     int
+	descSize  int    // dev_info.io_desc_size (24 unless UBLK_F_IO_DESC_SIZE)
 	flags     uint64 // negotiated UBLK_F_* features
 	charFd    int
 	runners   []*queue.Queue
@@ -127,6 +128,11 @@ type DeviceParams struct {
 	// data (UBLK_F_NEED_GET_DATA). Supported for completeness; it costs a round
 	// trip per write and buys nothing with go-ublk's fixed per-tag buffers.
 	NeedGetData bool
+
+	// IODescSize requests I/O descriptors larger than the standard 24 bytes
+	// (UBLK_F_IO_DESC_SIZE, kernel 7.3+): 24..256, a multiple of 8. The extra
+	// bytes reach a Handler as Request.DescriptorExtra. 0 leaves the default.
+	IODescSize int
 
 	// SharedMemoryZeroCopy lets the device skip copies for requests whose
 	// pages lie in memory registered with Device.RegisterSharedMemory
@@ -341,6 +347,9 @@ func validateParams(params *DeviceParams) error {
 			return fmt.Errorf("Integrity: MetadataSize %d must be 1..255 and IntervalSize %d a power of two from 512 to LogicalBlockSize",
 				ip.MetadataSize, iv)
 		}
+	}
+	if d := params.IODescSize; d != 0 && (d < 24 || d > 256 || d%8 != 0) {
+		return fmt.Errorf("IODescSize is %d; must be 0, or 24..256 and a multiple of 8", d)
 	}
 	if params.SharedMemoryZeroCopy && params.EnableZeroCopy {
 		return fmt.Errorf("SharedMemoryZeroCopy cannot be combined with EnableZeroCopy")
@@ -624,6 +633,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	}
 
 	d := newDevice(deviceID, params, options, deviceInfo.Flags)
+	d.descSize = descSizeOf(deviceInfo)
 	if options.Logger != nil {
 		options.Logger.Printf("Device created: %s (ID: %d) - call Start() to begin I/O", d.Path, d.ID)
 	}
@@ -749,6 +759,7 @@ func (d *Device) startQueues() error {
 			ZeroCopyFile: zcFile,
 			ZeroCopyBase: zcBase,
 
+			DescSize:          d.descSize,
 			IntegrityInterval: d.integrityInterval(),
 			IntegrityMetadata: d.integrityMetadata(),
 			SharedMemory:      &d.shmem,
@@ -763,6 +774,14 @@ func (d *Device) startQueues() error {
 		}
 	}
 	return nil
+}
+
+// descSizeOf is the descriptor stride the kernel uses for a device.
+func descSizeOf(info *uapi.UblksrvCtrlDevInfo) int {
+	if info.Flags&uapi.UBLK_F_IO_DESC_SIZE != 0 && info.IODescSize >= 24 {
+		return int(info.IODescSize)
+	}
+	return 24
 }
 
 func (d *Device) integrityInterval() int {
@@ -1208,6 +1227,7 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	ctrlParams.IOMinSize = params.IOMinSize
 	ctrlParams.IOOptSize = params.IOOptSize
 	ctrlParams.DMAAlignment = params.DMAAlignment
+	ctrlParams.IODescSize = uint16(params.IODescSize)
 
 	if params.EnableZoned {
 		ctrlParams.EnableUserCopy = true // the kernel requires it for zoned devices
