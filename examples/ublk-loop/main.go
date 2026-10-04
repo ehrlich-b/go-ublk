@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -32,6 +33,7 @@ func main() {
 		readOnly   = flag.Bool("read-only", false, "Export the file read-only")
 		verbose    = flag.Bool("v", false, "Verbose output")
 		delSpec    = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all'")
+		devID      = flag.Int("id", -1, "Device ID to request, giving a stable /dev/ublkbN (-1 = first free)")
 	)
 	flag.Parse()
 
@@ -73,6 +75,7 @@ func main() {
 	// Required on kernel 6.11+: sets UBLK_F_CMD_IOCTL_ENCODE at ADD_DEV.
 	params.EnableIoctlEncode = true
 	params.ReadOnly = *readOnly
+	params.DeviceID = int32(*devID)
 
 	// The durability contract, stated once, in the one place that knows the
 	// answer. Buffered writes to a file are in the page cache when WriteAt
@@ -107,11 +110,19 @@ func main() {
 	}
 	fmt.Printf("\n  sudo mkfs.ext4 %s && sudo mount %s /mnt\n", device.Path, device.Path)
 	fmt.Printf("\nPress Ctrl+C to stop...\n")
+	sdNotify("READY=1")
 
+	// Handle every signal that can arrive during a shutdown, not just the first
+	// one. logind sends SIGTERM and then SIGHUP to a session's processes, and an
+	// unhandled SIGHUP kills the daemon while Close is still running STOP_DEV,
+	// stranding the I/O only this process can complete (TODO Critical Bug #15).
+	// A write to a vanished terminal or log pipe must not kill it either.
+	signal.Ignore(syscall.SIGPIPE)
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	<-sigCh
 	fmt.Println("\nreceived shutdown signal")
+	sdNotify("STOPPING=1")
 
 	// Do NOT cancel the context before Close(). Close() has to run STOP_DEV
 	// while the I/O goroutines are still running, because the kernel drains
@@ -224,4 +235,26 @@ func formatSize(bytes int64) string {
 
 	units := []string{"K", "M", "G", "T"}
 	return fmt.Sprintf("%.1f %sB", float64(bytes)/float64(div), units[exp])
+}
+
+// sdNotify sends a state change to systemd when running as a Type=notify
+// service, so a mount ordered After= this unit waits until /dev/ublkbN is live.
+// It does nothing outside systemd.
+func sdNotify(state string) {
+	name := os.Getenv("NOTIFY_SOCKET")
+	if name == "" {
+		return
+	}
+	if name[0] == '@' {
+		name = "\x00" + name[1:] // abstract socket
+	}
+	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: name, Net: "unixgram"})
+	if err != nil {
+		log.Printf("sd_notify %s: %v", state, err)
+		return
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte(state)); err != nil {
+		log.Printf("sd_notify %s: %v", state, err)
+	}
 }

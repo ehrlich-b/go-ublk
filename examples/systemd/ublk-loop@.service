@@ -1,0 +1,41 @@
+# Run ublk-loop as a supervised service. Instance name = ublk device ID, so
+# ublk-loop@0.service serves /dev/ublkb0 from /var/lib/ublk/0.img.
+#
+# Why a unit at all (TODO.md Critical Bug #15): a daemon left in a login
+# session's scope is killed at the start of shutdown, before the filesystem
+# above it has unmounted. The unmount's writeback then fails, and about one
+# reboot in five never completes. As a service ordered before umount.target,
+# with the mount unit Requires=/After= it (see srv-ublk0.mount), stop order is
+# reversed: the filesystem unmounts through a still-running daemon.
+#
+# Install:
+#   install -m 0755 bin/ublk-loop /usr/local/bin/ublk-loop
+#   install -m 0644 examples/systemd/ublk-loop@.service /etc/systemd/system/
+#   install -m 0644 examples/systemd/srv-ublk0.mount /etc/systemd/system/
+#   mkdir -p /var/lib/ublk && truncate -s 10G /var/lib/ublk/0.img
+#   systemctl daemon-reload && systemctl enable --now srv-ublk0.mount
+
+[Unit]
+Description=go-ublk loop device /dev/ublkb%i
+# Start after local filesystems (the backing file lives on one) and stop only
+# when unmounting begins, not with ordinary services.
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=umount.target
+Conflicts=umount.target
+
+[Service]
+# ublk-loop reports READY=1 once /dev/ublkb%i is serving, so units ordered
+# After= this one (the mount) start only when the device exists.
+Type=notify
+ExecStartPre=/sbin/modprobe ublk_drv
+ExecStart=/usr/local/bin/ublk-loop -id=%i -file=/var/lib/ublk/%i.img
+# SIGTERM goes to the main process only; it runs STOP_DEV then DEL_DEV while
+# its I/O threads are still alive to complete in-flight requests. Give a busy
+# device time to drain before systemd escalates to SIGKILL.
+KillMode=mixed
+TimeoutStopSec=90
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

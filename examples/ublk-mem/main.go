@@ -192,8 +192,14 @@ func main() {
 	}()
 
 	// Wait for signal
+	// Handle every signal that can arrive during a shutdown, not just the first
+	// one. logind sends SIGTERM and then SIGHUP to a session's processes, and an
+	// unhandled SIGHUP kills the daemon while Close is still running STOP_DEV,
+	// stranding the I/O only this process can complete (TODO Critical Bug #15).
+	// A write to a vanished terminal or log pipe must not kill it either.
+	signal.Ignore(syscall.SIGPIPE)
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	<-sigCh
 
 	logger.Info("received shutdown signal")

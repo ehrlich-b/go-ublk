@@ -1,0 +1,28 @@
+# Mount /dev/ublkb0 at /srv/ublk0. A mount unit's name must match its path
+# (systemd-escape --path /srv/ublk0 -> srv-ublk0.mount).
+#
+# The load-bearing lines are Requires=/After= on the daemon: systemd stops
+# units in reverse start order, so this filesystem unmounts (flushing its
+# writeback) before the daemon serving it is asked to stop. Without them a
+# reboot under write load loses that writeback and can hang the host
+# (TODO.md Critical Bug #15). Create the filesystem once beforehand, e.g.
+#   systemctl start ublk-loop@0 && mkfs.ext4 /dev/ublkb0
+
+[Unit]
+Description=Filesystem on go-ublk device /dev/ublkb0
+Requires=ublk-loop@0.service
+After=ublk-loop@0.service
+DefaultDependencies=no
+Before=umount.target
+Conflicts=umount.target
+
+[Mount]
+What=/dev/ublkb0
+Where=/srv/ublk0
+Type=ext4
+Options=defaults
+
+[Install]
+# Not local-fs.target: the daemon starts after local-fs.target (its backing file
+# lives there), so ordering this mount before it would be a dependency cycle.
+WantedBy=multi-user.target
