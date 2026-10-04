@@ -39,7 +39,7 @@
 <text x="710" y="118" class="t-mono">DEL_DEV</text>
 <line x1="400" y1="210" x2="400" y2="286" class="line" marker-end="url(#ah-dev)"/>
 <text x="410" y="240" class="t-small">server exits with USER_RECOVERY</text>
-<text x="410" y="255" class="t-small">(after <tspan class="t-mono">QUIESCE_DEV</tspan> for a planned hand-off)</text>
+<text x="410" y="255" class="t-small">(after QUIESCE_DEV, for a planned hand-off)</text>
 <polyline points="200,286 200,194 286,194" class="line-accent" marker-end="url(#ah-dev-a)"/>
 <text x="190" y="232" text-anchor="end" class="t-mono t-small">START_USER_RECOVERY</text>
 <text x="190" y="247" text-anchor="end" class="t-small">new server fetches every tag</text>

@@ -9,7 +9,7 @@
     <nav aria-label="Site">{{ partial "nav.html" . }}</nav>
   </aside>
   <main id="main" class="content">
-    <article class="prose">
+    <article class="prose{{ if .Params.wide }} wide{{ end }}">
       <header class="page-header">
         {{- with .Parent }}{{ if not .IsHome }}<p class="eyebrow"><a href="{{ .RelPermalink }}">{{ .Params.navTitle | default .LinkTitle }}</a></p>{{ end }}{{ end }}
         <h1>{{ .Title }}</h1>

@@ -331,6 +331,9 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 /* Prose */
 
 .prose { max-width: var(--measure); overflow-wrap: break-word; }
+/* Reference pages: tables use the full content width, prose keeps its measure. */
+.prose.wide { max-width: 76rem; }
+.prose.wide > p, .prose.wide > ul, .prose.wide > .page-header, .prose.wide > .table-wrap, .prose.wide .callout, .prose.wide .uapi-source { max-width: var(--measure); }
 .prose > :first-child { margin-top: 0; }
 
 .page-header { margin-bottom: 2rem; }
@@ -650,8 +653,8 @@ h2 .badge, h3 .badge { margin-left: 0.5rem; }
 
 /* Compatibility matrix */
 
-.matrix-totals { list-style: none; padding: 0; margin: 0.75rem 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
-.matrix-totals li { margin: 0; font-variant-numeric: tabular-nums; }
+.prose .matrix-totals { list-style: none; padding: 0; margin: 0.75rem 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
+.prose .matrix-totals li { margin: 0; font-variant-numeric: tabular-nums; }
 .matrix-index { font-size: 0.9rem; margin: 0.5rem 0 0; }
 .matrix-index span { color: var(--fg-muted); }
 .matrix-index a { margin-left: 0.6rem; }

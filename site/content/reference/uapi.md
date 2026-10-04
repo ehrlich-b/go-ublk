@@ -4,6 +4,7 @@ linkTitle: "UAPI reference"
 description: "Every ublk control command, I/O command, feature flag, parameter type, I/O operation and flag, device state, structure and constant, with the Linux release that introduced it and its go-ublk status."
 weight: 10
 notoc: true
+wide: true
 ---
 
 One row per item in the kernel's `include/uapi/linux/ublk_cmd.h`. Filter by kind or by go-ublk status, or search by name. Every row has a stable anchor, so `/reference/uapi/#ublk_f_user_recovery` links straight to a flag. Expand **Details** for semantics, dependencies, the introducing commit and go-ublk notes.
