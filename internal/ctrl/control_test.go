@@ -1,6 +1,7 @@
 package ctrl
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"sync"
@@ -17,14 +18,25 @@ import (
 
 type controlTestRing struct {
 	uring.Ring
-	submit   func(uint32, *uapi.UblksrvCtrlCmd) (uring.Result, error)
-	closeErr error
+	submit func(uint32, *uapi.UblksrvCtrlCmd) (uring.Result, error)
+	// submitCtx, if set, models a ring that cancels on context end.
+	submitCtx func(context.Context, uint32, *uapi.UblksrvCtrlCmd) (uring.Result, error)
+	closeErr  error
 
 	mu     sync.Mutex
 	closes int
 }
 
 func (r *controlTestRing) SubmitCtrlCmd(op uint32, cmd *uapi.UblksrvCtrlCmd, _ uint64) (uring.Result, error) {
+	return r.submit(op, cmd)
+}
+
+// SubmitCtrlCmdContext is defined explicitly so the embedded (nil) Ring never
+// supplies it, whichever internal/uring version this builds against.
+func (r *controlTestRing) SubmitCtrlCmdContext(ctx context.Context, op uint32, cmd *uapi.UblksrvCtrlCmd, _ uint64) (uring.Result, error) {
+	if r.submitCtx != nil {
+		return r.submitCtx(ctx, op, cmd)
+	}
 	return r.submit(op, cmd)
 }
 

@@ -86,6 +86,60 @@ func TestContextAbandonsButKeepsCommandAlive(t *testing.T) {
 	}
 }
 
+// With a ring that cancels on context end (ASYNC_CANCEL, then reaping the
+// command's own CQE), the kernel's EINTR is the abandoned command's result
+// and the slot is reusable: nothing is left in flight.
+func TestCancellingRingReleasesSlot(t *testing.T) {
+	ring := &controlTestRing{
+		submit: func(op uint32, cmd *uapi.UblksrvCtrlCmd) (uring.Result, error) {
+			return controlTestResult(0), nil // the GET_DEV_INFO probe
+		},
+		submitCtx: func(ctx context.Context, op uint32, cmd *uapi.UblksrvCtrlCmd) (uring.Result, error) {
+			if op != uapi.UBLK_U_CMD_END_USER_RECOVERY {
+				return controlTestResult(0), nil
+			}
+			<-ctx.Done()
+			// what internal/uring returns after a reaped cancellation
+			return controlTestResult(neg(syscall.EINTR)), errors.Join(errors.New("control command cancelled"), ctx.Err())
+		},
+	}
+	c, ts := newTestControllerSlots(t, ring)
+	ctx, cancel := context.WithTimeout(bg, 10*time.Millisecond)
+	defer cancel()
+	err := c.EndUserRecovery(ctx, 3, 1)
+	var ife *InFlightError
+	if !errors.As(err, &ife) {
+		// The ring may finish its cancellation before exec notices the
+		// context; then the reaped result itself is returned.
+		if !errors.Is(err, syscall.EINTR) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("EndUserRecovery = %v", err)
+		}
+	} else {
+		select {
+		case <-ife.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancellation result never published")
+		}
+		if r := ife.Result(); !errors.Is(r, syscall.EINTR) || !errors.Is(r, context.DeadlineExceeded) {
+			t.Fatalf("late result %v", r)
+		}
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		created, unmaps := ts.counts()
+		if created == 1 && unmaps == 1 {
+			break // the one slot went back to the pool and was released by Close
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slot not reused/released after a reaped cancellation: created=%d unmaps=%d", created, unmaps)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestAbandonedCommandDoesNotBlockOthers(t *testing.T) {
 	b := newBlockingRing()
 	ring := b.ring()

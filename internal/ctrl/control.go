@@ -140,8 +140,9 @@ func newSlot() (*slot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", UblkControlPath, err)
 	}
-	// After merging internal/uring's CtrlTimeout, set CtrlTimeout: -1 here so
-	// the caller's context, not a fixed 10s cap, bounds STOP_DEV and DEL_DEV.
+	// Once internal/uring has Config.CtrlTimeout and SubmitCtrlCmdContext
+	// (ctxRing), set CtrlTimeout: -1 here so the caller's context, not a fixed
+	// 10s cap, bounds STOP_DEV and DEL_DEV; the context then cancels.
 	ring, err := uring.NewRing(uring.Config{Entries: 4, FD: int32(fd)})
 	if err != nil {
 		syscall.Close(fd)
@@ -314,7 +315,13 @@ func (c *Controller) exec(ctx context.Context, req request) (int32, error) {
 		done      = make(chan struct{})
 	)
 	go func() {
-		res, terr := s.ring.SubmitCtrlCmd(req.op, &cmd, 0)
+		var res uring.Result
+		var terr error
+		if cr, ok := s.ring.(ctxRing); ok {
+			res, terr = cr.SubmitCtrlCmdContext(ctx, req.op, &cmd, 0)
+		} else {
+			res, terr = s.ring.SubmitCtrlCmd(req.op, &cmd, 0)
+		}
 		mu.Lock()
 		result = c.finish(s, req, res, terr, payload, abandoned != nil)
 		finished = true
@@ -341,15 +348,38 @@ func (c *Controller) exec(ctx context.Context, req request) (int32, error) {
 	return 0, abandoned
 }
 
+// ctxRing is a ring that can cancel an in-flight control command when its
+// context ends: it submits IORING_OP_ASYNC_CANCEL, which signals the io-wq
+// worker so interruptible kernel waits (START_DEV and END_USER_RECOVERY
+// waiting for FETCHes, DEL_DEV waiting for the last reference, QUIESCE_DEV)
+// return EINTR, and it reaps the command's own completion before returning.
+// It then returns a non-nil Result together with an error wrapping the
+// context's; a nil Result with an error means the completion was not reaped
+// and the command may still be running. Rings without it are only waited on.
+type ctxRing interface {
+	SubmitCtrlCmdContext(ctx context.Context, cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, userData uint64) (uring.Result, error)
+}
+
 // finish turns a completion into an outcome, decodes the payload (read for a
 // waiting caller, late for an abandoned one) and only then releases the slot.
+// A non-nil Result is the kernel's verdict even when it comes with an error
+// (a reaped cancellation); only a nil Result with an error leaves the
+// command's fate unknown and retires the slot.
 func (c *Controller) finish(s *slot, req request, res uring.Result, terr error, payload []byte, late bool) outcome {
+	var cancelled error
+	if res != nil && terr != nil {
+		c.logger.Debug("control command cancelled and reaped", "op", req.name, "dev_id", req.devID, "res", res.Value(), "err", terr)
+		cancelled, terr = terr, nil
+	}
 	o := outcome{err: terr}
 	if terr == nil {
 		o.res = res.Value()
 		switch {
 		case o.res < 0:
 			o.err = syscall.Errno(-o.res)
+			if cancelled != nil {
+				o.err = errors.Join(o.err, cancelled) // keeps errors.Is(err, ctx.Err())
+			}
 		case late && req.late != nil:
 			req.late(payload, o.res)
 		case !late && req.read != nil:

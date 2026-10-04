@@ -529,7 +529,7 @@ func abandonedEndRecovery(c *ctrl.Controller) {
 	if err := waitGone(c, id); err != nil {
 		skip("abandoned device released", "%v: the kernel wait still holds a reference (ring not torn down)", err)
 	} else {
-		pass("abandoned device released", "ring teardown cancelled the kernel wait")
+		pass("abandoned device released", "the kernel wait was cancelled (ASYNC_CANCEL or ring teardown)")
 	}
 }
 
