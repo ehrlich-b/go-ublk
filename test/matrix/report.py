@@ -232,7 +232,7 @@ def cmd_aggregate(a):
     ordered = sorted(runs.values(), key=lambda r: (order.get(r["family"], 1), r["family"],
                                                      verkey(r.get("upstream", "")), r["id"]))
     os.makedirs(a.out, exist_ok=True)
-    matrix = {"generated": now(), "go_ublk_commit": commit,
+    matrix = {"generated": now(), "go_ublk_commit": a.commit or commit,
               "runs": [{k: r.get(k) for k in SCHEMA_KEYS} for r in ordered]}
     with open(os.path.join(a.out, "matrix.json"), "w") as f:
         json.dump(matrix, f, indent=1)
@@ -264,9 +264,16 @@ def markdown(matrix, runs):
     counts = {}
     for r in runs:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
+    commits = {}
+    for r in runs:
+        c = (r.get("detail", {}).get("go_ublk_commit") or "?")[:12]
+        commits[c] = commits.get(c, 0) + 1
     out = ["# go-ublk kernel matrix", "",
            f"Generated {matrix['generated']} against go-ublk `{matrix['go_ublk_commit'][:12]}`. "
-           f"{len(runs)} kernels: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())) + ".", "",
+           f"{len(runs)} kernels: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())) + ".", ""]
+    if len(commits) > 1:
+        out += ["Rows by the commit they ran: " + ", ".join(f"`{c}` {n}" for c, n in sorted(commits.items())) + ".", ""]
+    out += [
            "| Kernel id | Distro | uname -r | Base | ublk_drv | Features | Status | P/F/S/E | Oops | Wall | Failing tests |",
            "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in runs:
@@ -320,6 +327,7 @@ def main():
     g.add_argument("rundirs", nargs="+")
     g.add_argument("--out", required=True)
     g.add_argument("--manifest", default="")
+    g.add_argument("--commit", default="", help="go_ublk_commit to record (default: from the runs)")
     a = ap.parse_args()
     {"parse": cmd_parse, "aggregate": cmd_aggregate}[a.cmd](a)
 
