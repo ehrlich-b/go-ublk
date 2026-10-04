@@ -1,0 +1,134 @@
+name: Kernel matrix
+
+# Boots the go-ublk payload (ublk-suite + extras) under many kernels with KVM,
+# and separately runs it natively on the runner's own kernel. See
+# test/matrix/README.md. UNTESTED in Actions so far: written against the rig
+# runs, where the same scripts run under TCG.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernels:
+        description: "default = a modest set; full = every mainline series from v6.0 plus every distro row"
+        type: choice
+        options: [default, full]
+        default: default
+  push:
+    tags: ['v*']
+
+env:
+  MATRIX_HOME: ${{ github.workspace }}/../goublk-matrix
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Enable KVM for the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Install QEMU and unpacking tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 cpio rpm2cpio \
+            libarchive-tools zstd xz-utils kmod
+
+      - name: Choose kernel set
+        id: set
+        run: |
+          if [ "${{ inputs.kernels }}" = full ]; then
+            echo "mainline_latest=0" >> "$GITHUB_OUTPUT"
+            echo "distros=*" >> "$GITHUB_OUTPUT"
+          else
+            echo "mainline_latest=4" >> "$GITHUB_OUTPUT"
+            echo "distros=ubuntu-22.04-ga ubuntu-24.04-ga ubuntu-24.04-hwe ubuntu-24.04-hwe-6.17 debian-12 debian-13 fedora-4[34] centos-stream-10 arch" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only the extracted kernels are cached (vmlinuz + a small modules.cpio
+      # each); fetch.py skips any id that is already extracted.
+      - name: Cache extracted kernels
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MATRIX_HOME }}/cache/kernels
+          key: matrix-kernels-${{ inputs.kernels || 'default' }}-${{ hashFiles('test/matrix/distros.tsv', 'test/matrix/fetch.py', 'test/matrix/kmods.py') }}-${{ github.run_id }}
+          restore-keys: |
+            matrix-kernels-${{ inputs.kernels || 'default' }}-${{ hashFiles('test/matrix/distros.tsv', 'test/matrix/fetch.py', 'test/matrix/kmods.py') }}-
+
+      - name: Fetch kernels
+        run: make matrix-fetch MAINLINE_LATEST=${{ steps.set.outputs.mainline_latest }} DISTROS='${{ steps.set.outputs.distros }}'
+
+      - name: Extract kernels
+        run: make matrix-extract
+
+      - name: Build userland and payload
+        run: make matrix-userland matrix-payload
+
+      - name: Boot the matrix
+        run: make matrix-run ACCEL=kvm JOBS=3 RUN_ID=ci
+
+      - name: Report
+        if: always()
+        run: |
+          make matrix-report MATRIX_RUNS="$MATRIX_HOME/runs/ci"
+          cat test/matrix/results/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-matrix
+          path: |
+            test/matrix/results/
+            ${{ env.MATRIX_HOME }}/runs/ci/*/console.log
+            ${{ env.MATRIX_HOME }}/runs/ci/*/run.json
+
+  # The runner's own kernel (linux-azure), natively. Note that some linux-azure
+  # 6.17 builds carry the ublk ADD_DEV NULL-deref (LP #2154635); a hang or
+  # oops here is a kernel result, hence the job timeout.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Load ublk_drv
+        run: |
+          uname -r
+          sudo modprobe ublk_drv || {
+            sudo apt-get update
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+            sudo modprobe ublk_drv
+          }
+          ls -l /dev/ublk-control
+          sudo apt-get install -y --no-install-recommends e2fsprogs xfsprogs
+
+      - name: Run the payload natively
+        run: make matrix-native SCALE=1 MATRIX_HOME="$MATRIX_HOME"
+
+      - name: Report
+        if: always()
+        run: |
+          python3 test/matrix/report.py aggregate "$MATRIX_HOME"/runs/native-* --out native-results
+          cat native-results/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-matrix-native
+          path: |
+            native-results/
+            ${{ env.MATRIX_HOME }}/runs/native-*/*/console.log

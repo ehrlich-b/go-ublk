@@ -1,0 +1,80 @@
+#!/bin/busybox sh
+# PID 1 of a kernel-matrix guest. Mounts the basics, loads ublk_drv from the
+# per-kernel module set, runs /payload/run, reports, dumps dmesg, powers off.
+#
+# Two serial ports: ttyS0 is the console (kernel log + human output), ttyS1 is
+# the results channel and carries nothing but JSON lines, so the host never has
+# to untangle results from interleaved printk output. Every result line is also
+# echoed to the console with an @@GOUBLK@@ prefix as a fallback channel.
+# The userland ships busybox's links already; only fill in if they are missing
+# (a blanket --install would re-create links that shadow util-linux tools).
+[ -e /bin/sh ] || /bin/busybox --install -s 2>/dev/null
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export HOME=/root TERM=dumb
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || mount -t tmpfs tmpfs /dev
+mkdir -p /dev/pts /dev/shm /root
+mount -t devpts devpts /dev/pts
+for d in /tmp /var/tmp /run /dev/shm; do mkdir -p $d; mount -t tmpfs tmpfs $d; done
+exec </dev/console >/dev/console 2>&1
+hostname matrix
+ln -sf /proc/self/fd /dev/fd 2>/dev/null
+ln -sf /proc/mounts /etc/mtab 2>/dev/null
+
+R=/dev/ttyS1
+stty -F $R raw -echo 115200 2>/dev/null || R=/dev/null
+
+jstr() { printf '%s' "$1" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+emit() {
+	printf '%s\n' "$1" >$R
+	printf '@@GOUBLK@@ %s\n' "$1"
+}
+arg() { tr ' ' '\n' </proc/cmdline | sed -n "s/^goublk\.$1=//p" | tail -1; }
+
+up() { cut -d' ' -f1 /proc/uptime; }
+emit "{\"meta\":{\"phase\":\"boot\",\"uname\":\"$(uname -r)\",\"machine\":\"$(uname -m)\",\"boot_s\":$(up),\"cpus\":$(grep -c ^processor /proc/cpuinfo),\"mem_kb\":$(sed -n 's/^MemTotal: *\([0-9]*\).*/\1/p' /proc/meminfo)}}"
+
+# The kernel's own module autoload (mount -t xfs, crypto) execs
+# CONFIG_MODPROBE_PATH, which is /usr/sbin/modprobe on Fedora and /sbin/modprobe
+# elsewhere; point it at the one this userland has.
+command -v modprobe >/proc/sys/kernel/modprobe 2>/dev/null
+# Surface hung tasks well inside the host's wall-clock timeout.
+[ -w /proc/sys/kernel/hung_task_timeout_secs ] && echo 30 >/proc/sys/kernel/hung_task_timeout_secs
+echo 1 >/proc/sys/kernel/sysrq 2>/dev/null
+
+ublk=none
+if grep -qw ublk_drv /lib/modules/$(uname -r)/modules.builtin 2>/dev/null; then
+	ublk=builtin
+fi
+mp_out=$(modprobe ublk_drv 2>&1)
+mp_rc=$?
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e /dev/ublk-control ] && break; sleep 0.2; done
+[ -e /dev/ublk-control ] && ctl=true || ctl=false
+[ "$ublk" = none ] && [ -e /sys/module/ublk_drv ] && ublk=module
+srcv=$(cat /sys/module/ublk_drv/srcversion 2>/dev/null)
+emit "{\"meta\":{\"phase\":\"modprobe\",\"ublk_drv\":\"$ublk\",\"modprobe_rc\":$mp_rc,\"modprobe_out\":\"$(jstr "$mp_out")\",\"ublk_control\":$ctl,\"srcversion\":\"$srcv\"}}"
+
+export MATRIX_PROFILE=$(arg profile)
+export MATRIX_SCALE=$(arg scale)
+export MATRIX_TESTS=$(arg tests | tr ',' ' ')
+export MATRIX_SUITE_RUN=$(arg suite_run)
+export MATRIX_SUITE_SKIP=$(arg suite_skip)
+[ -n "$MATRIX_SCALE" ] || unset MATRIX_SCALE
+echo "=== payload start (profile=${MATRIX_PROFILE:-default} tests=${MATRIX_TESTS:-all}) ==="
+if [ -x /payload/run ]; then
+	/payload/run | while IFS= read -r line; do emit "$line"; done
+else
+	emit '{"test":"payload","status":"error","duration_s":0,"detail":"no /payload/run in initramfs"}'
+fi
+echo "=== payload end ==="
+emit "{\"meta\":{\"phase\":\"done\",\"uptime_s\":$(up)}}"
+
+echo "@@GOUBLK-DMESG-BEGIN@@"
+dmesg
+echo "@@GOUBLK-DMESG-END@@"
+sync
+poweroff -f
+echo o >/proc/sysrq-trigger
+sleep 30

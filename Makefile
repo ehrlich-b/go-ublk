@@ -626,6 +626,66 @@ vm-kernel-latest: vm-check
 	@echo "Done. Kernel: $$($(VM_SSH) 'uname -r')"
 
 #==============================================================================
+# Kernel Matrix (test/matrix): boot the payload under many kernels in QEMU
+#==============================================================================
+
+.PHONY: matrix-toolbox matrix-userland matrix-payload matrix-fetch matrix-extract matrix-run \
+	matrix-report matrix-native
+
+# Downloads, extracted kernels, builds and run logs; never the repo.
+MATRIX_HOME ?= $(HOME)/goublk-matrix
+# Prefix for the steps that need qemu/cpio/rpm2cpio/depmod. Empty runs them on
+# the host (CI). On a host without them, run them in the toolbox image:
+#   MATRIX_RUNNER = docker run --rm -v $(MATRIX_HOME):$(MATRIX_HOME) -v $(CURDIR):$(CURDIR) \
+#                   -w $(CURDIR) -e MATRIX_HOME=$(MATRIX_HOME) goublk-matrix
+MATRIX_RUNNER ?=
+# Kernel ids or globs (see `python3 test/matrix/fetch.py list`); empty = all.
+KERNELS ?=
+# Distro rows to fetch (globs over distros.tsv ids); MAINLINE_LATEST=N limits
+# mainline to the newest N series (0 = every series from v6.0).
+DISTROS ?= *
+MAINLINE_LATEST ?= 0
+ACCEL ?= tcg
+JOBS ?= 4
+MATRIX_RUNS ?= $(lastword $(sort $(wildcard $(MATRIX_HOME)/runs/*)))
+MATRIX_ENV = env MATRIX_HOME=$(MATRIX_HOME) ACCEL=$(ACCEL) JOBS=$(JOBS) \
+	$(if $(MEM),MEM=$(MEM)) $(if $(SMP),SMP=$(SMP)) $(if $(TIMEOUT),TIMEOUT=$(TIMEOUT)) \
+	$(if $(SCALE),SCALE=$(SCALE)) $(if $(PROFILE),PROFILE=$(PROFILE)) $(if $(TESTS),TESTS="$(TESTS)") \
+	$(if $(QEMU),QEMU="$(QEMU)") $(if $(RUN_ID),RUN_ID=$(RUN_ID)) \
+	$(if $(SUITE_RUN),SUITE_RUN='$(SUITE_RUN)') $(if $(SUITE_SKIP),SUITE_SKIP='$(SUITE_SKIP)')
+
+matrix-toolbox:
+	docker build -t goublk-matrix test/matrix
+
+matrix-userland:
+	@MATRIX_HOME=$(MATRIX_HOME) bash test/matrix/build-userland.sh
+
+matrix-payload:
+	@MATRIX_HOME=$(MATRIX_HOME) bash test/matrix/build-payload.sh
+
+matrix-fetch:
+	MATRIX_HOME=$(MATRIX_HOME) python3 test/matrix/fetch.py mainline --latest $(MAINLINE_LATEST)
+	MATRIX_HOME=$(MATRIX_HOME) python3 test/matrix/fetch.py distro "$(DISTROS)"
+
+matrix-extract:
+	$(MATRIX_RUNNER) $(MATRIX_ENV) bash test/matrix/extract.sh "$(KERNELS)"
+
+matrix-run: matrix-payload
+	@test -f $(MATRIX_HOME)/build/userland.cpio || $(MAKE) --no-print-directory matrix-userland
+	$(MATRIX_RUNNER) $(MATRIX_ENV) bash test/matrix/run-matrix.sh "$(KERNELS)"
+
+# Fold the latest run (or MATRIX_RUNS="dir1 dir2", later wins) into the
+# committed results: test/matrix/results/{matrix.json,summary.md,...}.
+matrix-report:
+	MATRIX_HOME=$(MATRIX_HOME) python3 test/matrix/fetch.py manifest
+	python3 test/matrix/report.py aggregate $(MATRIX_RUNS) --out test/matrix/results \
+		--manifest $(MATRIX_HOME)/cache/kernels.json
+
+# The payload against the host's own kernel, no VM (CI runner job; needs root).
+matrix-native: matrix-payload
+	sudo $(MATRIX_ENV) bash test/matrix/run-native.sh
+
+#==============================================================================
 # Docs site (Hugo; source in site/, output in site/public, gitignored)
 #==============================================================================
 
@@ -688,6 +748,12 @@ help:
 	@echo ""
 	@echo "Kernel:"
 	@echo "  make check-kernel   Check ublk kernel support"
+	@echo ""
+	@echo "Kernel matrix (see test/matrix/README.md):"
+	@echo "  make matrix-fetch [DISTROS=glob] [MAINLINE_LATEST=N]  Fetch kernels"
+	@echo "  make matrix-extract   Unpack fetched kernels"
+	@echo "  make matrix-run [KERNELS=glob] [ACCEL=tcg|kvm] [JOBS=N]  Boot them with the payload"
+	@echo "  make matrix-report    Write test/matrix/results from the latest run"
 	@echo ""
 	@echo "VM Kernel Management:"
 	@echo "  make vm-kernel      Show current VM kernel"

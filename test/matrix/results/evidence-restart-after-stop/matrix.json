@@ -1,0 +1,7385 @@
+{
+ "generated": "2026-10-04T14:39:55+00:00",
+ "go_ublk_commit": "595536b",
+ "runs": [
+  {
+   "id": "mainline-6.0.19",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.0.19-060019-generic",
+   "upstream": "6.0",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:14:51+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 4.9,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.1.189",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.1.189-0601189-generic",
+   "upstream": "6.1",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:15:07+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.2,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.2",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.2.0-060200-generic",
+   "upstream": "6.2",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:30:12+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.2,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.3",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.3.0-060300-generic",
+   "upstream": "6.3",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:30:14+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.2,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.4",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.4.0-060400-generic",
+   "upstream": "6.4",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:34:24+00:00",
+   "ublk_drv": true,
+   "features": "unknown",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "fail",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"unknown\",\"srcversion\":\"784A74C9C421FA0CEFC07D1\",\"error\":\"ioctl-encoded: no such device\\nlegacy: operation not supported\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.5,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 111.6,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 68.7,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.93,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.97,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.91,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 2.56,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.13,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.18,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 2.16,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.24,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.05,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.93,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.32,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.51,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.14,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "6 oops/hang line(s); first: [  254.103713] refcount_t: underflow; use-after-free.\n[  254.103976] WARNING: CPU: 1 PID: 2440 at lib/refcount.c:28 refcount_warn_saturate+0xa3/0x150\n[  254.104394] Modules linked in: xfs libcrc32c ublk_drv\n[  254.105152] CPU: 1 PID: 2440 Comm: iou-wrk-1990 Not tainted 6.4.0-060400-generic #202306271339\n[  254.105337] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[  254.105479] RIP: 0010:refcount_warn_saturate+0xa3/0x150\n[  254.105618] Code: cc cc 0f b6 1d b9 fe de 01 80 fb 01 0f 87 c8 79 8b 00 83 e3 01 75 dd 48 c7 c7 c8 5e 1a a8 c6 05 9d fe de 01 01 e8 7d 23 92 ff <0f> 0b eb c6 0f b6 1d 90 fe de 01 80 fb 01 0f 87 88 79 8b 00 83 e3\n[  254.105839] RSP: 0018:ff79027b00bd3bf8 EFLAGS: 00000246\n[  254.105894] RAX: 0000000000000000 RBX: 0000000000000000 RCX: 0000000000000000\n[  254.105995] RDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000000\n[  254.106065] RBP: ff79027b00bd3c00 R08: 0000000000000000 R09: 0000000000000000\n[  254.106114] R10: 0000000000000000 R11: 0000000000000000 R12: 0000000000000002\n[  254.106162] R13: ff27ac7e84cdb640 R14: 0000000000000001 R15: ff27ac7efb2c3000\n[  254.106260] FS:  000000"
+    }
+   ],
+   "summary": {
+    "pass": 38,
+    "fail": 6,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.5.11",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.5.11-060511-generic",
+   "upstream": "6.5",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:36:12+00:00",
+   "ublk_drv": true,
+   "features": "0xfe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0xfe\",\"opcode\":\"ioctl\",\"srcversion\":\"972662443D83734F46BED1F\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.3,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 111.6,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 68.7,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.92,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.87,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.88,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.18,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.17,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.45,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.19,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.12,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.93,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.34,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.34,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.43,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.22,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 66.8,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2542:ublk-mem 9:kworker/0:1+events"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "26 oops/hang line(s); first: [  308.158889] INFO: task kworker/0:1:9 blocked for more than 30 seconds.\n[  308.159273]       Not tainted 6.5.11-060511-generic #202311151304\n[  308.159424] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  308.159559] task:kworker/0:1     state:D stack:0     pid:9     ppid:2      flags:0x00004000\n[  308.160132] Workqueue: events ublk_stop_work_fn [ublk_drv]\n[  308.161066] Call Trace:\n[  308.161342]  <TASK>\n[  308.161641]  __schedule+0x2cc/0x770\n[  308.161999]  schedule+0x63/0x110\n[  308.162050]  schedule_preempt_disabled+0x15/0x30\n[  308.162116]  __mutex_lock.constprop.0+0x42f/0x740\n[  308.162182]  ? add_timer+0x20/0x40\n[  308.162314]  __mutex_lock_slowpath+0x13/0x20\n[  308.162374]  mutex_lock+0x3c/0x50\n[  308.162436]  ublk_stop_dev+0x1e/0xd0 [ublk_drv]\n[  308.162510]  ublk_stop_work_fn+0x15/0x20 [ublk_drv]\n[  308.162577]  process_one_work+0x220/0x440\n[  308.162635]  worker_thread+0x4d/0x3f0\n[  308.162684]  ? _raw_spin_lock_irqsave+0xe/0x20\n[  308.162791]  ? __pfx_worker_thread+0x10/0x10\n[  308.162866]  kthread+0xef/0x120\n[  308.162915]  ? __pfx_kthread+0x10/0x10\n[  308.162966]  ret_from_fork+0x44/0x70\n[  308.163016]  ? __pfx_kthread+0x10/0x10\n[  308.16"
+    }
+   ],
+   "summary": {
+    "pass": 39,
+    "fail": 7,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.6.158",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.6.158-0606158-generic",
+   "upstream": "6.6",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:37:02+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\",\"srcversion\":\"C7BE2610E44A9F0F166E36C\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.8,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 111.1,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 70.4,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.93,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.91,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.93,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.26,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.17,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.45,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.14,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.1,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.92,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.33,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.28,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.36,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.11,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 66.9,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2539:ublk-mem 8:kworker/0:0+events"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "26 oops/hang line(s); first: [  308.361438] INFO: task kworker/0:0:8 blocked for more than 30 seconds.\n[  308.361819]       Not tainted 6.6.158-0606158-generic #202610031241\n[  308.361974] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  308.362121] task:kworker/0:0     state:D stack:0     pid:8     ppid:2      flags:0x00004000\n[  308.362666] Workqueue: events ublk_stop_work_fn [ublk_drv]\n[  308.363481] Call Trace:\n[  308.363759]  <TASK>\n[  308.364001]  __schedule+0x2cb/0x770\n[  308.364266]  schedule+0x63/0x110\n[  308.364312]  schedule_preempt_disabled+0x15/0x30\n[  308.364389]  __mutex_lock.constprop.0+0x42f/0x740\n[  308.364476]  __mutex_lock_slowpath+0x13/0x20\n[  308.364532]  mutex_lock+0x3c/0x50\n[  308.364593]  ublk_stop_dev+0x27/0x100 [ublk_drv]\n[  308.364662]  ublk_stop_work_fn+0x15/0x20 [ublk_drv]\n[  308.364729]  process_one_work+0x181/0x3a0\n[  308.364902]  worker_thread+0x18b/0x330\n[  308.364974]  ? __pfx_worker_thread+0x10/0x10\n[  308.365032]  kthread+0xef/0x120\n[  308.365121]  ? __pfx_kthread+0x10/0x10\n[  308.365175]  ret_from_fork+0x44/0x70\n[  308.365223]  ? __pfx_kthread+0x10/0x10\n[  308.365273]  ret_from_fork_asm+0x1b/0x30\n[  308.365373]  </TASK>\n[  308.365480] INFO: task"
+    }
+   ],
+   "summary": {
+    "pass": 39,
+    "fail": 7,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.10.14",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.10.14-061014-generic",
+   "upstream": "6.10",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:21:09+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\",\"srcversion\":\"2A89CFE8B9E2B4C7F7A4211\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 6.3,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "fail",
+     "duration_s": 112.5,
+     "detail": "integrity sweep: PASS=23 FAIL=1; FAIL: device did not appear (q=4 d=128)   log| 2026/10/04 14:16:47 [ERROR] failed to create device error=failed to START_DEV: START_DEV failed: operation canceled   integrity sweep: PASS=23 FAIL=1   failed: q4/d128/dir1(no-dev) "
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 71.6,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.92,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.09,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.95,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.04,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.16,
+     "detail": "write-zeroes: backend saw 1073741824 bytes in 1 ranges, want 5368709120"
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.67,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.21,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.51,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.83,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.33,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.33,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.12,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 63.6,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state: none"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "18 oops/hang line(s); first: [  302.754472] INFO: task ublk-suite:1995 blocked for more than 30 seconds.\n[  302.756141]       Not tainted 6.10.14-061014-generic #202411070043\n[  302.756279] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  302.756408] task:ublk-suite      state:D stack:0     pid:1995  tgid:1970  ppid:142    flags:0x00004000\n[  302.757139] Call Trace:\n[  302.757522]  <TASK>\n[  302.757947]  __schedule+0x277/0x6c0\n[  302.758465]  schedule+0x29/0xd0\n[  302.758603]  schedule_timeout+0x135/0x170\n[  302.758684]  __wait_for_common+0x91/0x190\n[  302.758754]  ? __pfx_schedule_timeout+0x10/0x10\n[  302.758835]  wait_for_completion+0x24/0x40\n[  302.758890]  io_wq_put_and_exit+0xaa/0x270\n[  302.759017]  io_uring_clean_tctx+0x84/0xba\n[  302.759120]  io_uring_cancel_generic+0x277/0x2d0\n[  302.759197]  ? futex_unqueue+0x3d/0x70\n[  302.759295]  ? __pfx_autoremove_wake_function+0x10/0x10\n[  302.759431]  __io_uring_cancel+0x14/0x20\n[  302.759496]  do_exit+0x137/0x4d0\n[  302.759664]  do_group_exit+0x34/0x90\n[  302.759725]  get_signal+0x7a9/0x890\n[  302.759779]  arch_do_signal_or_restart+0x39/0x110\n[  302.759846]  syscall_exit_to_user_mode+0x206/0x270\n[  302.759910]  do_syscall_64+0x8a/0x"
+    }
+   ],
+   "summary": {
+    "pass": 38,
+    "fail": 8,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.11.11",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.11.11-061111-generic",
+   "upstream": "6.11",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:21:36+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\",\"srcversion\":\"569A93F8F4B041ACF871AD1\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 6.3,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.1,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 115.3,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 71.5,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.94,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.98,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.94,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 2.74,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.13,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.55,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.32,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.83,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.32,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.35,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.17,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 66.9,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2555:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "20 oops/hang line(s); first: [  302.769006] INFO: task ublk-suite:2017 blocked for more than 30 seconds.\n[  302.770684]       Not tainted 6.11.11-061111-generic #202412051415\n[  302.770833] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  302.770965] task:ublk-suite      state:D stack:0     pid:2017  tgid:1978  ppid:142    flags:0x00004000\n[  302.771652] Call Trace:\n[  302.771936]  <TASK>\n[  302.772182]  __schedule+0x277/0x6c0\n[  302.772674]  schedule+0x29/0xd0\n[  302.772750]  schedule_timeout+0x135/0x170\n[  302.772809]  __wait_for_common+0x91/0x190\n[  302.772869]  ? __pfx_schedule_timeout+0x10/0x10\n[  302.772943]  wait_for_completion+0x24/0x40\n[  302.772999]  io_wq_put_and_exit+0xaa/0x270\n[  302.773057]  io_uring_clean_tctx+0x84/0xba\n[  302.773115]  io_uring_cancel_generic+0x277/0x2d0\n[  302.773181]  ? __pfx_autoremove_wake_function+0x10/0x10\n[  302.773253]  __io_uring_cancel+0x14/0x20\n[  302.773306]  do_exit+0x137/0x4d0\n[  302.773353]  do_group_exit+0x34/0x90\n[  302.773413]  get_signal+0x7a9/0x890\n[  302.773464]  arch_do_signal_or_restart+0x39/0x110\n[  302.773531]  syscall_exit_to_user_mode+0x1eb/0x250\n[  302.773710]  do_syscall_64+0x8a/0x170\n[  302.773785]  ? irqentry_exit+0x43/0"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 6,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.12.112",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.12.112-0612112-generic",
+   "upstream": "6.12",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:23:04+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\",\"srcversion\":\"D8595C05D9DC36E47CF764A\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.8,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.1,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 111.4,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 70.7,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.91,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.97,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.95,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.94,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.89,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.04,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.58,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.24,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.43,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.79,
+     "detail": "leaked 61 memory mappings over 5 create/close cycles (~12.2 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.43,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.11,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 67.1,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2541:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "20 oops/hang line(s); first: [  302.775098] INFO: task ublk-suite:1990 blocked for more than 30 seconds.\n[  302.777175]       Not tainted 6.12.112-0612112-generic #202610031248\n[  302.777354] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  302.777591] task:ublk-suite      state:D stack:0     pid:1990  tgid:1977  ppid:145    flags:0x00004004\n[  302.778152] Call Trace:\n[  302.778547]  <TASK>\n[  302.778826]  __schedule+0x2bf/0x640\n[  302.779581]  schedule+0x2b/0xf0\n[  302.779656]  ? try_to_wake_up+0x2ec/0x7a0\n[  302.779719]  schedule_timeout+0x137/0x170\n[  302.779776]  wait_for_completion+0x81/0x140\n[  302.779834]  io_wq_put_and_exit+0xa2/0x260\n[  302.780028]  io_uring_clean_tctx+0x87/0xbb\n[  302.780091]  io_uring_cancel_generic+0x272/0x2c0\n[  302.780171]  ? futex_wait_queue+0x69/0xa0\n[  302.780228]  ? __pfx_autoremove_wake_function+0x10/0x10\n[  302.780300]  __io_uring_cancel+0x1b/0x30\n[  302.780488]  do_exit+0x12e/0x4c0\n[  302.780607]  do_group_exit+0x2d/0xb0\n[  302.780660]  get_signal+0x7a7/0x880\n[  302.780774]  arch_do_signal_or_restart+0x39/0x1f0\n[  302.780888]  syscall_exit_to_user_mode+0x146/0x1d0\n[  302.780956]  do_syscall_64+0x8d/0x1a0\n[  302.781008]  ? kmem_cache_free+0x439/0"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 6,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.13.12",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.13.12-061312-generic",
+   "upstream": "6.13",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:27:06+00:00",
+   "ublk_drv": true,
+   "features": "0x3fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x3fe\",\"opcode\":\"ioctl\",\"srcversion\":\"BBB487E13AE905CA7000C42\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.4,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 112.8,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 72.9,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.07,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.97,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.32,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.69,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.5,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.64,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.84,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.33,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.34,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 130.22,
+     "detail": "create: failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 67.0,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:3190:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [  219.110805] BUG: kernel NULL pointer dereference, address: 0000000000000080\n[  219.111169] #PF: supervisor read access in kernel mode\n[  219.111222] #PF: error_code(0x0000) - not-present page\n[  219.111368] PGD 2a66067 P4D 16cc5067 PUD 4825067 PMD 0 \n[  219.111411] Oops: Oops: 0000 [#1] PREEMPT SMP NOPTI\n[  219.111411] CPU: 1 UID: 0 PID: 1994 Comm: ublk-suite Not tainted 6.13.12-061312-generic #202504200842\n[  219.111411] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[  219.111411] RIP: 0010:io_req_uring_cleanup+0x1b/0xb0\n[  219.111411] Code: 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 0f 1f 44 00 00 55 48 89 e5 41 55 41 54 41 89 f4 53 4c 8b af b8 00 00 00 48 89 fb <49> 8b bd 80 00 00 00 48 85 ff 74 10 e8 f4 91 c1 ff 49 c7 85 80 00\n[  219.111411] RSP: 0018:ff5cdc87017ab9c0 EFLAGS: 00000202\n[  219.111411] RAX: 0000000000000c00 RBX: ff3fd329ccf55e00 RCX: 0000000000000001\n[  219.111411] RDX: 0000000000000000 RSI: 0000000000000001 RDI: ff3fd329ccf55e00\n[  219.111411] RBP: ff5cdc87017ab9d8 R08: 0000000000000000 R09: 0000000000000000\n[  219.111411] R10: 0000000000000000 R11: 0000000000000000 R12: 0000000000000001\n["
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 6,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.14.11",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.14.11-061411-generic",
+   "upstream": "6.14",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:28:50+00:00",
+   "ublk_drv": true,
+   "features": "0x3fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x3fe\",\"opcode\":\"ioctl\",\"srcversion\":\"62CB2177FC04A4DB72D45F0\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.2,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 112.4,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 71.1,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.95,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.25,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.07,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.65,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.37,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.81,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.31,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 10.28,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 240.14,
+     "detail": "server create: server did not report readiness"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 2.1,
+     "detail": "leaked: ublk-suite-process D-state: none"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [  215.551086] BUG: kernel NULL pointer dereference, address: 0000000000000000\n[  215.551316] #PF: supervisor read access in kernel mode\n[  215.551362] #PF: error_code(0x0000) - not-present page\n[  215.551438] PGD 9046067 P4D bd8c067 PUD 2ace067 PMD 0 \n[  215.551900] Oops: Oops: 0000 [#1] PREEMPT SMP NOPTI\n[  215.552061] CPU: 0 UID: 0 PID: 2059 Comm: ublk-suite Not tainted 6.14.11-061411-generic #202506101206\n[  215.552231] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[  215.552438] RIP: 0010:io_req_uring_cleanup+0x1b/0xb0\n[  215.552876] Code: 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 0f 1f 44 00 00 55 48 89 e5 41 55 41 54 41 89 f4 53 4c 8b af b8 00 00 00 48 89 fb <49> 8b 7d 00 48 85 ff 74 0d e8 c7 92 c1 ff 49 c7 45 00 00 00 00 00\n[  215.553102] RSP: 0018:ff82ee49018d3a28 EFLAGS: 00000202\n[  215.553160] RAX: 0000000000000c00 RBX: ff3923407c120500 RCX: 0000000000000001\n[  215.553215] RDX: 0000000000000000 RSI: 0000000000000001 RDI: ff3923407c120500\n[  215.553266] RBP: ff82ee49018d3a40 R08: 0000000000000000 R09: 0000000000000000\n[  215.553315] R10: 0000000000000000 R11: 0000000000000000 R12: 0000000000000001\n[ "
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 5,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.15.11",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.15.11-061511-generic",
+   "upstream": "6.15",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:25:44+00:00",
+   "ublk_drv": true,
+   "features": "0x3ff",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x3ff\",\"opcode\":\"ioctl\",\"srcversion\":\"97151D8EB2134CD7FC3680B\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.3,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 112.5,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 72.1,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.98,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.2,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.05,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.94,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.1,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.6,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.29,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.42,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.78,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.31,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 10.35,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 20.97,
+     "detail": "close /dev/ublkb1: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 2.0,
+     "detail": "leaked: ublk-suite-process D-state: none"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [  216.297330] BUG: kernel NULL pointer dereference, address: 0000000000000000\n[  216.297681] #PF: supervisor read access in kernel mode\n[  216.297760] #PF: error_code(0x0000) - not-present page\n[  216.297904] PGD 8eb0067 P4D 5a86067 PUD 15252067 PMD 0 \n[  216.298380] Oops: Oops: 0000 [#1] SMP NOPTI\n[  216.298772] CPU: 0 UID: 0 PID: 1990 Comm: ublk-suite Not tainted 6.15.11-061511-generic #202508201748 PREEMPT(voluntary) \n[  216.298921] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[  216.299130] RIP: 0010:io_req_uring_cleanup+0x1b/0xc0\n[  216.299517] Code: 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 0f 1f 44 00 00 55 48 89 e5 41 55 41 54 41 89 f4 53 4c 8b af b8 00 00 00 48 89 fb <49> 8b 7d 00 48 85 ff 74 0d e8 37 e7 c0 ff 49 c7 45 00 00 00 00 00\n[  216.299754] RSP: 0018:ff4f4837c17db978 EFLAGS: 00000202\n[  216.299811] RAX: 0000000000000c00 RBX: ff1adcf908e68200 RCX: 0000000000000001\n[  216.299866] RDX: 0000000000000000 RSI: 0000000000000001 RDI: ff1adcf908e68200\n[  216.299916] RBP: ff4f4837c17db990 R08: 0000000000000000 R09: 0000000000000000\n[  216.299966] R10: 0000000000000000 R11: 0000000000000000 R12: 000000"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 5,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.16.12",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.16.12-061612-generic",
+   "upstream": "6.16",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:29:57+00:00",
+   "ublk_drv": true,
+   "features": "0x3fff",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x3fff\",\"opcode\":\"ioctl\",\"srcversion\":\"02788F9BECC395DB27476AB\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.7,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 112.1,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 70.1,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.06,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.12,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.98,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.03,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.6,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.17,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.83,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.32,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "timeout",
+     "duration_s": 60.07,
+     "detail": "no result after 1m0s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 31.43,
+     "detail": "close /dev/ublkb3: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 67.1,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2847:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [  214.402735] BUG: kernel NULL pointer dereference, address: 0000000000000000\n[  214.403286] #PF: supervisor read access in kernel mode\n[  214.403584] #PF: error_code(0x0000) - not-present page\n[  214.403952] PGD 7ebbb067 P4D 8900067 PUD b67a067 PMD 0 \n[  214.406616] Oops: Oops: 0000 [#1] SMP NOPTI\n[  214.408005] CPU: 0 UID: 0 PID: 2009 Comm: ublk-suite Not tainted 6.16.12-061612-generic #202510121336 PREEMPT(voluntary) \n[  214.408451] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[  214.409554] RIP: 0010:io_req_uring_cleanup+0x1b/0xc0\n[  214.411268] Code: 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 0f 1f 44 00 00 55 48 89 e5 41 55 41 54 41 89 f4 53 4c 8b af b8 00 00 00 48 89 fb <49> 8b 7d 00 48 85 ff 74 0d e8 97 d6 bf ff 49 c7 45 00 00 00 00 00\n[  214.411772] RSP: 0018:ff6d7943017539c0 EFLAGS: 00000202\n[  214.411832] RAX: 0000000000000c00 RBX: ff29639fbe9d8000 RCX: 0000000000000001\n[  214.411888] RDX: 0000000000000000 RSI: 0000000000000001 RDI: ff29639fbe9d8000\n[  214.411939] RBP: ff6d7943017539d8 R08: 0000000000000000 R09: 0000000000000000\n[  214.411989] R10: 0000000000000000 R11: 0000000000000000 R12: 000000"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 5,
+    "skip": 0,
+    "error": 1
+   }
+  },
+  {
+   "id": "mainline-6.17.12",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.17.12-061712-generic",
+   "upstream": "6.17",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:29:59+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\",\"srcversion\":\"DC54D3D9DD478FDB96CA1EF\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.2,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 110.9,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 70.7,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.95,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.12,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.12,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 2.65,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.11,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 2.51,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.27,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.55,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.83,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.14,
+     "detail": "Start after Stop (documented as supported): failed to open /dev/ublkc0: device or resource busy"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 41.62,
+     "detail": "close /dev/ublkb3: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 3,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.18.55",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.18.55-061855-generic",
+   "upstream": "6.18",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:31:02+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\",\"srcversion\":\"C233E14752DB5FF7C181894\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.3,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.1,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 112.5,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 71.2,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.03,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.99,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.15,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.17,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.99,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.12,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.88,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.37,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.81,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.43,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.82,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.32,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.14,
+     "detail": "Start after Stop (documented as supported): failed to open /dev/ublkc0: device or resource busy"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 20.75,
+     "detail": "close /dev/ublkb2: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 3,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "mainline-6.19.14",
+   "family": "mainline",
+   "distro": "Ubuntu mainline build",
+   "kernel": "6.19.14-061914-generic",
+   "upstream": "6.19",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:36:04+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\",\"srcversion\":\"6E232E51ECF56FFF80DC7BF\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.4,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 113.2,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 72.6,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.07,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.08,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.22,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.17,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.71,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.54,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 3.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "fail",
+     "duration_s": 20.42,
+     "detail": "Close did not return within 20s after the context was cancelled"
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 10.03,
+     "detail": "failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "fail",
+     "duration_s": 10.07,
+     "detail": "worker 0 cycle 0: create: failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "fail",
+     "duration_s": 10.05,
+     "detail": "failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "fail",
+     "duration_s": 10.18,
+     "detail": "server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 10.07,
+     "detail": "failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.06,
+     "detail": "create: failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/exit",
+     "status": "fail",
+     "duration_s": 127.9,
+     "detail": "ublk-suite reported every test but did not exit within 30s: State: D (disk sleep) wchan=io_wq_put_and_exit"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 67.3,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:10:kworker/0:1+events 1974:ublk-suite 2991:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "28 oops/hang line(s); first: [  272.605460] INFO: task iou-wrk-1974:1981 blocked for more than 30 seconds.\n[  272.608854]       Not tainted 6.19.14-061914-generic #202604221411\n[  272.609390] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  272.609808] task:iou-wrk-1974    state:D stack:0     pid:1981  tgid:1974  ppid:138    task_flags:0x484150 flags:0x00080000\n[  272.610907] Call Trace:\n[  272.611338]  <TASK>\n[  272.611925]  __schedule+0x2ad/0x600\n[  272.612476]  schedule+0x27/0x90\n[  272.612689]  schedule_preempt_disabled+0x15/0x30\n[  272.612857]  __mutex_lock.constprop.0+0x4f1/0xa10\n[  272.612971]  __mutex_lock_slowpath+0x13/0x20\n[  272.613080]  mutex_lock+0x3b/0x50\n[  272.613153]  __del_gendisk+0x68/0x340\n[  272.613224]  ? update_load_avg+0x8e/0x420\n[  272.613306]  del_gendisk+0x7c/0xc0\n[  272.613646]  ublk_stop_dev_unlocked.part.0+0x38/0x150 [ublk_drv]\n[  272.614066]  ublk_stop_dev+0x2f/0xb0 [ublk_drv]\n[  272.614188]  ublk_ctrl_uring_cmd+0x517/0x7e0 [ublk_drv]\n[  272.614288]  ? sysvec_apic_timer_interrupt+0x54/0xd0\n[  272.614412]  io_uring_cmd+0xb7/0x190\n[  272.614640]  __io_issue_sqe+0x41/0x1c0\n[  272.614751]  ? finish_task_switch.isra.0+0x9b/0x2d0\n[  272.614891]  io_issue_sqe"
+    }
+   ],
+   "summary": {
+    "pass": 36,
+    "fail": 11,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "amazon-2023-6.1",
+   "family": "amazon",
+   "distro": "Amazon Linux 2023 (6.1)",
+   "kernel": "6.1.186-228.376.amzn2023.x86_64",
+   "upstream": "6.1",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:01:57+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.4,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.5,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "amazon-2023-6.12",
+   "family": "amazon",
+   "distro": "Amazon Linux 2023 (6.12)",
+   "kernel": "6.12.103-129.197.amzn2023.x86_64",
+   "upstream": "6.12",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:01:56+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.1,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "arch-lts",
+   "family": "arch",
+   "distro": "Arch Linux LTS",
+   "kernel": "6.18.55-1-lts",
+   "upstream": "6.18",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:06:10+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\",\"srcversion\":\"C233E14752DB5FF7C181894\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.3,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 108.8,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 70.0,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.03,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.9,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 2.58,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.07,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 2.17,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.24,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.96,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.49,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 1.09,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.37,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.29,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.21,
+     "detail": "Start after Stop (documented as supported): failed to open /dev/ublkc0: device or resource busy"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 42.91,
+     "detail": "close /dev/ublkb3: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 3,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "arch",
+   "family": "arch",
+   "distro": "Arch Linux",
+   "kernel": "7.2.8-arch1-2",
+   "upstream": "7.2",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:15:27+00:00",
+   "ublk_drv": true,
+   "features": "0xfffff",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0xfffff\",\"opcode\":\"ioctl\",\"srcversion\":\"465AF2E302619F74AAD76FE\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.8,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 115.5,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 69.4,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.06,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.98,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.93,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.05,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.35,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.59,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.31,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 3.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.94,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.33,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "timeout",
+     "duration_s": 60.03,
+     "detail": "no result after 1m0s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 30.97,
+     "detail": "close /dev/ublkb1: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 67.0,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2796:ublk-mem 41:khugepaged"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "4 oops/hang line(s); first: [  218.816253] BUG: kernel NULL pointer dereference, address: 0000000000000018\n[  218.816430] #PF: supervisor write access in kernel mode\n[  218.816479] #PF: error_code(0x0002) - not-present page\n[  218.816555] PGD 9527067 P4D 4e3f067 PUD 4abc067 PMD 0 \n[  218.816615] Oops: Oops: 0002 [#1] SMP NOPTI\n[  218.816615] CPU: 1 UID: 0 PID: 28 Comm: kworker/1:0 Not tainted 7.2.8-arch1-2 #1 PREEMPT(full)  186163caea6eb5dc4b2a0252463c7ce1c6927294\n[  218.816615] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014\n[  218.816615] Workqueue: events ublk_partition_scan_work [ublk_drv]\n[  218.816615] RIP: 0010:ublk_queue_rq+0x4d/0xc0 [ublk_drv]\n[  218.816615] Code: f8 ff ff 84 c0 75 31 80 7b 19 00 75 36 48 63 55 20 48 c7 c6 90 56 40 c0 88 44 24 07 48 c1 e2 06 48 8b bc 13 90 00 00 00 31 d2 <48> 89 6f 18 e8 ca ea 05 f1 0f b6 44 24 07 48 83 c4 08 5b 5d c3 cc\n[  218.816615] RSP: 0018:ff4484c1800f3a40 EFLAGS: 00000246\n[  218.816615] RAX: 0000000000000000 RBX: ff11e4fa84dd8000 RCX: 0000000000000000\n[  218.816615] RDX: 0000000000000000 RSI: ffffffffc0405690 RDI: 0000000000000000\n[  218.816615] RBP: ff11e4fa8cc42940 R08: ff11e4faf811f100 R09:"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 5,
+    "skip": 0,
+    "error": 1
+   }
+  },
+  {
+   "id": "debian-12",
+   "family": "debian",
+   "distro": "Debian 12",
+   "kernel": "6.1.0-53-amd64",
+   "upstream": "6.1",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:03:06+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.2,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "debian-12-backports",
+   "family": "debian",
+   "distro": "Debian 12 backports",
+   "kernel": "6.12.95+deb12-amd64",
+   "upstream": "6.12",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:14:35+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.1,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 113.2,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 69.2,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 3.11,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.03,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 0.94,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.92,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.08,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.33,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.65,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.47,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.48,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 1.1,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.29,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.35,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.29,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.53,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.1,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 66.5,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2623:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "20 oops/hang line(s); first: [  308.328422] INFO: task ublk-suite:2048 blocked for more than 30 seconds.\n[  308.329929]       Not tainted 6.12.95+deb12-amd64 #1 Debian 6.12.95-1~bpo12+1\n[  308.330093] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  308.330222] task:ublk-suite      state:D stack:0     pid:2048  tgid:2034  ppid:196    flags:0x00004000\n[  308.330752] Call Trace:\n[  308.330917]  <TASK>\n[  308.331132]  __schedule+0x4fb/0xc00\n[  308.332005]  schedule+0x27/0xc0\n[  308.332059]  schedule_timeout+0x15d/0x170\n[  308.332094]  __wait_for_common+0x90/0x1c0\n[  308.332128]  ? __pfx_schedule_timeout+0x10/0x10\n[  308.332169]  io_wq_put_and_exit+0xad/0x240\n[  308.332249]  io_uring_clean_tctx+0x8a/0xc0\n[  308.332285]  io_uring_cancel_generic+0x172/0x320\n[  308.332336]  ? __pfx_autoremove_wake_function+0x10/0x10\n[  308.332418]  do_exit+0x11b/0xaf0\n[  308.332453]  do_group_exit+0x30/0x80\n[  308.332483]  __x64_sys_exit_group+0x18/0x20\n[  308.332514]  x64_sys_call+0x14b1/0x16a0\n[  308.332545]  do_syscall_64+0x87/0x1b0\n[  308.332613]  ? __x64_sys_futex+0x92/0x1d0\n[  308.332648]  ? restore_fpregs_from_fpstate+0x3c/0xa0\n[  308.332688]  ? ktime_get_ts64+0x41/0x110\n[  308.332720]  ? posix_get_"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 6,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "debian-13",
+   "family": "debian",
+   "distro": "Debian 13",
+   "kernel": "6.12.111+deb13-amd64",
+   "upstream": "6.12",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:14:35+00:00",
+   "ublk_drv": true,
+   "features": "0x1fe",
+   "oops": true,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x1fe\",\"opcode\":\"ioctl\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.1,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 112.7,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 70.0,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.04,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.94,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.11,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.98,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.14,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.28,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.38,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.65,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 2.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.33,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.48,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 1.11,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.31,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.38,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.32,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 30.58,
+     "detail": "Start after Stop (documented as supported): failed to START_DEV: START_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 10.17,
+     "detail": "server create: server: ERROR failed to add device: ADD_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    },
+    {
+     "test": "suite/hygiene",
+     "status": "fail",
+     "duration_s": 66.6,
+     "detail": "leaked: ublk-suite-process /dev/ublkb0  reaper-stuck D-state:2629:ublk-mem"
+    },
+    {
+     "test": "poweroff",
+     "status": "fail",
+     "duration_s": 45.0,
+     "detail": "payload finished but the guest did not power off within 45s (kernel shutdown blocked, typically by a wedged ublk device); killed by the host"
+    },
+    {
+     "test": "kernel-log",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "18 oops/hang line(s); first: [  308.325228] INFO: task ublk-suite:2052 blocked for more than 30 seconds.\n[  308.326649]       Not tainted 6.12.111+deb13-amd64 #1 Debian 6.12.111-1\n[  308.326795] \"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\" disables this message.\n[  308.326923] task:ublk-suite      state:D stack:0     pid:2052  tgid:2037  ppid:197    flags:0x00004000\n[  308.327351] Call Trace:\n[  308.327547]  <TASK>\n[  308.327785]  __schedule+0x505/0xc00\n[  308.328888]  schedule+0x27/0xc0\n[  308.328952]  schedule_timeout+0x12f/0x160\n[  308.329012]  __wait_for_common+0x8e/0x1c0\n[  308.329075]  ? __pfx_schedule_timeout+0x10/0x10\n[  308.329132]  io_wq_put_and_exit+0xaa/0x240\n[  308.329169]  io_uring_clean_tctx+0x83/0xb0\n[  308.329203]  io_uring_cancel_generic+0x289/0x2d0\n[  308.329242]  ? __pfx_autoremove_wake_function+0x10/0x10\n[  308.329347]  do_exit+0x11e/0xad0\n[  308.329415]  ? __pfx_futex_wake_mark+0x10/0x10\n[  308.329464]  do_group_exit+0x30/0x80\n[  308.329495]  get_signal+0x87c/0x880\n[  308.329527]  arch_do_signal_or_restart+0x3f/0x250\n[  308.329567]  syscall_exit_to_user_mode+0x139/0x1b0\n[  308.329626]  do_syscall_64+0x93/0x1b0\n[  308.329677]  ? do_syscall_64+0x93/0x1b0\n[  308.329708]  ? __pfx_hrtime"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 6,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "fedora-42",
+   "family": "fedora",
+   "distro": "Fedora 42",
+   "kernel": "6.19.14-108.fc42.x86_64",
+   "upstream": "6.19",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:12:58+00:00",
+   "ublk_drv": true,
+   "features": "0x7fff",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0x7fff\",\"opcode\":\"ioctl\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.5,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 120.3,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 72.2,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.01,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.0,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.2,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.93,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.24,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.13,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 1.87,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.56,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 3.84,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.14,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.44,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.84,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.34,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.26,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.14,
+     "detail": "Start after Stop (documented as supported): failed to open /dev/ublkc0: device or resource busy"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 41.82,
+     "detail": "close /dev/ublkb1: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 3,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "fedora-43",
+   "family": "fedora",
+   "distro": "Fedora 43",
+   "kernel": "7.2.8-100.fc43.x86_64",
+   "upstream": "7.2",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:17:02+00:00",
+   "ublk_drv": true,
+   "features": "0xfffff",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0xfffff\",\"opcode\":\"ioctl\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.5,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 110.9,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 75.9,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 1.02,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 1.13,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.37,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.16,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 1.1,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.27,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.19,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.25,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.18,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 2.07,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.75,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 3.91,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.45,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.92,
+     "detail": "leaked 60 memory mappings over 5 create/close cycles (~12.0 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.34,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.31,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.16,
+     "detail": "Start after Stop (documented as supported): failed to open /dev/ublkc0: device or resource busy"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 21.85,
+     "detail": "close /dev/ublkb3: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 3,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "fedora-44",
+   "family": "fedora",
+   "distro": "Fedora 44",
+   "kernel": "7.2.8-200.fc44.x86_64",
+   "upstream": "7.2",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:19:02+00:00",
+   "ublk_drv": true,
+   "features": "0xfffff",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"0xfffff\",\"opcode\":\"ioctl\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.4,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "28 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "7 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "integration/large-io",
+     "status": "pass",
+     "duration_s": 0.8,
+     "detail": "1 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "pass",
+     "duration_s": 119.4,
+     "detail": "integrity sweep: PASS=24 FAIL=0"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "pass",
+     "duration_s": 72.7,
+     "detail": "PASS=14 FAIL=0"
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "pass",
+     "duration_s": 0.98,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "pass",
+     "duration_s": 0.97,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "pass",
+     "duration_s": 1.05,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "pass",
+     "duration_s": 1.1,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "pass",
+     "duration_s": 0.96,
+     "detail": ""
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "pass",
+     "duration_s": 1.3,
+     "detail": ""
+    },
+    {
+     "test": "io/boundaries",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/flush",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/discard",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "io/discard-large",
+     "status": "pass",
+     "duration_s": 0.21,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "pass",
+     "duration_s": 0.24,
+     "detail": ""
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "pass",
+     "duration_s": 0.17,
+     "detail": ""
+    },
+    {
+     "test": "io/readonly",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "io/multi-device",
+     "status": "pass",
+     "duration_s": 3.06,
+     "detail": ""
+    },
+    {
+     "test": "params/geometry",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "fs/ext4",
+     "status": "pass",
+     "duration_s": 1.45,
+     "detail": ""
+    },
+    {
+     "test": "fs/xfs",
+     "status": "pass",
+     "duration_s": 3.92,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "pass",
+     "duration_s": 0.23,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "pass",
+     "duration_s": 0.16,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "pass",
+     "duration_s": 0.15,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "pass",
+     "duration_s": 0.46,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.92,
+     "detail": "leaked 61 memory mappings over 5 create/close cycles (~12.2 per cycle)"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "pass",
+     "duration_s": 0.22,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "pass",
+     "duration_s": 0.34,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "pass",
+     "duration_s": 0.27,
+     "detail": ""
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.15,
+     "detail": "Start after Stop (documented as supported): failed to open /dev/ublkc0: device or resource busy"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 41.29,
+     "detail": "close /dev/ublkb1: failed to delete device: DEL_DEV submit failed: failed to submit control command: timeout waiting for control command completion after 10s"
+    }
+   ],
+   "summary": {
+    "pass": 40,
+    "fail": 3,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "almalinux-9",
+   "family": "rhel",
+   "distro": "AlmaLinux 9",
+   "kernel": "5.14.0-687.53.1.el9_8.x86_64",
+   "upstream": "5.14",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:01:57+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.8,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "18 pass, 6 fail, 4 skip; failed: TestRealRingNewCloseWithPipe TestRealRingSubmitCtrlCmdPipeUnsupported TestRealRingSecondRoundTripSameRing TestRealRingOpenCloseNoRegistration TestSubmitIOCmdReturnsFabricatedSuccess TestSubmitIOCmdProductionCallSiteDiscardsResult     real_ring_test.go:75: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:85: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:99: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "6 pass, 1 fail, 0 skip; failed: TestURingInterface     unit_test.go:75: NewRing failed: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 7,
+    "fail": 2,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "centos-stream-9",
+   "family": "rhel",
+   "distro": "CentOS Stream 9",
+   "kernel": "5.14.0-754.el9.x86_64",
+   "upstream": "5.14",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:02:49+00:00",
+   "ublk_drv": false,
+   "features": "",
+   "oops": false,
+   "status": "no-ublk",
+   "results": [
+    {
+     "test": "probe",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.8,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.7,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "18 pass, 6 fail, 4 skip; failed: TestRealRingNewCloseWithPipe TestRealRingSubmitCtrlCmdPipeUnsupported TestRealRingSecondRoundTripSameRing TestRealRingOpenCloseNoRegistration TestSubmitIOCmdReturnsFabricatedSuccess TestSubmitIOCmdProductionCallSiteDiscardsResult     real_ring_test.go:75: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:85: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:99: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "6 pass, 1 fail, 0 skip; failed: TestURingInterface     unit_test.go:75: NewRing failed: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "integration/large-io",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "verify-sweep",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "loop-e2e",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    },
+    {
+     "test": "suite",
+     "status": "skip",
+     "duration_s": 0.0,
+     "detail": "no /dev/ublk-control"
+    }
+   ],
+   "summary": {
+    "pass": 7,
+    "fail": 2,
+    "skip": 5,
+    "error": 0
+   }
+  },
+  {
+   "id": "almalinux-10",
+   "family": "rhel",
+   "distro": "AlmaLinux 10",
+   "kernel": "6.12.0-211.56.1.el10_2.x86_64",
+   "upstream": "6.12",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:02:33+00:00",
+   "ublk_drv": true,
+   "features": "unknown",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "fail",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"unknown\",\"srcversion\":\"5799E24E6A58591A9F62173\",\"error\":\"io_uring setup: io_uring_setup failed: operation not permitted\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.6,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "18 pass, 6 fail, 4 skip; failed: TestRealRingNewCloseWithPipe TestRealRingSubmitCtrlCmdPipeUnsupported TestRealRingSecondRoundTripSameRing TestRealRingOpenCloseNoRegistration TestSubmitIOCmdReturnsFabricatedSuccess TestSubmitIOCmdProductionCallSiteDiscardsResult     real_ring_test.go:75: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:85: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:99: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "6 pass, 1 fail, 0 skip; failed: TestURingInterface     unit_test.go:75: NewRing failed: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "integration/large-io",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "0 pass, 1 fail, 0 skip; failed: TestDisposableLargeIOPublicRunnerPaths     largeio_kernel_test.go:84: CreateAndServe with existing ublk privilege: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted     largeio_kernel_test.go:84: Create with existing ublk privilege: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "verify-sweep",
+     "status": "fail",
+     "duration_s": 5.1,
+     "detail": "integrity sweep: PASS=0 FAIL=24; FAIL: device did not appear (q=1 d=1)   log| 2026/10/04 14:01:56 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted   log| 2026/10/04 14:01:56 [ERROR] failed to create device error=failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted FAIL: device did not appear (q=1 d=1)   log| 2026/10/04 14:01:56 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted   log| 2026/10/04 14:01:56 [ERROR] failed to create device error=failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted FAIL: device did not appear (q=1 d=64)   log| 2026/10/04 14:01:57 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "loop-e2e",
+     "status": "fail",
+     "duration_s": 29.3,
+     "detail": "; 2026/10/04 14:02:02 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted 2026/10/04 14:02:02 create device: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "fail",
+     "duration_s": 0.02,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/boundaries",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/flush",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/discard",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/discard-large",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/readonly",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/multi-device",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "params/geometry",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "fs/ext4",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "fs/xfs",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "fail",
+     "duration_s": 0.03,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "open control device: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "fail",
+     "duration_s": 0.03,
+     "detail": "worker 1 cycle 0: create: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "fail",
+     "duration_s": 0.03,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "fail",
+     "duration_s": 0.05,
+     "detail": "server: ERROR failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 0.02,
+     "detail": "create: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    }
+   ],
+   "summary": {
+    "pass": 7,
+    "fail": 36,
+    "skip": 0,
+    "error": 0
+   }
+  },
+  {
+   "id": "centos-stream-10",
+   "family": "rhel",
+   "distro": "CentOS Stream 10",
+   "kernel": "6.12.0-271.el10.x86_64",
+   "upstream": "6.12",
+   "arch": "x86_64",
+   "boot": "initramfs",
+   "accel": "tcg",
+   "date": "2026-10-04T14:02:48+00:00",
+   "ublk_drv": true,
+   "features": "unknown",
+   "oops": false,
+   "status": "fail",
+   "results": [
+    {
+     "test": "probe",
+     "status": "fail",
+     "duration_s": 0.2,
+     "detail": "{\"features\":\"unknown\",\"srcversion\":\"A72A5ED01780D367B935BB1\",\"error\":\"io_uring setup: io_uring_setup failed: operation not permitted\"}"
+    },
+    {
+     "test": "unit/examples_ublk-loop",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "10 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/examples_ublk-mem",
+     "status": "pass",
+     "duration_s": 5.4,
+     "detail": "20 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_ctrl",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "17 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_logging",
+     "status": "pass",
+     "duration_s": 0.2,
+     "detail": "4 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_queue",
+     "status": "pass",
+     "duration_s": 0.6,
+     "detail": "44 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uapi",
+     "status": "pass",
+     "duration_s": 0.4,
+     "detail": "33 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/internal_uring",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "18 pass, 6 fail, 4 skip; failed: TestRealRingNewCloseWithPipe TestRealRingSubmitCtrlCmdPipeUnsupported TestRealRingSecondRoundTripSameRing TestRealRingOpenCloseNoRegistration TestSubmitIOCmdReturnsFabricatedSuccess TestSubmitIOCmdProductionCallSiteDiscardsResult     real_ring_test.go:75: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:85: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted     real_ring_test.go:99: NewMinimalRing(4, 5): io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "unit/root",
+     "status": "pass",
+     "duration_s": 0.3,
+     "detail": "43 pass, 0 fail, 0 skip"
+    },
+    {
+     "test": "unit/test_unit",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "6 pass, 1 fail, 0 skip; failed: TestURingInterface     unit_test.go:75: NewRing failed: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "integration/large-io",
+     "status": "fail",
+     "duration_s": 0.3,
+     "detail": "0 pass, 1 fail, 0 skip; failed: TestDisposableLargeIOPublicRunnerPaths     largeio_kernel_test.go:84: CreateAndServe with existing ublk privilege: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted     largeio_kernel_test.go:84: Create with existing ublk privilege: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "verify-sweep",
+     "status": "fail",
+     "duration_s": 4.3,
+     "detail": "integrity sweep: PASS=0 FAIL=24; FAIL: device did not appear (q=1 d=1)   log| 2026/10/04 14:02:12 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted   log| 2026/10/04 14:02:12 [ERROR] failed to create device error=failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted FAIL: device did not appear (q=1 d=1)   log| 2026/10/04 14:02:12 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted   log| 2026/10/04 14:02:12 [ERROR] failed to create device error=failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted FAIL: device did not appear (q=1 d=64)   log| 2026/10/04 14:02:12 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "loop-e2e",
+     "status": "fail",
+     "duration_s": 29.7,
+     "detail": "; 2026/10/04 14:02:18 [ERROR] failed to create io_uring error=io_uring_setup failed: operation not permitted 2026/10/04 14:02:18 create device: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted "
+    },
+    {
+     "test": "io/integrity/q1-d1-bs512",
+     "status": "fail",
+     "duration_s": 0.01,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q1-d64-bs512",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q2-d32-bs4096",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q4-d128-bs512",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity/q4-d16-bs4096-maxio64k",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/integrity-buffered",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/boundaries",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/flush",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/no-volatile-cache",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/discard",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/discard-large",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/write-zeroes",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/write-zeroes-large",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/no-discard-advertised",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/error-propagation",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/readonly",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "io/multi-device",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "params/geometry",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "fs/ext4",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "fs/xfs",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "CreateAndServe: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/create-close",
+     "status": "fail",
+     "duration_s": 0.05,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/fixed-id",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "open control device: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/create-start-stop-close",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/ctx-cancel-idle",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/churn-leaks",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/concurrent-create",
+     "status": "fail",
+     "duration_s": 0.03,
+     "detail": "worker 1 cycle 0: create: failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/close-under-load",
+     "status": "fail",
+     "duration_s": 0.04,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/server-killed",
+     "status": "fail",
+     "duration_s": 0.04,
+     "detail": "server: ERROR failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/restart-after-stop",
+     "status": "fail",
+     "duration_s": 0.0,
+     "detail": "failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    },
+    {
+     "test": "lifecycle/chaos",
+     "status": "fail",
+     "duration_s": 0.04,
+     "detail": "server create: server: ERROR failed to create controller: failed to create io_uring: io_uring_setup failed: operation not permitted"
+    }
+   ],
+   "summary": {
+    "pass": 7,
+    "fail": 36,
+    "skip": 0,
+    "error": 0
+   }
+  }
+ ]
+}
