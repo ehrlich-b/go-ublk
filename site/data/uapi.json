@@ -1,283 +1,4254 @@
 {
-  "sample": true,
-  "source": {
-    "kernel": "7.3-rc5",
-    "header": "include/uapi/linux/ublk_cmd.h",
-    "generated": "SAMPLE (hand-written; replace with the generated file)"
+ "source": {
+  "kernel": "v7.3-rc5",
+  "header": "include/uapi/linux/ublk_cmd.h",
+  "generated": "2026-10-04",
+  "go_ublk_commit": "next",
+  "method": "git log -S / tag-range rev-list on a blobless torvalds/linux clone; semantics from drivers/block/ublk_drv.c"
+ },
+ "items": [
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_GET_QUEUE_AFFINITY",
+   "value": "nr=0x01 ioctl=0x80207501 (_IOR('u', 0x01, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Read the CPU set blk-mq maps to one hardware queue.",
+   "details": "**Inputs:** `data[0]` = queue id; `addr`/`len` = output buffer. `len` must be a multiple of\n`sizeof(unsigned long)` and `len * 8 >= nr_cpu_ids` (`ublk_ctrl_get_queue_affinity`).\n\n**Output:** a kernel cpumask (array of `unsigned long`, bit *n* = CPU *n*) of every possible CPU whose\n`tag_set.map[HCTX_TYPE_DEFAULT].mq_map[cpu] == queue`; bytes past `cpumask_size()` are zeroed.\n\n**Errors:** `EINVAL` (bad len, `addr == 0`, queue >= nr_hw_queues), `EFAULT`, `ENOMEM`, `ENODEV` (no such device).\nDoes not sleep, so since v6.19 (87213b0d847c) it is handled inline under `IO_URING_F_NONBLOCK`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`). Permission mask for unprivileged devices: MAY_READ.\n\nLegacy raw opcode: `UBLK_CMD_GET_QUEUE_AFFINITY` (0x01, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Valid any time after ADD_DEV (the tag set exists from ADD_DEV). The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Used by default to pin each queue's I/O threads to the CPUs the kernel routes to it (when DeviceParams.CPUAffinity is empty); ctrl.Controller.GetQueueAffinity."
+   }
   },
-  "items": [
-    {
-      "kind": "ctrl_cmd",
-      "name": "UBLK_U_CMD_ADD_DEV",
-      "value": "0xc0207504",
-      "introduced": "6.4",
-      "commit": "",
-      "summary": "Create a device: allocates `/dev/ublkcN` and negotiates queues, depth, buffer size and feature flags.",
-      "details": "`addr` points to a `struct ublksrv_ctrl_dev_info` (64 bytes) that the kernel reads and writes back with the negotiated values. `dev_id` in the header must match `info.dev_id`; pass `U32_MAX` to auto-assign. The legacy opcode `UBLK_CMD_ADD_DEV` (0x04) exists since 6.0.",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "`ublk.Create` / `ublk.CreateAndServe`." }
-    },
-    {
-      "kind": "ctrl_cmd",
-      "name": "UBLK_U_CMD_GET_FEATURES",
-      "value": "0x80207513",
-      "introduced": "6.5",
-      "commit": "",
-      "summary": "Report the `UBLK_F_*` features this kernel supports, without needing a device.",
-      "details": "`addr` points to an 8-byte buffer and `len` must be exactly `UBLK_FEATURES_LEN` (8).",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "ctrl_cmd",
-      "name": "UBLK_U_CMD_QUIESCE_DEV",
-      "value": "0xc0207516",
-      "introduced": "6.16",
-      "commit": "",
-      "summary": "Quiesce a live device so a new server can take over through user recovery.",
-      "details": "`data[0]` is a timeout in milliseconds; 0 waits forever. Returns `-EBUSY` if every tag stays busy for the whole timeout.",
-      "requires": ["UBLK_F_QUIESCE"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "io_cmd",
-      "name": "UBLK_U_IO_FETCH_REQ",
-      "value": "0xc0107520",
-      "introduced": "6.4",
-      "commit": "",
-      "summary": "Arm a tag: the command completes when the kernel has a request for that tag.",
-      "details": "Issued once per tag at startup. The issuing task becomes the tag's daemon.",
-      "requires": [],
-      "conflicts": ["UBLK_F_BATCH_IO"],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "" }
-    },
-    {
-      "kind": "io_cmd",
-      "name": "UBLK_U_IO_NEED_GET_DATA",
-      "value": "0xc0107522",
-      "introduced": "6.4",
-      "commit": "",
-      "summary": "Supply a buffer for a WRITE delivered without its data.",
-      "details": "",
-      "requires": ["UBLK_F_NEED_GET_DATA"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "The runner fails the queue if the kernel returns `UBLK_IO_RES_NEED_GET_DATA`." }
-    },
-    {
-      "kind": "feature",
-      "name": "UBLK_F_SUPPORT_ZERO_COPY",
-      "value": "1 << 0",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Zero copy through io_uring fixed buffers (`REGISTER_IO_BUF`).",
-      "details": "Defined since 6.0; functional since 6.15, when `UBLK_U_IO_REGISTER_IO_BUF` was added.",
-      "requires": [],
-      "conflicts": ["UBLK_F_UNPRIVILEGED_DEV"],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "`EnableZeroCopy` sets the flag but the data plane does not register buffers." }
-    },
-    {
-      "kind": "feature",
-      "name": "UBLK_F_URING_CMD_COMP_IN_TASK",
-      "value": "1 << 1",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Complete I/O commands through `io_uring_cmd_complete_in_task`.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "Always requested." }
-    },
-    {
-      "kind": "feature",
-      "name": "UBLK_F_USER_RECOVERY",
-      "value": "1 << 3",
-      "introduced": "6.1",
-      "commit": "",
-      "summary": "Keep `/dev/ublkbN` alive across a server exit so a new server can recover it.",
-      "details": "",
-      "requires": [],
-      "conflicts": ["UBLK_F_UNPRIVILEGED_DEV"],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "feature",
-      "name": "UBLK_F_QUIESCE",
-      "value": "1 << 12",
-      "introduced": "6.16",
-      "commit": "",
-      "summary": "Enables `UBLK_U_CMD_QUIESCE_DEV`.",
-      "details": "",
-      "requires": ["UBLK_F_USER_RECOVERY"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "feature",
-      "name": "UBLK_F_SHMEM_ZC",
-      "value": "1 << 19",
-      "introduced": "7.1",
-      "commit": "",
-      "summary": "Shared-memory zero copy: requests whose pages match a registered buffer arrive by index and offset.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "param_type",
-      "name": "UBLK_PARAM_TYPE_BASIC",
-      "value": "1 << 0",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Size, block sizes, maximum request size and attributes. Mandatory.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "" }
-    },
-    {
-      "kind": "param_type",
-      "name": "UBLK_PARAM_TYPE_ZONED",
-      "value": "1 << 3",
-      "introduced": "6.6",
-      "commit": "",
-      "summary": "Zone limits for a zoned device.",
-      "details": "",
-      "requires": ["UBLK_F_ZONED"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "io_op",
-      "name": "UBLK_IO_OP_READ",
-      "value": "0",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Read `nr_sectors` 512-byte sectors starting at `start_sector`.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "`Backend.ReadAt`." }
-    },
-    {
-      "kind": "io_op",
-      "name": "UBLK_IO_OP_WRITE_SAME",
-      "value": "4",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Defined in the UAPI but never generated by current kernels.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "not-applicable", "notes": "" }
-    },
-    {
-      "kind": "io_flag",
-      "name": "UBLK_IO_F_FUA",
-      "value": "1 << 13",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Write must be durable before it completes. Sent only if the device advertises `UBLK_ATTR_FUA`.",
-      "details": "",
-      "requires": ["UBLK_ATTR_FUA"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "FUA is not advertised; the block layer emulates it with a post-flush." }
-    },
-    {
-      "kind": "dev_state",
-      "name": "UBLK_S_DEV_QUIESCED",
-      "value": "2",
-      "introduced": "6.1",
-      "commit": "",
-      "summary": "No server; new I/O is queued until a recovered server ends recovery.",
-      "details": "",
-      "requires": ["UBLK_F_USER_RECOVERY"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "attr",
-      "name": "UBLK_ATTR_VOLATILE_CACHE",
-      "value": "1 << 2",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "The device has a volatile write cache, so the kernel sends FLUSH.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "`DeviceParams.VolatileCache`, default true." }
-    },
-    {
-      "kind": "struct",
-      "name": "ublksrv_io_desc",
-      "value": "24 bytes",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Per-tag request descriptor in the read-only mmap of `/dev/ublkcN`.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "" }
-    },
-    {
-      "kind": "struct_field",
-      "name": "ublksrv_io_desc.start_sector",
-      "value": "offset 8, u64",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "First sector of the request, always in 512-byte units.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "" }
-    },
-    {
-      "kind": "struct",
-      "name": "ublk_param_integrity",
-      "value": "16 bytes",
-      "introduced": "7.0",
-      "commit": "",
-      "summary": "Integrity (protection information) limits.",
-      "details": "",
-      "requires": ["UBLK_F_INTEGRITY"],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "missing", "notes": "" }
-    },
-    {
-      "kind": "constant",
-      "name": "UBLK_MAX_QUEUE_DEPTH",
-      "value": "4096",
-      "introduced": "6.0",
-      "commit": "",
-      "summary": "Maximum tags per queue; also sets the fixed stride of the per-queue descriptor mmap.",
-      "details": "",
-      "requires": [],
-      "conflicts": [],
-      "notes": "",
-      "go_ublk": { "status": "supported", "notes": "" }
-    }
-  ]
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_GET_QUEUE_AFFINITY",
+   "value": "0x01 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_GET_QUEUE_AFFINITY.",
+   "details": "Same handler as `UBLK_U_CMD_GET_QUEUE_AFFINITY`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_GET_DEV_INFO",
+   "value": "nr=0x02 ioctl=0x80207502 (_IOR('u', 0x02, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Read a device's `struct ublksrv_ctrl_dev_info`.",
+   "details": "**Inputs:** `dev_id`; `addr`/`len` (len >= 64) receives the 64-byte `ublksrv_ctrl_dev_info`.\n\n**Output:** the device's current info: negotiated flags, `state` (`UBLK_S_DEV_*`), queues, depth,\n`max_io_buf_bytes`, `owner_uid/gid`, the opaque `ublksrv_flags`, and `ublksrv_pid` translated into the\ncaller's pid namespace (-1 if the server is gone or not visible; translation since v6.19-rc7, 47bdf1d29cae,\nbackported to 6.18.8).\n\n**Errors:** `ENODEV` (no device with that id), `EINVAL` (len < 64, addr 0, or \u2014 for an unprivileged\ndevice \u2014 no `dev_path_len`), `EFAULT`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_GET_DEV_INFO` (0x02, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "There is no list command: enumerate devices by probing ids or by reading `/sys/class/ublk-char/`. On an unprivileged device GET_DEV_INFO also needs the path prefix, which is how a client can tell the two apart. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.GetDevInfo`; public `ublk.GetDeviceInfo`, `Device.KernelInfo`, `ListDevices` (probes ids 0..63 only)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_GET_DEV_INFO",
+   "value": "0x02 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_GET_DEV_INFO.",
+   "details": "Same handler as `UBLK_U_CMD_GET_DEV_INFO`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_ADD_DEV",
+   "value": "nr=0x04 ioctl=0xc0207504 (_IOWR('u', 0x04, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Create a device (`/dev/ublkcN`) and negotiate queues, depth, buffer size and features.",
+   "details": "**Inputs:** header `queue_id` must be `0xffff`; header `dev_id` must equal `info.dev_id` (`U32_MAX` =\nauto-assign, else < 2^20 since v6.7); `addr`/`len` (len >= 64) points at `ublksrv_ctrl_dev_info` with\n`nr_hw_queues` (1..4096), `queue_depth` (1..4096), `max_io_buf_bytes`, `flags`, `ublksrv_flags`, and\n`io_desc_size` (only with `UBLK_F_IO_DESC_SIZE`).\n\n**Output (written back to `addr`):** assigned `dev_id`; `nr_hw_queues` clamped to `nr_cpu_ids`;\n`max_io_buf_bytes` rounded down to `PAGE_SIZE`; `flags &= UBLK_F_ALL`, then forced on:\n`CMD_IOCTL_ENCODE | URING_CMD_COMP_IN_TASK | PER_IO_DAEMON | BUF_REG_OFF_DAEMON | SAFE_STOP_DEV`\n(PER_IO_DAEMON removed again with BATCH_IO; NEED_GET_DATA removed with USER_COPY / ZERO_COPY /\nAUTO_BUF_REG / BATCH_IO; UNPRIVILEGED_DEV removed for a CAP_SYS_ADMIN caller; USER_RECOVERY and\nREISSUE removed for an unprivileged device); `owner_uid/gid` = caller (init_user_ns ids);\n`io_desc_size` = 24 unless IO_DESC_SIZE; `state` = DEAD and `ublksrv_pid` = -1 (reset since\ne65848e4ce35, v7.2-rc6, backported to 6.1.183/6.6.151/6.12.103/6.18.44/7.1.8).\n\n**Errors:** `EINVAL` (len/addr/queue_id, depth or queue count 0 or > 4096 [checked since v6.16,\n8c8472855884, backported 6.6.95/6.12.35/6.15.4], dev_id mismatch or >= 2^20, bad recovery-flag\ncombination [v6.13+], QUIESCE without USER_RECOVERY, unprivileged with USER_COPY/ZERO_COPY/AUTO_BUF_REG,\nINTEGRITY without USER_COPY, ZONED without USER_COPY/ZERO_COPY or without CONFIG_BLK_DEV_ZONED, bad\nio_desc_size), `EPERM` (no CAP_SYS_ADMIN and no UNPRIVILEGED_DEV), `EACCES` (unprivileged device count\n>= `ublks_max`), `EEXIST` (requested id in use), `EFAULT`, `ENOMEM`, `EINTR` (killable `ublk_ctl_mutex`).\n\nPrivileges: CAP_SYS_ADMIN, or `UBLK_F_UNPRIVILEGED_DEV` (v6.3+) by any user who can open\n`/dev/ublk-control`. ADD_DEV never takes a path prefix.\n\n\nLegacy raw opcode: `UBLK_CMD_ADD_DEV` (0x04, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Unknown flag bits are silently cleared, so the written-back `flags` is the negotiation result; compare it with what you asked for. Before v6.16 a zero or oversized depth/queue count was not rejected. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.AddDev` / `AddDevice`; public `ublk.Create`, `CreateAndServe`. Flags are pre-validated against the 7.3-rc5 rules (`ctrl.ValidateFeatures`, `ctrl.Negotiate`)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_ADD_DEV",
+   "value": "0x04 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_ADD_DEV.",
+   "details": "Same handler as `UBLK_U_CMD_ADD_DEV`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_DEL_DEV",
+   "value": "nr=0x05 ioctl=0xc0207505 (_IOWR('u', 0x05, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Remove a device and wait until its id is free.",
+   "details": "**Inputs:** `dev_id`; no buffer.\n\n**Behaviour:** `ublk_ctrl_del_dev(wait=true)`: stops the device if it is still started\n(`ublk_stop_dev`), deletes `/dev/ublkcN`, drops the creation reference, then waits interruptibly until\nthe device number is released \u2014 i.e. until the last reference (open `/dev/ublkcN`, its mmaps, the\nrelease work) is gone. Calling it from a process that still holds `/dev/ublkcN` open blocks until that\nprocess closes it or a signal arrives.\n\n**Errors:** `ENODEV`, `EINTR` (interrupted wait; the device is still deleted, v6.5+ 3e9dce80dbf9),\n`EINTR`/killed on the `ublk_ctl_mutex`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_DEL_DEV` (0x05, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Close and munmap everything on `/dev/ublkcN` before DEL_DEV, or use DEL_DEV_ASYNC. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.DelDev`; used by `Device.Close` (after STOP_DEV and queue teardown) and `ublk.DeleteDevice`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_DEL_DEV",
+   "value": "0x05 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_DEL_DEV.",
+   "details": "Same handler as `UBLK_U_CMD_DEL_DEV`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_START_DEV",
+   "value": "nr=0x06 ioctl=0xc0207506 (_IOWR('u', 0x06, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Expose `/dev/ublkbN` once every queue has fetched all of its tags.",
+   "details": "**Inputs:** `data[0]` = the ublk server's pid (> 0). Since v6.17 (c2c8089f325e) it must equal the tgid\nof the process that opened `/dev/ublkcN`; since v6.19-rc7 (47bdf1d29cae, 6.18.8) the comparison is done\nin the init pid namespace so servers in a pid namespace work.\n\n**Behaviour:** requires `UBLK_PARAM_TYPE_BASIC` from SET_PARAMS; builds `queue_limits` from the params;\nwaits interruptibly until every queue has every tag fetched (`ublk_wait_dev_ready_and_lock`, v7.2-rc5\n432a9b2780c0; earlier `wait_for_completion_interruptible(&ub->completion)`); allocates the gendisk\n`ublkbN`, applies capacity/read-only, sets state LIVE, `add_disk()`. Partition scanning is deferred to a\nwork item since v6.19 (7fc4da6a304b, backported 6.18.4) and skipped entirely for unprivileged daemons or\nwith `UBLK_F_NO_AUTO_PART_SCAN`.\n\n**Errors:** `EINVAL` (pid <= 0, no BASIC params, pid mismatch), `EEXIST` (already LIVE or disk still in\nuse), `EINTR`, `EOPNOTSUPP` (zoned params without CONFIG_BLK_DEV_ZONED), `ENOMEM`, add_disk errors.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_START_DEV` (0x06, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "START_DEV blocks until the FETCHes arrive, so issue it from a thread other than the queue threads (or asynchronously). Before v6.5 (53e7d08f6d6e, backported 6.1.43) an interrupted wait was ignored. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.StartDev` with `os.Getpid()`; called by `Device.Start` after the queue engines have primed their FETCHes."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_START_DEV",
+   "value": "0x06 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_START_DEV.",
+   "details": "Same handler as `UBLK_U_CMD_START_DEV`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_STOP_DEV",
+   "value": "nr=0x07 ioctl=0xc0207507 (_IOWR('u', 0x07, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Remove `/dev/ublkbN` and abort the server's pending fetches.",
+   "details": "**Inputs:** `dev_id`; no buffer.\n\n**Behaviour:** `ublk_stop_dev`: with a queueing recovery mode first force-aborts requeued requests\n(`ublk_force_abort_dev`); `del_gendisk()` (waits for in-flight requests, so the server must keep serving\nuntil STOP_DEV returns); state -> DEAD, `ublksrv_pid` -> -1; cancels the partition-scan work; then\ncompletes every still-pending FETCH/COMMIT uring_cmd with `UBLK_IO_RES_ABORT` (`ublk_cancel_dev`).\n\n**Result:** always 0 for an existing device (`ENODEV` otherwise).\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_STOP_DEV` (0x07, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not reversible in practice: ublksrv and go-ublk delete the device after stopping it. TRY_STOP_DEV is the variant that refuses while the disk is open. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.StopDev`; `Device.Stop`/`Close` (or TRY_STOP_DEV when `DeviceParams.SafeStop`)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_STOP_DEV",
+   "value": "0x07 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_STOP_DEV.",
+   "details": "Same handler as `UBLK_U_CMD_STOP_DEV`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_SET_PARAMS",
+   "value": "nr=0x08 ioctl=0xc0207508 (_IOWR('u', 0x08, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Set the device's `struct ublk_params` (block limits) before START_DEV.",
+   "details": "**Inputs:** `addr`/`len` -> `struct ublk_params`; the leading `len` field must be non-zero and <= header\n`len`; `types` non-zero. The kernel copies `min(params.len, sizeof(kernel ublk_params))` bytes and masks\n`types` with `UBLK_PARAM_TYPE_ALL` (unknown types silently dropped).\n\n**Validation (`ublk_validate_params`):** BASIC mandatory: `9 <= logical_bs_shift <= PAGE_SHIFT` (lower\nbound since v6.3-rc6 1d1665279a84), `physical_bs_shift`, `io_min_shift`, `io_opt_shift` <= 28 (v7.1-rc3\n86f33ca9bea3), logical <= physical, `max_sectors <= max_io_buf_bytes >> 9`, `max_sectors >= PAGE_SIZE/512`\n(v7.1-rc4 1860c2f85922; 6.12.92/6.18.34/7.0.11), zoned => `chunk_sectors` power of two (v7.3-rc1\n2707acf1856d; 6.12.110/6.18.52/7.2.6). DISCARD: `max_discard_segments == 1` when `max_discard_sectors`,\n`discard_granularity != 0`. DEVT is read-only (EINVAL). ZONED only with `UBLK_F_ZONED` and vice versa.\nDMA_ALIGN, SEGMENT and INTEGRITY rules: see their entries. On any failure the stored params are zeroed.\n\n**Errors:** `EINVAL`, `EACCES` (device already started: `UB_STATE_USED` since v6.14-rc6 5ac60242b017,\nbackported 6.1.131/6.6.83/6.12.19; before that only a LIVE device was refused, so SET_PARAMS during\nrecovery \"succeeded\" without effect), `EFAULT`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_SET_PARAMS` (0x08, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Params are applied only by START_DEV. A newer server sending a longer `ublk_params` to an older kernel is fine (truncated); unknown types are dropped, so check GET_PARAMS if it matters. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.SetParams` / `SetDeviceParams` (BASIC, DISCARD, DMA_ALIGN, SEGMENT). ZONED and INTEGRITY are modeled in `uapi.UblkParams` but no public parameter sets them."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_SET_PARAMS",
+   "value": "0x08 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_SET_PARAMS.",
+   "details": "Same handler as `UBLK_U_CMD_SET_PARAMS`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_GET_PARAMS",
+   "value": "nr=0x09 ioctl=0x80207509 (_IOR('u', 0x09, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Read back the device's `struct ublk_params`, with the read-only DEVT block filled in.",
+   "details": "**Inputs:** `addr`/`len`; the caller must store the buffer size in the leading `len` field\n(`0 < params.len <= header len`).\n\n**Output:** `ublk_ctrl_fill_params_devt` sets `UBLK_PARAM_TYPE_DEVT` (char major/minor always; disk\nmajor/minor once started, else 0), then copies `min(params.len, sizeof(ublk_params))` bytes of the stored\nparams (what SET_PARAMS stored, including its `len`/`types`).\n\n**Errors:** `EINVAL`, `EFAULT`, `ENODEV`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_GET_PARAMS` (0x09, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "DEVT exists since v6.3 (abb864d38085); on older kernels the block device numbers must come from sysfs. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.GetParams` (256-byte buffer; decodes every known type). Used by `ublk.Recover` to rebuild geometry."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_GET_PARAMS",
+   "value": "0x09 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_GET_PARAMS.",
+   "details": "Same handler as `UBLK_U_CMD_GET_PARAMS`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_START_USER_RECOVERY",
+   "value": "nr=0x10 ioctl=0xc0207510 (_IOWR('u', 0x10, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Begin taking over a recoverable device whose previous server has exited.",
+   "details": "**Inputs:** `dev_id`; no buffer, no data.\n\n**Preconditions (`ublk_ctrl_start_recovery`):** created with `UBLK_F_USER_RECOVERY` (else `EINVAL`);\n`/dev/ublkcN` no longer open (`UB_STATE_OPEN` clear \u2014 cleared at the end of the asynchronous release\nwork after the old server's fds and io_uring are gone) and state `QUIESCED` or `FAIL_IO` (else `EBUSY`).\n\n**Version differences:** v6.1\u2013v6.14: this command also reset every tag (`ublk_queue_reinit`), cleared\n`ub->mm` (so the new process can mmap) and re-armed the readiness completion \u2014 it was mandatory.\nv6.11-rc7 (e58f5142f883, 6.1.110/6.6.51) returns EINVAL instead of oopsing when no queue was ever ready.\nSince v6.15 (728cbac5fe21) the reset happens in `ublk_ch_release_work_fn` and START_USER_RECOVERY is only\na precondition check; END_USER_RECOVERY no longer depends on it since v7.2-rc5 (432a9b2780c0).\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_START_USER_RECOVERY` (0x10, since v6.1).",
+   "requires": [
+    "UBLK_F_USER_RECOVERY"
+   ],
+   "conflicts": [],
+   "notes": "Poll: EBUSY is expected for a short while after the old server dies (release is asynchronous). The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.StartUserRecovery`; `ublk.Recover` retries EBUSY for up to 30 s."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_START_USER_RECOVERY",
+   "value": "0x10 (raw cmd_op)",
+   "introduced": "v6.1",
+   "commit": "c732a852b419",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_START_USER_RECOVERY.",
+   "details": "Same handler as `UBLK_U_CMD_START_USER_RECOVERY`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_END_USER_RECOVERY",
+   "value": "nr=0x11 ioctl=0xc0207511 (_IOWR('u', 0x11, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Finish recovery: wait for the new server's fetches and put the device back to LIVE.",
+   "details": "**Inputs:** `data[0]` = new server pid (validated like START_DEV since v6.17).\n\n**Behaviour (`ublk_ctrl_end_recovery`):** waits interruptibly until every queue has fetched every tag,\nthen requires a recoverable state (`EBUSY` otherwise) and `UBLK_F_USER_RECOVERY` (`EINVAL`), stores the\npid, sets state LIVE and kicks the requeue list so requests held during the outage are dispatched to the\nnew server. v6.1\u2013v6.14 unquiesced the block queue / cleared `fail_io` here instead.\n\n**Errors:** `EINVAL` (pid mismatch, no recovery), `EBUSY`, `EINTR`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nLegacy raw opcode: `UBLK_CMD_END_USER_RECOVERY` (0x11, since v6.1).",
+   "requires": [
+    "UBLK_F_USER_RECOVERY"
+   ],
+   "conflicts": [],
+   "notes": "Before v7.2-rc5 the wait used a completion re-armed only by a successful START_USER_RECOVERY; skipping START could strand a requeued request (432a9b2780c0, backported 6.18.42/7.1.6). The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.EndUserRecovery`; `ublk.Recover` after the new queues have primed."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_END_USER_RECOVERY",
+   "value": "0x11 (raw cmd_op)",
+   "introduced": "v6.1",
+   "commit": "c732a852b419",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_END_USER_RECOVERY.",
+   "details": "Same handler as `UBLK_U_CMD_END_USER_RECOVERY`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_GET_DEV_INFO2",
+   "value": "nr=0x12 ioctl=0x80207512 (_IOR('u', 0x12, 32 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "GET_DEV_INFO that always carries the char-device path, so it works for unprivileged devices.",
+   "details": "**Inputs:** `addr` points at a buffer whose first `dev_path_len` bytes are the NUL-terminated path of\n`/dev/ublkcN` (`dev_path_len` includes the NUL, <= PATH_MAX, <= `len`), followed by room for the 64-byte\ninfo. The kernel checks the path names the device's char node (`ublk_char_dev_permission`: same rdev,\ncharacter device, `inode_permission(MAY_READ)`), then advances `addr`/`len` past the path.\n\n**Privileged devices:** the caller still needs CAP_SYS_ADMIN *and* must supply the path (the only\ncommand that requires a path on a privileged device).\n\n**Errors:** as GET_DEV_INFO, plus `EINVAL` (missing/oversized path), `EPERM`/`ENOENT`/`EACCES` from the\npath check.\n\n\nLegacy raw opcode: `UBLK_CMD_GET_DEV_INFO2` (0x12, since v6.3).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "ublk.rst recommends: try GET_DEV_INFO2 first, fall back to GET_DEV_INFO on kernels that lack it. The ioctl-encoded form exists since v6.4; on v6.0\u2013v6.3 only the raw opcode works.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "ctrl.Controller.GetDevInfo2 (always sends the char-device path). The public GetDeviceInfo uses GET_DEV_INFO and adds the path automatically for unprivileged devices."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_CMD_GET_DEV_INFO2",
+   "value": "0x12 (raw cmd_op)",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_CMD_GET_DEV_INFO2.",
+   "details": "Same handler as `UBLK_U_CMD_GET_DEV_INFO2`. The driver accepts a raw opcode (`_IOC_TYPE == 0`) only when built with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` (`ublk_check_cmd_op`, v6.4+; check fixed in v6.4-rc2 e485bd9e2c41); without it the command fails with `EOPNOTSUPP`. On v6.0\u2013v6.3 it is the only encoding. The number is also `_IOC_NR` of the ioctl form, which is what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy command definition, don't use in new application\". Ubuntu and the AL2023 6.18 kernel build with the legacy option off (see distro-kernels.md).",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_GET_FEATURES",
+   "value": "nr=0x13 ioctl=0x80207513 (_IOR('u', 0x13, 32 bytes))",
+   "introduced": "v6.5",
+   "commit": "b5bbc52fd012",
+   "summary": "Read the kernel's supported `UBLK_F_*` mask (`UBLK_F_ALL`).",
+   "details": "**Inputs:** `addr`/`len` with `len == UBLK_FEATURES_LEN` (8) exactly. `dev_id` is ignored: the command\nis handled before any device lookup and before permission checks.\n\n**Output:** the 64-bit `UBLK_F_ALL` of the running kernel (`UBLK_F_INTEGRITY` only when built with\nCONFIG_BLK_DEV_INTEGRITY).\n\n**Encoding gotcha:** `ublk_ctrl_uring_cmd` compares the *full* opcode (`cmd_op ==\nUBLK_U_CMD_GET_FEATURES`), unlike every other control command which is matched on `_IOC_NR`. An\n`_IOWR`-encoded 0x13 therefore falls through to the device path and fails with `ENODEV` (or `EOPNOTSUPP`).\n\n**Errors:** `EINVAL` (len != 8 or addr 0), `EFAULT`. Kernels before v6.5 do not know the command; with\n`dev_id = -1` they fail it (`ENODEV` on v6.4).\n\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_GET_FEATURES`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Any user who can open `/dev/ublk-control` may call it. kublk refuses to run without it (requires `UBLK_F_CMD_IOCTL_ENCODE`).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.GetFeatures` (exact `_IOR` encoding); public `ublk.Probe`. Pre-6.5 kernels are treated as the v6.0 base set."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_DEL_DEV_ASYNC",
+   "value": "nr=0x14 ioctl=0x80207514 (_IOR('u', 0x14, 32 bytes))",
+   "introduced": "v6.9",
+   "commit": "13fe8e6825e4",
+   "summary": "Remove a device without waiting for its id to be freed.",
+   "details": "Same as DEL_DEV (`ublk_ctrl_del_dev(wait=false)`): stop if needed, delete `/dev/ublkcN`, drop the\nreference \u2014 but return immediately; the id becomes reusable when the last reference goes. Avoids the\nclose/munmap/unregister ordering problem of DEL_DEV.\n\n**Broken dispatch in v6.9 and v6.10:** the switch compared `_IOC_NR(cmd_op)` with the full ioctl value,\nso the command never matched and failed with `-ENOTSUPP` (524). Fixed in v6.11-rc1 (55fbb9a5d64e,\nno stable backport). Usable from v6.11.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_DEL_DEV_ASYNC`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Header encodes it `_IOR` although it carries no output; the driver only checks `_IOC_NR`.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "ublk.DeleteDeviceAsync (6.11+)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_UPDATE_SIZE",
+   "value": "nr=0x15 ioctl=0xc0207515 (_IOWR('u', 0x15, 32 bytes))",
+   "introduced": "v6.16",
+   "commit": "98b995660bff",
+   "summary": "Change a started device's capacity.",
+   "details": "**Inputs:** `data[0]` = new size in 512-byte sectors.\n\n**Behaviour (`ublk_ctrl_set_size`):** stores it in `params.basic.dev_sectors` and calls\n`set_capacity_and_notify()` (uevent with `RESIZE=1`; partitions are not rescanned). The driver does not\ncheck `UBLK_F_UPDATE_SIZE`; the flag only advertises the command. No validation of the value.\n\n**Errors:** `ENODEV` if the device has no disk (never started or stopped) \u2014 since v7.0-rc4\n(25966fc09769, backported 6.18.20/6.19.9); v6.16\u2013v6.19 kernels without it dereference NULL instead.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_UPDATE_SIZE`).",
+   "requires": [
+    "UBLK_F_UPDATE_SIZE"
+   ],
+   "conflicts": [],
+   "notes": "The backend must already serve the new size when growing, and must stop accepting I/O beyond it only after shrinking.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.UpdateSize` (refuses a DEAD device to dodge the pre-7.0 NULL deref); public `Device.Resize`."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_QUIESCE_DEV",
+   "value": "nr=0x16 ioctl=0xc0207516 (_IOWR('u', 0x16, 32 bytes))",
+   "introduced": "v6.16",
+   "commit": "b465ae7b2524",
+   "summary": "Drain a LIVE device and abort the server's fetches so the server can hand over (live upgrade).",
+   "details": "**Inputs:** `data[0]` = timeout in milliseconds (0 = wait forever; the value is passed to an\n`unsigned int` parameter, so it is truncated to 32 bits).\n\n**Behaviour (`ublk_ctrl_quiesce_dev`):** `EOPNOTSUPP` without `UBLK_F_QUIESCE`; `ENODEV` if no disk or\nDEAD; returns 0 at once if not LIVE. Otherwise marks the device canceling (new requests are requeued),\nwaits until every queue has at least one idle tag whose FETCH can be cancelled (`ublk_wait_for_idle_io`;\nskipped for BATCH_IO), then cancels all pending FETCH/COMMIT uring_cmds with `UBLK_IO_RES_ABORT`. The\nserver then exits/closes `/dev/ublkcN`; the release work moves the device to `QUIESCED` (or `FAIL_IO`),\nready for START/END_USER_RECOVERY by the next server.\n\n**Errors:** `EOPNOTSUPP`, `ENODEV`, `EBUSY` (timeout: all I/O stayed with the server), `EINTR`.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_QUIESCE_DEV`).",
+   "requires": [
+    "UBLK_F_QUIESCE"
+   ],
+   "conflicts": [],
+   "notes": "Requires UBLK_F_QUIESCE, which itself requires UBLK_F_USER_RECOVERY at ADD_DEV.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.QuiesceDev`; used by `Device.Detach` when the device has QUIESCE (30 s timeout)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_TRY_STOP_DEV",
+   "value": "nr=0x17 ioctl=0xc0207517 (_IOWR('u', 0x17, 32 bytes))",
+   "introduced": "v7.0",
+   "commit": "93ada1b3da39",
+   "summary": "STOP_DEV only if nobody has the block device open.",
+   "details": "**Behaviour (`ublk_ctrl_try_stop_dev`):** `ENODEV` if there is no disk; under `disk->open_mutex`,\n`EBUSY` if `disk_openers() > 0`; otherwise sets `block_open` (further opens of `/dev/ublkbN` fail with\n`ENXIO`) and performs STOP_DEV.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_TRY_STOP_DEV`).",
+   "requires": [
+    "UBLK_F_SAFE_STOP_DEV"
+   ],
+   "conflicts": [],
+   "notes": "Advertised by `UBLK_F_SAFE_STOP_DEV`, which every v7.0+ kernel reports.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ctrl.Controller.TryStopDev`; `Device.Stop` uses it when `DeviceParams.SafeStop` (EBUSY -> `ErrDeviceBusy`)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_REG_BUF",
+   "value": "nr=0x18 ioctl=0xc0207518 (_IOWR('u', 0x18, 32 bytes))",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Register a shared-memory buffer for UBLK_F_SHMEM_ZC zero copy; returns its index.",
+   "details": "**Inputs:** `addr` -> `struct ublk_shmem_buf_reg` (up to `len` bytes, max 24, copied; missing tail is\nzero). `flags` may only be `UBLK_SHMEM_BUF_READ_ONLY`; `reserved` must be 0; `len` non-zero, page-aligned,\n<= 4 GiB; `addr` page-aligned.\n\n**Behaviour (`ublk_ctrl_reg_buf`):** long-term pins the pages (`FOLL_WRITE` unless READ_ONLY), freezes the\nqueue if started, allocates an index 0..65535 (IDA), inserts the PFN ranges into the device's maple tree.\nAllowed before START_DEV (365ea7cc6244, same release).\n\n**Result:** the buffer index (>= 0). **Errors:** `EOPNOTSUPP` (no SHMEM_ZC), `EINVAL`, `EFAULT` (partial\npin), `ENOMEM`, `ENOSPC` (indexes exhausted), `EEXIST` (pages already registered).\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_REG_BUF`).",
+   "requires": [
+    "UBLK_F_SHMEM_ZC"
+   ],
+   "conflicts": [],
+   "notes": "The registration struct is out of line precisely so an unprivileged caller can prefix the path at `addr`.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Device.RegisterSharedMemory (with DeviceParams.SharedMemoryZeroCopy)."
+   }
+  },
+  {
+   "kind": "ctrl_cmd",
+   "name": "UBLK_U_CMD_UNREG_BUF",
+   "value": "nr=0x19 ioctl=0xc0207519 (_IOWR('u', 0x19, 32 bytes))",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Unregister a REG_BUF buffer.",
+   "details": "**Inputs:** `data[0]` = index from REG_BUF. **Errors:** `EOPNOTSUPP` (no SHMEM_ZC), `EINVAL` (index >\n65535), `ENOENT` (not registered). Unpins the pages after freezing the queue. All buffers are released\nautomatically when the device is freed.\nPrivileges: CAP_SYS_ADMIN for a privileged device; for a `UBLK_F_UNPRIVILEGED_DEV` device the caller must prefix the char-device path at `addr` and pass `dev_path_len` (see `ublk_ctrl_uring_cmd_permission`).\n\nNo raw/legacy opcode exists (the driver mirrors the number privately as `UBLK_CMD_UNREG_BUF`).",
+   "requires": [
+    "UBLK_F_SHMEM_ZC"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Device.UnregisterSharedMemory."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_FETCH_REQ",
+   "value": "nr=0x20 ioctl=0xc0107520 (_IOWR('u', 0x20, 16 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Arm a tag: hand the kernel one uring_cmd per (queue, tag) to complete when a request arrives.",
+   "details": "**SQE:** `struct ublksrv_io_cmd {q_id, tag, result (unused), addr}` in the SQE command area of\n`/dev/ublkcN`'s io_uring. `addr` = server data buffer for this tag; required in copy mode unless\n`UBLK_F_NEED_GET_DATA`; must be 0 with USER_COPY / SUPPORT_ZERO_COPY / AUTO_BUF_REG (`EINVAL`). With\n`UBLK_F_AUTO_BUF_REG`, `sqe->addr` carries a `ublk_auto_buf_reg` (buffer index + flags).\n\n**Rules:** only before the device is ready (`EBUSY` once every queue has fetched all tags); once per tag\n(`EINVAL` if already active); serialized by `ub->mutex`. The issuing task becomes the tag's daemon\n(`io->task`); all later commands for the tag must come from it (per-queue daemon on v6.0\u2013v6.15: the task\nthat issued the queue's last FETCH; per-I/O since v6.16). Not valid on a BATCH_IO device (`EOPNOTSUPP`).\nOn v6.0\u2013v6.2 the I/O ring must use SQE128 too.\n\n**CQE (when a request is dispatched to this tag):** `UBLK_IO_RES_OK` (descriptor at `io_cmd_buf[tag]` is\nvalid; for WRITE the data is already in `addr`), `UBLK_IO_RES_NEED_GET_DATA` (WRITE with NEED_GET_DATA),\n`UBLK_IO_RES_ABORT` (device stopping / quiescing / server exiting: do not re-fetch), or a negative errno for\na rejected command.\n\n\nLegacy raw opcode: `UBLK_IO_FETCH_REQ` (0x20, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Ioctl form since v6.4.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`internal/queue` engine: one locked OS thread + io_uring per tag range primes every tag at start."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_IO_FETCH_REQ",
+   "value": "0x20 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_IO_FETCH_REQ.",
+   "details": "Accepted only with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` on v6.4+; the only form on v6.0\u2013v6.3. The I/O path matches `_IOC_NR(cmd_op)`, so this number is also what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy IO command definition, don't use in new application\".",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_COMMIT_AND_FETCH_REQ",
+   "value": "nr=0x21 ioctl=0xc0107521 (_IOWR('u', 0x21, 16 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Complete the tag's current request with a result and re-arm the tag in one command.",
+   "details": "**SQE:** `ublksrv_io_cmd {q_id, tag, result, addr}`. `result` = bytes transferred (READ/WRITE) or 0, or a\nnegative errno; `addr` = buffer for the next request (copy mode; may be 0 with NEED_GET_DATA except for\nREAD) \u2014 for `UBLK_IO_OP_ZONE_APPEND` it is instead `zone_append_lba` (the sector written). With\nAUTO_BUF_REG, `sqe->addr` carries the next `ublk_auto_buf_reg`; the previous auto-registered buffer is\nunregistered automatically if this SQE goes to the same io_uring.\n\n**Rules:** must come from the tag's daemon task (`EINVAL` otherwise); the tag must be owned by the server\n(`EBUSY` if a command is already pending); a stray COMMIT while NEED_GET_DATA is pending is `EINVAL`.\n\n**Completion semantics:** see semantics.md \u00a73 \u2014 negative results map through `errno_to_blk_status()`,\na 0-byte READ becomes `EIO`, short READ/WRITE results behave differently before and after v7.3-rc1.\nThe CQE for this SQE arrives with the *next* request (or ABORT).\n\n\nLegacy raw opcode: `UBLK_IO_COMMIT_AND_FETCH_REQ` (0x21, since v6.0).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Ioctl form since v6.4.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Engine commits with full length on success, negative errno on failure (`Request.Complete/CompleteN`)."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_IO_COMMIT_AND_FETCH_REQ",
+   "value": "0x21 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_IO_COMMIT_AND_FETCH_REQ.",
+   "details": "Accepted only with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` on v6.4+; the only form on v6.0\u2013v6.3. The I/O path matches `_IOC_NR(cmd_op)`, so this number is also what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy IO command definition, don't use in new application\".",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_NEED_GET_DATA",
+   "value": "nr=0x22 ioctl=0xc0107522 (_IOWR('u', 0x22, 16 bytes))",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Second step of a two-phase WRITE: supply the buffer and let the kernel copy the payload into it.",
+   "details": "Used only with `UBLK_F_NEED_GET_DATA` after a FETCH/COMMIT completed with `UBLK_IO_RES_NEED_GET_DATA`.\n**SQE:** `{q_id, tag, addr = destination buffer}`. The kernel copies the WRITE data into `addr` and\ncompletes *this* SQE with `UBLK_IO_RES_OK` (synchronously since v6.16; via task work before), after\nwhich the descriptor is valid and the server handles the WRITE and later sends COMMIT_AND_FETCH_REQ.\nIssuing it when not expected, or anything else when it is expected, is `EINVAL`. Must come from the\ndaemon task.\n\n\nLegacy raw opcode: `UBLK_IO_NEED_GET_DATA` (0x22, since v6.0).",
+   "requires": [
+    "UBLK_F_NEED_GET_DATA"
+   ],
+   "conflicts": [],
+   "notes": "Costs an extra round trip; only for servers that cannot pre-allocate per-tag buffers. Unavailable with USER_COPY/ZERO_COPY/AUTO_BUF_REG/BATCH_IO (flag cleared at ADD_DEV). Ioctl form since v6.4.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Engine handles `UBLK_IO_RES_NEED_GET_DATA` (`DeviceParams.NeedGetData`)."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_IO_NEED_GET_DATA",
+   "value": "0x22 (raw cmd_op)",
+   "introduced": "v6.0",
+   "commit": "4e18403d9485",
+   "summary": "Legacy (non-ioctl) opcode for UBLK_U_IO_NEED_GET_DATA.",
+   "details": "Accepted only with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y` on v6.4+; the only form on v6.0\u2013v6.3. The I/O path matches `_IOC_NR(cmd_op)`, so this number is also what the driver switches on.",
+   "requires": [
+    "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES"
+   ],
+   "conflicts": [],
+   "notes": "Header: \"Legacy IO command definition, don't use in new application\".",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk sends only the ioctl-encoded `UBLK_U_*` form (minimum kernel 6.8), so the raw opcode is never used. The number is modeled in `internal/uapi`."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_REGISTER_IO_BUF",
+   "value": "nr=0x23 ioctl=0xc0107523 (_IOWR('u', 0x23, 16 bytes))",
+   "introduced": "v6.15",
+   "commit": "1f6540e2aabb",
+   "summary": "Zero copy: install an in-flight request's pages into the issuing io_uring's fixed-buffer table.",
+   "details": "**SQE:** `{q_id, tag, addr = buffer-table index}` sent on any io_uring that has a (sparse) registered\nbuffer table. The request's bvec becomes a kernel fixed buffer at that index\n(`io_buffer_register_request`, named `io_buffer_register_bvec` before v7.3); the server then uses\n`IORING_OP_READ_FIXED/WRITE_FIXED` or `IORING_URING_CMD_FIXED` against it. The ublk request cannot\ncomplete until every registration is dropped (refcount, see `ublk_io` comments).\n\n**Rules:** `UBLK_F_SUPPORT_ZERO_COPY` required (`EINVAL`); request must be started and carry data.\nOn the daemon task it uses a cheap counter; off the daemon task it is allowed since v6.17\n(`UBLK_F_BUF_REG_OFF_DAEMON`), on v6.15\u2013v6.16 only the daemon may issue it. Also valid on BATCH_IO devices.\n\n\nNo raw opcode. On a BATCH_IO device the driver compares the full opcode value.",
+   "requires": [
+    "UBLK_F_SUPPORT_ZERO_COPY"
+   ],
+   "conflicts": [],
+   "notes": "Not available to unprivileged devices (kernel memory could leak if the server does not fill a READ).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Zero-copy engine (`EnableZeroCopy`) when AUTO_BUF_REG is unavailable or falls back."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_UNREGISTER_IO_BUF",
+   "value": "nr=0x24 ioctl=0xc0107524 (_IOWR('u', 0x24, 16 bytes))",
+   "introduced": "v6.15",
+   "commit": "1f6540e2aabb",
+   "summary": "Zero copy: remove a buffer installed by REGISTER_IO_BUF (or AUTO_BUF_REG).",
+   "details": "**SQE:** `{addr = buffer-table index}`; since v6.17 `q_id`/`tag` are ignored and any task may issue it\n(`UBLK_F_BUF_REG_OFF_DAEMON`); on v6.15\u2013v6.16 the q_id/tag of the registered request and the daemon task\nwere required. Calls `io_buffer_unregister()`; the request completes once its last registration is gone\nand the server has committed it.\n\n\nNo raw opcode. On a BATCH_IO device the driver compares the full opcode value.",
+   "requires": [
+    "UBLK_F_SUPPORT_ZERO_COPY"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Linked after the file I/O in the zero-copy engine."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_PREP_IO_CMDS",
+   "value": "nr=0x25 ioctl=0xc0107525 (_IOWR('u', 0x25, 16 bytes))",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "BATCH_IO: arm many tags of one queue at once (batch FETCH_REQ).",
+   "details": "**SQE cmd area:** `struct ublk_batch_io {q_id, flags, nr_elem, elem_bytes}`; `sqe->addr` -> user buffer\nof `nr_elem * elem_bytes` bytes of elements (`ublk_elem_header {tag, buf_index, result}` + optional\n`__u64 buf_addr` if `UBLK_BATCH_F_HAS_BUF_ADDR` + optional `__u64 zone_lba` if `HAS_ZONE_LBA`).\n`elem_bytes` must equal 8 + 8\u00b7HAS_BUF_ADDR + 8\u00b7HAS_ZONE_LBA; `nr_elem <= queue_depth` (`E2BIG`).\nFlag rules (`ublk_check_batch_cmd`): HAS_ZONE_LBA needs ZONED; HAS_BUF_ADDR needs copy mode;\nAUTO_BUF_REG_FALLBACK needs AUTO_BUF_REG and excludes HAS_BUF_ADDR.\n\n**Behaviour:** the buffer is snapshotted (v7.2-rc3 f01f5275feb7) and each tag is fetched as by FETCH_REQ\n(no daemon task is recorded \u2014 any task may serve any tag). All-or-nothing: on an error the already\nprepared tags are reverted. Returns 0 or a negative errno.\n\n\nNo raw opcode. On a BATCH_IO device the driver compares the full opcode value.",
+   "requires": [
+    "UBLK_F_BATCH_IO"
+   ],
+   "conflicts": [],
+   "notes": "Only on a device created with UBLK_F_BATCH_IO (its `/dev/ublkcN` uses `ublk_ch_batch_io_fops`).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "DeviceParams.BatchIO: one PREP_IO_CMDS per queue registers every tag."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_COMMIT_IO_CMDS",
+   "value": "nr=0x26 ioctl=0xc0107526 (_IOWR('u', 0x26, 16 bytes))",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "BATCH_IO: commit results for many tags (and re-arm them).",
+   "details": "Same header and element format as PREP_IO_CMDS. Per element: `result` = completion result, `buf_addr` =\nbuffer for the next request (copy mode), `zone_lba` for zone append, `buf_index` for AUTO_BUF_REG.\n\n**Result:** number of *bytes* of the element buffer processed (`iter.done`); elements after the first\nfailing one are not committed \u2014 divide by `elem_bytes` and retry the remainder. A negative errno only if\nnothing was processed. Completions are batched through `blk_mq_end_request_batch()`.\n\n\nNo raw opcode. On a BATCH_IO device the driver compares the full opcode value.",
+   "requires": [
+    "UBLK_F_BATCH_IO"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "DeviceParams.BatchIO: each I/O thread commits a round's completions in one command, resubmitting unconsumed elements."
+   }
+  },
+  {
+   "kind": "io_cmd",
+   "name": "UBLK_U_IO_FETCH_IO_CMDS",
+   "value": "nr=0x27 ioctl=0xc0107527 (_IOWR('u', 0x27, 16 bytes))",
+   "introduced": "v7.0",
+   "commit": "a4d883755399",
+   "summary": "BATCH_IO: multishot fetch that delivers ready tags in provided buffers.",
+   "details": "**SQE:** must set `IORING_URING_CMD_MULTISHOT` (uring_cmd multishot exists since v6.18, 620a50c92700) and\nuse a provided-buffer ring (`sqe->buf_index` = buffer group); header `elem_bytes == 2`, `flags == 0`.\n\n**CQEs:** each CQE consumes one provided buffer filled with `__u16` tags of requests now owned by the\nserver (res = byte count); read each tag's descriptor from the mmapped `io_cmd_buf`. Several FETCH_IO_CMDS\nmay be queued on a queue (load balancing across tasks) but only one is active at a time. The command\nterminates with an error CQE (e.g. `-ENOBUFS` when no buffer can be selected, `UBLK_IO_RES_ABORT` on\ncancel / quiesce, `-ENODEV` if the queue is canceling when attached).\n\n\nNo raw opcode. On a BATCH_IO device the driver compares the full opcode value.",
+   "requires": [
+    "UBLK_F_BATCH_IO"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "DeviceParams.BatchIO: multishot fetch into a 16 x 256-byte provided-buffer ring."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_SUPPORT_ZERO_COPY",
+   "value": "1ULL<<0 (0x1)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Zero copy via io_uring kernel fixed buffers (REGISTER/UNREGISTER_IO_BUF).",
+   "details": "Reserved in v6.0 but stripped by ADD_DEV (`flags &= ~UBLK_F_SUPPORT_ZERO_COPY`, \"We are not ready to support zero copy\") on every kernel through v6.14. Functional since v6.15 (1f6540e2aabb): the kernel no longer copies data to/from the server buffer (`ublk_need_map_io()` false), FETCH/COMMIT must pass `addr = 0`, and the server reaches request pages only through REGISTER_IO_BUF + fixed-buffer io_uring ops. Decoupled from USER_COPY in v6.15-rc5 (69edf98be844). The server should align `ublk_param_dma_align` and `ublk_param_segment` with its backend. Clears NEED_GET_DATA.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_UNPRIVILEGED_DEV"
+   ],
+   "notes": "On 6.0\u20136.14 the bit is silently dropped from the negotiated flags, so check the written-back flags.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.EnableZeroCopy` with a `ZeroCopyBackend` (a backing file): the engine registers each request buffer (AUTO_BUF_REG when the kernel lists it, otherwise REGISTER_IO_BUF + linked UNREGISTER_IO_BUF) and reads/writes the file with fixed-buffer ops, fdatasync and fallocate on the queue's ring. Not offered to Handlers; excludes user copy, NEED_GET_DATA and unprivileged."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_URING_CMD_COMP_IN_TASK",
+   "value": "1ULL<<1 (0x2)",
+   "introduced": "v6.0",
+   "commit": "0edb3696c171",
+   "summary": "Always dispatch requests to the server via io_uring_cmd_complete_in_task().",
+   "details": "v6.0\u2013v6.4: selected `io_uring_cmd_complete_in_task()` instead of `task_work_add()` for dispatch (task_work_add was only usable when ublk_drv was built in; for a module the flag was forced on since v6.1-rc4, 224e858f215a). v6.5 removed the task_work_add path (29dc5d06613f) and forces the flag on in every ADD_DEV reply; it has no effect since.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Informational only on v6.5+.",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "Not requested; the kernel forces it on and ignores it since 6.5."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_NEED_GET_DATA",
+   "value": "1ULL<<2 (0x4)",
+   "introduced": "v6.0",
+   "commit": "4e18403d9485",
+   "summary": "Two-phase WRITE: deliver WRITEs without data, server supplies the buffer with UBLK_U_IO_NEED_GET_DATA.",
+   "details": "For WRITE requests (v6.0\u2013v6.3 also FLUSH) the FETCH/COMMIT CQE returns `UBLK_IO_RES_NEED_GET_DATA`; the server allocates a buffer and issues NEED_GET_DATA, the kernel copies the payload and completes it with `UBLK_IO_RES_OK`. FETCH may pass `addr = 0`; COMMIT may pass `addr = 0` unless the request is a READ. Cleared by ADD_DEV when combined with USER_COPY (v6.5+), SUPPORT_ZERO_COPY or AUTO_BUF_REG (v6.15/6.16+) or BATCH_IO (v7.0+).",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_USER_COPY",
+    "UBLK_F_SUPPORT_ZERO_COPY",
+    "UBLK_F_AUTO_BUF_REG",
+    "UBLK_F_BATCH_IO"
+   ],
+   "notes": "Added for servers with existing buffer management; costs an extra round trip per WRITE.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.NeedGetData`; the engine issues NEED_GET_DATA."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_USER_RECOVERY",
+   "value": "1ULL<<3 (0x8)",
+   "introduced": "v6.1",
+   "commit": "77a440e2cbb4",
+   "summary": "Keep the device (and /dev/ublkbN) when the server dies so a new server can recover it.",
+   "details": "When the server exits, `ublk_ch_release_work_fn` aborts what the server held and moves the device to `UBLK_S_DEV_QUIESCED` (or `FAIL_IO` with RECOVERY_FAIL_IO) instead of stopping it. Requests issued to the server are failed with EIO (default), requeued (REISSUE) or failed (FAIL_IO); new requests are requeued (default/REISSUE) or failed with `BLK_STS_TARGET` (FAIL_IO). A new server recovers with START_USER_RECOVERY, re-opens/mmaps `/dev/ublkcN`, fetches every tag, then END_USER_RECOVERY. Silently cleared for unprivileged devices. Full protocol and version history: semantics.md \u00a79.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_UNPRIVILEGED_DEV"
+   ],
+   "notes": "Recovery was reworked in v6.15 (detection moved to char-device release; reset moved out of START_USER_RECOVERY). Known unfixed-before-v7.1 UAF on the recovery reset path: f7700a4415af.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.Recovery` (RecoveryQueue / RecoveryReissue / RecoveryFailIO), `Device.Detach`, `ublk.Recover`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_USER_RECOVERY_REISSUE",
+   "value": "1ULL<<4 (0x10)",
+   "introduced": "v6.1",
+   "commit": "a0d41dc11374",
+   "summary": "With USER_RECOVERY: requeue (re-issue) requests that were with the dead server.",
+   "details": "`__ublk_fail_req` requeues instead of failing outstanding requests (`ublk_nosrv_should_reissue_outstanding`), so the new server sees them again after END_USER_RECOVERY. The backend must tolerate a write being applied twice. Silently cleared for unprivileged devices. Only valid together with USER_RECOVERY and not with FAIL_IO (EINVAL since v6.13, d00c0ea17955).",
+   "requires": [
+    "UBLK_F_USER_RECOVERY"
+   ],
+   "conflicts": [
+    "UBLK_F_USER_RECOVERY_FAIL_IO"
+   ],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`RecoveryReissue`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_UNPRIVILEGED_DEV",
+   "value": "1ULL<<5 (0x20)",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Let a non-root user create and own a device.",
+   "details": "ADD_DEV without CAP_SYS_ADMIN requires this flag (else EPERM); with CAP_SYS_ADMIN the flag is cleared. The kernel records the caller's uid/gid; every later control command must carry the `/dev/ublkcN` path prefix (`dev_path_len`) and pass an inode permission check; only the owner may open `/dev/ublkbN` (v6.3, 48a905198024); partitions are never scanned; an I/O timeout SIGKILLs the server (v6.4, c0b79b0ff53b); at most `ublks_max` (default 64) such devices exist. USER_RECOVERY/REISSUE are silently dropped; USER_COPY (v6.12, 42aafd8b48ad, 6.6.58), SUPPORT_ZERO_COPY (v6.15) and AUTO_BUF_REG (v6.16) are rejected. Needs a udev rule making `/dev/ublk-control` accessible and chowning `ublkc*`/`ublkb*` to owner_uid/gid.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_USER_COPY",
+    "UBLK_F_SUPPORT_ZERO_COPY",
+    "UBLK_F_AUTO_BUF_REG",
+    "UBLK_F_USER_RECOVERY"
+   ],
+   "notes": "Before v6.12 an unprivileged USER_COPY server could leak uninitialized kernel memory by under-filling READs.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.EnableUnprivileged`; every control command gets the path prefix automatically (`ctrl.devRequest`)."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_CMD_IOCTL_ENCODE",
+   "value": "1ULL<<6 (0x40)",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Advertises that the kernel accepts ioctl-encoded (`UBLK_U_*`) opcodes.",
+   "details": "Set in every ADD_DEV reply since v6.4 (`flags |= UBLK_F_CMD_IOCTL_ENCODE`); the driver never reads the bit from the request. Its presence in GET_FEATURES / the ADD_DEV reply is how a server knows `UBLK_U_*` opcodes work.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Always requested; go-ublk sends only ioctl-encoded opcodes."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_USER_COPY",
+   "value": "1ULL<<7 (0x80)",
+   "introduced": "v6.5",
+   "commit": "1172d5b8beca",
+   "summary": "Move data with pread()/pwrite() on /dev/ublkcN instead of kernel copies into a server buffer.",
+   "details": "The kernel never touches the server buffer; FETCH/COMMIT pass `addr = 0` (except ZONE_APPEND's LBA). The server copies with `pread`/`pwrite` (or io_uring READ/WRITE) at offset `UBLKSRV_IO_BUF_OFFSET + (q_id << UBLK_QID_OFF) + (tag << UBLK_TAG_OFF) + byte_offset` (+ `UBLKSRV_IO_INTEGRITY_FLAG` for the integrity buffer): read() copies a WRITE/ZONE_APPEND payload out, write() fills a READ/REPORT_ZONES. Allowed only while the server owns the request. Required by ZONED (or ZERO_COPY) and INTEGRITY. Rejected for unprivileged devices since v6.12. Details: semantics.md \u00a75.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_UNPRIVILEGED_DEV",
+    "UBLK_F_NEED_GET_DATA"
+   ],
+   "notes": "Per-request data is limited to 32 MiB by the 25-bit offset field.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.EnableUserCopy`; the engine pread/pwrites on the char fd."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_ZONED",
+   "value": "1ULL<<8 (0x100)",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Zoned block device (host-managed) support.",
+   "details": "Requires CONFIG_BLK_DEV_ZONED and USER_COPY or SUPPORT_ZERO_COPY (ADD_DEV EINVAL otherwise) and `UBLK_PARAM_TYPE_ZONED` params (with `chunk_sectors` = zone size, a power of two). Adds the zone operations, `UBLK_IO_OP_REPORT_ZONES` (server fills a `struct blk_zone` array), and zone append, whose written sector is returned in COMMIT's `zone_append_lba`.",
+   "requires": [
+    "UBLK_F_USER_COPY"
+   ],
+   "conflicts": [],
+   "notes": "UBLK_F_SUPPORT_ZERO_COPY also satisfies the requirement (v6.15+).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.EnableZoned` + `Zoned` (zone size, open/active limits, max append); Handler-only (zone ops, `Request.ReportZones`, `CompleteZoneAppend`); user copy is turned on automatically."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_USER_RECOVERY_FAIL_IO",
+   "value": "1ULL<<9 (0x200)",
+   "introduced": "v6.13",
+   "commit": "59eaa01ce7a6",
+   "summary": "With USER_RECOVERY: fail all I/O while no server is attached, instead of queueing it.",
+   "details": "After the server dies the device goes to `UBLK_S_DEV_FAIL_IO`: outstanding requests fail with EIO, new requests fail immediately with `BLK_STS_TARGET` (`ublk_prep_req`), until a new server completes recovery. Valid only with USER_RECOVERY and not with REISSUE.",
+   "requires": [
+    "UBLK_F_USER_RECOVERY"
+   ],
+   "conflicts": [
+    "UBLK_F_USER_RECOVERY_REISSUE"
+   ],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`RecoveryFailIO`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_UPDATE_SIZE",
+   "value": "1ULL<<10 (0x400)",
+   "introduced": "v6.16",
+   "commit": "98b995660bff",
+   "summary": "Advertises UBLK_U_CMD_UPDATE_SIZE (online resize).",
+   "details": "Purely informational: the driver does not check the bit when handling UPDATE_SIZE.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Requested when the kernel lists it; `Device.Resize`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_AUTO_BUF_REG",
+   "value": "1ULL<<11 (0x800)",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "Zero copy without explicit commands: register each request buffer automatically before dispatch.",
+   "details": "FETCH/COMMIT pass a `ublk_auto_buf_reg` in `sqe->addr` (index + flags, reserved fields 0, else EINVAL). Before completing the fetch CQE the kernel registers the request bvec at that index in the *same* io_uring's sparse buffer table and unregisters it at COMMIT (if COMMIT goes to the same ring; otherwise the server must UNREGISTER_IO_BUF). If registration fails: with `UBLK_AUTO_BUF_REG_FALLBACK` the CQE is delivered with `UBLK_IO_F_NEED_REG_BUF` set in the descriptor; without it the request is failed with EIO and the uring_cmd stays pending. Compatible with SUPPORT_ZERO_COPY; clears NEED_GET_DATA; rejected for unprivileged devices.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_UNPRIVILEGED_DEV",
+    "UBLK_F_NEED_GET_DATA"
+   ],
+   "notes": "Buffer table max 16K entries per io_uring.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Requested automatically with `EnableZeroCopy` when the kernel lists it; FETCH/COMMIT carry `{Index: tag, Flags: UBLK_AUTO_BUF_REG_FALLBACK}` and a request arriving with `UBLK_IO_F_NEED_REG_BUF` is registered manually."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_QUIESCE",
+   "value": "1ULL<<12 (0x1000)",
+   "introduced": "v6.16",
+   "commit": "b465ae7b2524",
+   "summary": "Enables UBLK_U_CMD_QUIESCE_DEV (drain for live server upgrade).",
+   "details": "Must be combined with USER_RECOVERY (ADD_DEV EINVAL otherwise). QUIESCE_DEV returns EOPNOTSUPP without it.",
+   "requires": [
+    "UBLK_F_USER_RECOVERY"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Requested with any RecoveryMode when the kernel lists it; used by `Device.Detach`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_PER_IO_DAEMON",
+   "value": "1ULL<<13 (0x2000)",
+   "introduced": "v6.16",
+   "commit": "ab03a61c6614",
+   "summary": "Each (queue, tag) may have its own daemon task instead of one task per queue.",
+   "details": "Capability flag: v6.16+ always report it (except with BATCH_IO, where the kernel clears it since there is no daemon at all). The task that issues a tag's FETCH_REQ owns that tag; other tags of the same queue can be served by other tasks, so a server can spread one hot queue over several threads. On older kernels all tags of a queue must be served by one task.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_BATCH_IO"
+   ],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.ThreadsPerQueue > 1` splits a queue's tags across engines (requires the flag)."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_BUF_REG_OFF_DAEMON",
+   "value": "1ULL<<14 (0x4000)",
+   "introduced": "v6.17",
+   "commit": "763ff02ce287",
+   "summary": "REGISTER/UNREGISTER_IO_BUF may be issued from any task.",
+   "details": "Capability flag always reported since v6.17. UNREGISTER_IO_BUF also ignores q_id/tag.",
+   "requires": [
+    "UBLK_F_SUPPORT_ZERO_COPY"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "go-ublk issues REGISTER/UNREGISTER_IO_BUF on the tag's own engine thread, so it never needs off-daemon registration."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_BATCH_IO",
+   "value": "1ULL<<15 (0x8000)",
+   "introduced": "v7.0",
+   "commit": "e2723e6ce602",
+   "summary": "Per-queue batch I/O commands (PREP/COMMIT/FETCH_IO_CMDS) replace per-tag FETCH/COMMIT.",
+   "details": "The device's char node uses `ublk_ch_batch_io_fops`; per-tag FETCH_REQ/COMMIT_AND_FETCH_REQ/NEED_GET_DATA are rejected; REGISTER/UNREGISTER_IO_BUF still work. No daemon task: any task can serve any tag. Clears PER_IO_DAEMON and NEED_GET_DATA. FETCH_IO_CMDS needs multishot uring_cmd (v6.18+ io_uring) and provided buffer rings. Protocol: semantics.md \u00a78.",
+   "requires": [],
+   "conflicts": [
+    "UBLK_F_NEED_GET_DATA",
+    "UBLK_F_PER_IO_DAEMON"
+   ],
+   "notes": "Several recovery fixes landed after 7.0 (e4c4bfec2bb8, 8a14be55bdc6 [7.2.7]).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "DeviceParams.BatchIO (copy and user-copy modes; not with zero copy)."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_INTEGRITY",
+   "value": "1ULL<<16 (0x10000)",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "Requests may carry an integrity/metadata (PI) buffer.",
+   "details": "Requires USER_COPY (ADD_DEV EINVAL) and a kernel with CONFIG_BLK_DEV_INTEGRITY (otherwise absent from UBLK_F_ALL). Configure with `UBLK_PARAM_TYPE_INTEGRITY`; requests with metadata have `UBLK_IO_F_INTEGRITY` set and the server reads/writes the metadata with pread/pwrite at the user-copy offset OR'ed with `UBLKSRV_IO_INTEGRITY_FLAG` (bit 62).",
+   "requires": [
+    "UBLK_F_USER_COPY"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.Integrity` (`IntegrityParams`: metadata size, interval, checksum, reftag, PI offset, tag size); user copy forced on; Backends implement `IntegrityBackend`, Handlers get `Request.Integrity`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_SAFE_STOP_DEV",
+   "value": "1ULL<<17 (0x20000)",
+   "introduced": "v7.0",
+   "commit": "93ada1b3da39",
+   "summary": "Advertises UBLK_U_CMD_TRY_STOP_DEV.",
+   "details": "Always reported since v7.0.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.SafeStop` -> TRY_STOP_DEV."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_NO_AUTO_PART_SCAN",
+   "value": "1ULL<<18 (0x40000)",
+   "introduced": "v7.0",
+   "commit": "8443e2087e70",
+   "summary": "Do not scan partitions when the device starts.",
+   "details": "START_DEV skips the async partition scan and clears `GD_SUPPRESS_PART_SCAN` (only for trusted daemons; v7.0-rc4 155a3bedccaf) so a later `BLKRRPART` works.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.NoPartitionScan`."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_SHMEM_ZC",
+   "value": "1ULL<<19 (0x80000)",
+   "introduced": "v7.1",
+   "commit": "08677040a911",
+   "summary": "Shared-memory zero copy: requests whose pages lie in a registered buffer arrive by reference.",
+   "details": "The server registers memfd/hugetlbfs memory it shares with clients via UBLK_U_CMD_REG_BUF. When a request's pages all fall contiguously inside one registered buffer (PFN maple-tree match, `ublk_try_buf_match`) the descriptor gets `UBLK_IO_F_SHMEM_ZC` and `addr = ublk_shmem_zc_addr(index, offset)`; no copy happens in either direction. Non-matching requests use the normal path. A READ_ONLY buffer only matches WRITEs. Only O_DIRECT client I/O can match.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "DeviceParams.SharedMemoryZeroCopy; requests in registered regions arrive with FlagSharedMemory and Data pointing into the region."
+   }
+  },
+  {
+   "kind": "feature",
+   "name": "UBLK_F_IO_DESC_SIZE",
+   "value": "1ULL<<20 (0x100000)",
+   "introduced": "v7.3-rc1",
+   "commit": "5c0958d80190",
+   "summary": "Server chooses the per-tag descriptor stride (`ublksrv_ctrl_dev_info.io_desc_size`).",
+   "details": "With the flag, ADD_DEV takes `io_desc_size` (24..256, multiple of 8) from dev_info (former `pad0`); otherwise it is set to 24. The mmapped descriptor array uses that stride: descriptor of tag *t* at `t * io_desc_size`, mmap length `round_up(depth * io_desc_size, PAGE_SIZE)`, and queue *q* at offset `q * round_up(4096 * io_desc_size, PAGE_SIZE)`. Bytes past the 24-byte `ublksrv_io_desc` are reserved for future kernel fields.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Unreleased as of 2026-10-04 (v7.3-rc).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "DeviceParams.IODescSize; the engine honors the stride and exposes the extra bytes as Request.DescriptorExtra."
+   }
+  },
+  {
+   "kind": "dev_state",
+   "name": "UBLK_S_DEV_DEAD",
+   "value": "0",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "No block device: just added, or stopped.",
+   "details": "Set at ADD_DEV (forced since e65848e4ce35) and by `ublk_detach_disk` on STOP_DEV / DEL_DEV / server exit without recovery. SET_PARAMS works only before the first START_DEV.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`KernelStateDead`."
+   }
+  },
+  {
+   "kind": "dev_state",
+   "name": "UBLK_S_DEV_LIVE",
+   "value": "1",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Started and served.",
+   "details": "Entered by START_DEV (before `add_disk`) and END_USER_RECOVERY.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`KernelStateLive`."
+   }
+  },
+  {
+   "kind": "dev_state",
+   "name": "UBLK_S_DEV_QUIESCED",
+   "value": "2",
+   "introduced": "v6.1",
+   "commit": "77a440e2cbb4",
+   "summary": "Server gone (or QUIESCE_DEV), requests held for a recovering server.",
+   "details": "Recovery mode without FAIL_IO. Since v6.15 the block queue is *not* quiesced; requests are requeued via the canceling flag until END_USER_RECOVERY kicks the requeue list (v6.1\u2013v6.14: `blk_mq_quiesce_queue`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`KernelStateQuiesced`; `Recover` accepts it."
+   }
+  },
+  {
+   "kind": "dev_state",
+   "name": "UBLK_S_DEV_FAIL_IO",
+   "value": "3",
+   "introduced": "v6.13",
+   "commit": "59eaa01ce7a6",
+   "summary": "Server gone, all I/O failing until a server recovers the device.",
+   "details": "Only with UBLK_F_USER_RECOVERY_FAIL_IO. New requests get `BLK_STS_TARGET` (-EREMOTEIO in userspace).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`KernelStateFailIO`."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_READ",
+   "value": "0",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Read `nr_sectors` at `start_sector` into the request.",
+   "details": "Result: bytes read (>0). A 0 result is turned into EIO. Copy mode: the kernel copies `result` bytes from the server buffer; a short result completes that many bytes and requeues the rest (all versions). With USER_COPY/zero copy a short positive result completed only that part before v7.3-rc1 but completes the *whole* request since a8a79eba22dc.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Dispatched to the Backend/Handler (`Request.Op`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_WRITE",
+   "value": "1",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Write `nr_sectors` at `start_sector` from the request.",
+   "details": "Result: bytes written. v6.0\u2013v7.2: a short result completes that many bytes and requeues the remainder (a 0 result requeues the whole request); v7.3-rc1+ (a8a79eba22dc): any non-negative result completes the entire request \u2014 return the full length or an errno.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Dispatched to the Backend/Handler (`Request.Op`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_FLUSH",
+   "value": "2",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Flush the volatile write cache.",
+   "details": "Sent only if the device advertises `UBLK_ATTR_VOLATILE_CACHE`. No data, `nr_sectors` 0. Result 0 or errno. Preflush/FUA on writes are turned into separate FLUSH requests by the block layer unless `UBLK_ATTR_FUA` is also set.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Dispatched to the Backend/Handler (`Request.Op`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_DISCARD",
+   "value": "3",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Deallocate a range.",
+   "details": "Sent only if DISCARD params set `max_discard_sectors`. No data; may exceed `max_io_buf_bytes` (range ops are not bounded by the data buffer). Single segment only.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Dispatched to the Backend/Handler (`Request.Op`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_WRITE_SAME",
+   "value": "4",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Defined but never generated.",
+   "details": "`ublk_setup_iod` has no mapping for it (REQ_OP_WRITE_SAME left the block layer in 5.18), so no kernel ever sends it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "Constant only; never sent by the kernel."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_WRITE_ZEROES",
+   "value": "5",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Zero a range (optionally without deallocating).",
+   "details": "Sent only if `max_write_zeroes_sectors` is set. No data. `UBLK_IO_F_NOUNMAP` means the range must stay allocated.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Dispatched to the Backend/Handler (`Request.Op`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_ZONE_OPEN",
+   "value": "10",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Explicitly open a zone.",
+   "details": "Zoned devices only.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_ZONE_CLOSE",
+   "value": "11",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Close a zone.",
+   "details": "Zoned devices only.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_ZONE_FINISH",
+   "value": "12",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Finish (fill) a zone.",
+   "details": "Zoned devices only.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_ZONE_APPEND",
+   "value": "13",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Append data to a zone; the server picks the sector.",
+   "details": "Data flows like WRITE (USER_COPY read()/zero copy). Return the sector actually written in COMMIT's `zone_append_lba` (`req->__sector = addr`); in batch mode in the element's `zone_lba` with `UBLK_BATCH_F_HAS_ZONE_LBA`.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_ZONE_RESET_ALL",
+   "value": "14",
+   "introduced": "v6.6",
+   "commit": "851e06297f20",
+   "summary": "Reset every zone.",
+   "details": "Zoned devices only.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_ZONE_RESET",
+   "value": "15",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Reset a zone's write pointer.",
+   "details": "Zoned devices only.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_op",
+   "name": "UBLK_IO_OP_REPORT_ZONES",
+   "value": "18",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Report zone descriptors.",
+   "details": "Carried as REQ_OP_DRV_IN: `start_sector` = first zone, `nr_zones` (union with nr_sectors) = max zones. The server fills a `struct blk_zone` array (linux/blkzoned.h) into the request buffer (write() in USER_COPY mode); a zero-length entry ends the report early. Result = bytes.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Delivered to a Handler on a zoned device (`EnableZoned`, `ublk.Op*`)."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_FAILFAST_DEV",
+   "value": "1U<<8 (0x100)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_FAILFAST_DEV: don't retry on device errors.",
+   "details": "Set from `req->cmd_flags` by `ublk_req_build_flags`. Advisory; a server may ignore it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Passed to Handlers on Request.Flags (ublk.Flag*); a hint a Backend may ignore."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_FAILFAST_TRANSPORT",
+   "value": "1U<<9 (0x200)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_FAILFAST_TRANSPORT: don't retry on transport errors.",
+   "details": "Set from `req->cmd_flags` by `ublk_req_build_flags`. Advisory; a server may ignore it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Passed to Handlers on Request.Flags (ublk.Flag*); a hint a Backend may ignore."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_FAILFAST_DRIVER",
+   "value": "1U<<10 (0x400)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_FAILFAST_DRIVER: don't retry on driver errors.",
+   "details": "Set from `req->cmd_flags` by `ublk_req_build_flags`. Advisory; a server may ignore it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Passed to Handlers on Request.Flags (ublk.Flag*); a hint a Backend may ignore."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_META",
+   "value": "1U<<11 (0x800)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_META: filesystem metadata I/O (priority hint).",
+   "details": "Set from `req->cmd_flags` by `ublk_req_build_flags`. Advisory; a server may ignore it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Passed to Handlers on Request.Flags (ublk.Flag*); a hint a Backend may ignore."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_FUA",
+   "value": "1U<<13 (0x2000)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_FUA: the write must be durable before completion.",
+   "details": "Only appears if the device advertises `UBLK_ATTR_VOLATILE_CACHE | UBLK_ATTR_FUA`; otherwise the block layer emulates FUA with a post-flush and the bit is never set. A server that advertises FUA must make such writes durable before completing them.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "FUA is advertised only when the server honors it (`FUABackend` or a Handler); `ublk.FlagFUA`."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_NOUNMAP",
+   "value": "1U<<15 (0x8000)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_NOUNMAP: WRITE_ZEROES must not deallocate.",
+   "details": "Set from `req->cmd_flags` by `ublk_req_build_flags`. Advisory; a server may ignore it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Passed to Handlers as FlagNoUnmap. WriteZeroesBackend does not see it; zero-copy write-zeroes always uses FALLOC_FL_ZERO_RANGE, which keeps the allocation."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_SWAP",
+   "value": "1U<<16 (0x10000)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "REQ_SWAP: swap I/O (avoid allocating memory).",
+   "details": "Set from `req->cmd_flags` by `ublk_req_build_flags`. Advisory; a server may ignore it.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Passed to Handlers on Request.Flags (ublk.Flag*); a hint a Backend may ignore."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_NEED_REG_BUF",
+   "value": "1U<<17 (0x20000)",
+   "introduced": "v6.16",
+   "commit": "53f427e7944b",
+   "summary": "AUTO_BUF_REG fallback: automatic registration failed, register manually.",
+   "details": "Set only when the server passed `UBLK_AUTO_BUF_REG_FALLBACK` (or `UBLK_BATCH_F_AUTO_BUF_REG_FALLBACK`) and `io_buffer_register_request` failed; the CQE is delivered anyway and the server must register the buffer itself or use user copy.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Zero-copy engine registers the buffer manually when it sees it (`ublk.FlagNeedRegBuf`)."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_INTEGRITY",
+   "value": "1U<<18 (0x40000)",
+   "introduced": "v7.0",
+   "commit": "f82f0a16a827",
+   "summary": "Request has an integrity (metadata) buffer.",
+   "details": "Set when `blk_integrity_rq(req)`. Read/write the metadata through user copy with `UBLKSRV_IO_INTEGRITY_FLAG`. Bit 12 held an unrelated pre-release `UBLK_IO_F_INTEGRITY` removed before v6.0 (d276a22314c2).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Engine copies the metadata into/out of `Request.Integrity` (`ublk.FlagIntegrity`)."
+   }
+  },
+  {
+   "kind": "io_flag",
+   "name": "UBLK_IO_F_SHMEM_ZC",
+   "value": "1U<<19 (0x80000)",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "`addr` encodes a shared-memory buffer index + offset (UBLK_F_SHMEM_ZC).",
+   "details": "Set by `ublk_init_iod` when `ublk_try_buf_match` succeeds; decode with `ublk_shmem_zc_index/offset`. No data copy happens for such requests.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "ublk.FlagSharedMemory; the engine resolves the index/offset address into the registered region."
+   }
+  },
+  {
+   "kind": "attr",
+   "name": "UBLK_ATTR_READ_ONLY",
+   "value": "1<<0",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Make /dev/ublkbN read-only (`set_disk_ro`).",
+   "details": "Bit of `ublk_param_basic.attrs`, applied at START_DEV (`ublk_ctrl_start_dev`, `ublk_dev_param_basic_apply`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.ReadOnly`."
+   }
+  },
+  {
+   "kind": "attr",
+   "name": "UBLK_ATTR_ROTATIONAL",
+   "value": "1<<1",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Report a rotational device (`BLK_FEAT_ROTATIONAL`; before 6.11 `QUEUE_FLAG_NONROT` cleared).",
+   "details": "Bit of `ublk_param_basic.attrs`, applied at START_DEV (`ublk_ctrl_start_dev`, `ublk_dev_param_basic_apply`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.Rotational`."
+   }
+  },
+  {
+   "kind": "attr",
+   "name": "UBLK_ATTR_VOLATILE_CACHE",
+   "value": "1<<2",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Device has a volatile write cache: the kernel sends FLUSH.",
+   "details": "Bit of `ublk_param_basic.attrs`, applied at START_DEV (`ublk_ctrl_start_dev`, `ublk_dev_param_basic_apply`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.VolatileCache` (default true)."
+   }
+  },
+  {
+   "kind": "attr",
+   "name": "UBLK_ATTR_FUA",
+   "value": "1<<3",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Device supports FUA writes (only honored together with VOLATILE_CACHE).",
+   "details": "Bit of `ublk_param_basic.attrs`, applied at START_DEV (`ublk_ctrl_start_dev`, `ublk_dev_param_basic_apply`).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Advertised only when the server honors `UBLK_IO_F_FUA`."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_BASIC",
+   "value": "1<<0",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "struct ublk_param_basic: block sizes, max_sectors, capacity (mandatory).",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Always sent."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_DISCARD",
+   "value": "1<<1",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "struct ublk_param_discard: discard and write-zeroes limits.",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Sent when the backend implements Discard/WriteZeroes."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_DEVT",
+   "value": "1<<2",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "struct ublk_param_devt: char/block device numbers (read-only, GET_PARAMS only).",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Decoded from GET_PARAMS."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_ZONED",
+   "value": "1<<3",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "struct ublk_param_zoned: zone limits (needs UBLK_F_ZONED).",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [
+    "UBLK_F_ZONED"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Sent with `EnableZoned`."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_DMA_ALIGN",
+   "value": "1<<4",
+   "introduced": "v6.15",
+   "commit": "e84025d2a9cb",
+   "summary": "struct ublk_param_dma_align: DMA alignment mask.",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.DMAAlignment`."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_SEGMENT",
+   "value": "1<<5",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "struct ublk_param_segment: segment boundary/size/count limits.",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DeviceParams.SegmentBoundaryMask/MaxSegmentSize/MaxSegments`."
+   }
+  },
+  {
+   "kind": "param_type",
+   "name": "UBLK_PARAM_TYPE_INTEGRITY",
+   "value": "1<<6",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "struct ublk_param_integrity: metadata/PI format (needs UBLK_F_INTEGRITY).",
+   "details": "Bit in `ublk_params.types`. SET_PARAMS silently drops types the kernel does not know (`types &= UBLK_PARAM_TYPE_ALL`). See the struct entry for validation.",
+   "requires": [
+    "UBLK_F_INTEGRITY"
+   ],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Sent with `DeviceParams.Integrity`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublksrv_ctrl_cmd",
+   "value": "sizeof=32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Control command payload, placed in the SQE128 command area of a `/dev/ublk-control` URING_CMD.",
+   "details": "Read with READ_ONCE at offset 48 of a 128-byte SQE (`io_uring_sqe128_cmd`); the control ring must be created with `IORING_SETUP_SQE128` (`EINVAL` otherwise, checked first since v7.0-rc1 da7e4b75e50c).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblksrvCtrlCmd` (size-checked)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.dev_id",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Target device id (`U32_MAX` for ADD_DEV auto-assign; ignored by GET_FEATURES).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblksrvCtrlCmd.DevID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.queue_id",
+   "value": "offset=4 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Must be 0xffff for ADD_DEV; otherwise unused (queue commands use data[0]).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`QueueID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.len",
+   "value": "offset=6 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Length of the buffer at `addr` (including the path prefix for unprivileged devices).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Len`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.addr",
+   "value": "offset=8 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Userspace buffer (input or output, command specific).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Addr` (off-heap buffers)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.data",
+   "value": "offset=16 size=8 __u64[1]",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Inline argument (pid, queue id, size, timeout, buffer index).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Was `__u64 data[2]` (16 bytes) in v6.0\u2013v6.2; split into data[1] + dev_path_len/pad/reserved in v6.3 (4093cb5a0634). Struct size unchanged.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Data`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.dev_path_len",
+   "value": "offset=24 size=2 __u16",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Length of the NUL-terminated `/dev/ublkcN` path prefixed at `addr` (unprivileged devices, GET_DEV_INFO2).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DevPathLen`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.pad",
+   "value": "offset=26 size=2 __u16",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Padding.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Pad`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_cmd.reserved",
+   "value": "offset=28 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Reserved (not read by the kernel).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublksrv_ctrl_dev_info",
+   "value": "sizeof=64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Device description exchanged by ADD_DEV and returned by GET_DEV_INFO(2).",
+   "details": "64 bytes in every version (fields were renamed, never resized).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblksrvCtrlDevInfo`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.nr_hw_queues",
+   "value": "offset=0 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Queues requested (1..4096); clamped to nr_cpu_ids.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`NrHwQueues`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.queue_depth",
+   "value": "offset=2 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Tags per queue (1..4096).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`QueueDepth`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.state",
+   "value": "offset=4 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "UBLK_S_DEV_* (kernel-owned; reset to DEAD at ADD_DEV since e65848e4ce35).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`State`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.io_desc_size",
+   "value": "offset=6 size=2 __u16",
+   "introduced": "v7.3-rc1",
+   "commit": "5c0958d80190",
+   "summary": "Descriptor stride with UBLK_F_IO_DESC_SIZE (24..256); was `pad0` before v7.3.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Read back and used as the descriptor stride; set from DeviceParams.IODescSize."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.max_io_buf_bytes",
+   "value": "offset=8 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Largest data request; rounded down to PAGE_SIZE; bounds max_sectors.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxIOBufBytes`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.dev_id",
+   "value": "offset=12 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Assigned device id.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DevID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.ublksrv_pid",
+   "value": "offset=16 size=4 __s32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Server pid (set by START_DEV/END_USER_RECOVERY; -1 when none; namespace-translated on read since v6.19-rc7).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblksrvPID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.pad1",
+   "value": "offset=20 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Padding.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Pad1`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.flags",
+   "value": "offset=24 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "UBLK_F_* requested / negotiated.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Flags`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.ublksrv_flags",
+   "value": "offset=32 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Opaque to the kernel; stored at ADD_DEV and returned verbatim.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblksrvFlags` (public `DeviceParams.Tag`, used by `FindDevices`)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.owner_uid",
+   "value": "offset=40 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Creator's uid (kernel-set).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Was the low half of `__u64 reserved0` in v6.0\u2013v6.2.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`OwnerUID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.owner_gid",
+   "value": "offset=44 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "4093cb5a0634",
+   "summary": "Creator's gid (kernel-set).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`OwnerGID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.reserved1",
+   "value": "offset=48 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Reserved.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved1`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_ctrl_dev_info.reserved2",
+   "value": "offset=56 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Reserved.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved2`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublksrv_io_desc",
+   "value": "sizeof=24",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Per-tag request descriptor in the read-only mmapped command buffer of `/dev/ublkcN`.",
+   "details": "Queue *q*'s array is mapped at offset `q * round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, PAGE_SIZE)` with length exactly `round_up(queue_depth * io_desc_size, PAGE_SIZE)` (`ublk_ch_mmap`; `EINVAL` otherwise, `EPERM` for a writable mapping, and since v7.3-rc2 VM_MAYWRITE is cleared so mprotect cannot make it writable). Before v6.13 (d369735e02ef, 6.1.120/6.6.64/6.12.2) the queue stride was not page-rounded, which broke multi-queue on 64K-page kernels. Valid to read after the tag's CQE returns OK; written by the kernel on the daemon task (v7.3).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblksrvIODesc`; read with atomic loads."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_desc.op_flags",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Bits 0-7 UBLK_IO_OP_*, bits 8-31 UBLK_IO_F_*.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`OpFlags`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_desc.nr_sectors",
+   "value": "offset=4 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Length in 512-byte sectors (union `nr_zones` for REPORT_ZONES since v6.6).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`NrSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_desc.start_sector",
+   "value": "offset=8 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Offset in 512-byte sectors.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`StartSector`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_desc.addr",
+   "value": "offset=16 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Server buffer address for this request (copy mode), or the SHMEM_ZC encoding.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Addr`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublksrv_io_cmd",
+   "value": "sizeof=16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Per-tag I/O command payload (FETCH/COMMIT/NEED_GET_DATA/REGISTER/UNREGISTER).",
+   "details": "Fits a normal 64-byte SQE command area (SQE128 not required since v6.3).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblksrvIOCmd`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_cmd.q_id",
+   "value": "offset=0 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Queue id.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`QID`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_cmd.tag",
+   "value": "offset=2 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Tag (request index in the queue).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Tag`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_cmd.result",
+   "value": "offset=4 size=4 __s32",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "COMMIT only: bytes or negative errno.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Result`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublksrv_io_cmd.addr",
+   "value": "offset=8 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Buffer address (copy mode), buffer-table index (REGISTER/UNREGISTER), or zone_append_lba (union since v6.6).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Addr` / `SetZoneAppendLBA`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_auto_buf_reg",
+   "value": "sizeof=8",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "AUTO_BUF_REG registration request, packed into `sqe->addr` of FETCH/COMMIT.",
+   "details": "Packing: bits 0-15 index, 16-23 flags, 24-31 reserved0, 32-63 reserved1 (`ublk_auto_buf_reg_to_sqe_addr`). Reserved fields must be zero and flags within `UBLK_AUTO_BUF_REG_F_MASK` (`EINVAL`, validated before the uring_cmd is taken since v7.3-rc1 ca5a01eee34c).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Used by the zero-copy engine (`SQEAddr`)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_auto_buf_reg.index",
+   "value": "offset=0 size=2 __u16",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "Buffer-table slot for the request buffer.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblkAutoBufReg.Index`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_auto_buf_reg.flags",
+   "value": "offset=2 size=1 __u8",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "UBLK_AUTO_BUF_REG_FALLBACK.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Flags`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_auto_buf_reg.reserved0",
+   "value": "offset=3 size=1 __u8",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "Must be 0.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved0`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_auto_buf_reg.reserved1",
+   "value": "offset=4 size=4 __u32",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "Must be 0 (future: external io_uring fd).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved1`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_elem_header",
+   "value": "sizeof=8",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Mandatory 8-byte head of each BATCH_IO element.",
+   "details": "Element = header [+ `__u64 buf_addr` if HAS_BUF_ADDR] [+ `__u64 zone_lba` if HAS_ZONE_LBA].",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled only. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_elem_header.tag",
+   "value": "offset=0 size=2 __u16",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "I/O tag (< queue_depth).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblkElemHeader.Tag`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_elem_header.buf_index",
+   "value": "offset=2 size=2 __u16",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "AUTO_BUF_REG buffer index.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`BufIndex`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_elem_header.result",
+   "value": "offset=4 size=4 __s32",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Completion result (COMMIT_IO_CMDS only).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Result`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_batch_io",
+   "value": "sizeof=16",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "BATCH_IO command header in the SQE command area; elements live at `sqe->addr`.",
+   "details": "`nr_elem * elem_bytes` bytes of elements; see UBLK_U_IO_PREP_IO_CMDS.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled only. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_batch_io.q_id",
+   "value": "offset=0 size=2 __u16",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Queue id.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblkBatchIO.QID`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_batch_io.flags",
+   "value": "offset=2 size=2 __u16",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "UBLK_BATCH_F_*.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Flags`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_batch_io.nr_elem",
+   "value": "offset=4 size=2 __u16",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Element count (<= queue_depth).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`NrElem`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_batch_io.elem_bytes",
+   "value": "offset=6 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "8/16/24 (2 for FETCH_IO_CMDS).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ElemBytes`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_batch_io.reserved",
+   "value": "offset=7 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Reserved.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_batch_io.reserved2",
+   "value": "offset=8 size=8 __u64",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Reserved.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved2`. Used by batch I/O."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_basic",
+   "value": "sizeof=32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "UBLK_PARAM_TYPE_BASIC limits.",
+   "details": "All sector counts are 512-byte sectors regardless of logical block size.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblkParamBasic`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.attrs",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "UBLK_ATTR_*.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Attrs`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.logical_bs_shift",
+   "value": "offset=4 size=1 __u8",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "log2 logical block size, 9..PAGE_SHIFT.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`LogicalBSShift`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.physical_bs_shift",
+   "value": "offset=5 size=1 __u8",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "log2 physical block size, >= logical, <= 28 (v7.1+).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`PhysicalBSShift` (`DeviceParams.PhysicalBlockSize`)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.io_opt_shift",
+   "value": "offset=6 size=1 __u8",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "log2 optimal I/O size, <= 28 (v7.1+).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`IOOptShift` (`IOOptSize`)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.io_min_shift",
+   "value": "offset=7 size=1 __u8",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "log2 minimum I/O size, <= 28 (v7.1+).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`IOMinShift` (`IOMinSize`)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.max_sectors",
+   "value": "offset=8 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Max request size in sectors; <= max_io_buf_bytes>>9 and >= PAGE_SIZE>>9 (v7.1+).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.chunk_sectors",
+   "value": "offset=12 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Chunk / zone size in sectors (power of two when zoned).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ChunkSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.dev_sectors",
+   "value": "offset=16 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Capacity in sectors.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DevSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_basic.virt_boundary_mask",
+   "value": "offset=24 size=8 __u64",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Virtual boundary (SG gap) mask.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`VirtBoundaryMask`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_discard",
+   "value": "sizeof=20",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "UBLK_PARAM_TYPE_DISCARD limits.",
+   "details": "Validated: `max_discard_segments == 1` when max_discard_sectors != 0; `discard_granularity != 0`.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblkParamDiscard`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_discard.discard_alignment",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Discard alignment offset (bytes).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DiscardAlignment`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_discard.discard_granularity",
+   "value": "offset=4 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Granularity (bytes), must be non-zero.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DiscardGranularity`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_discard.max_discard_sectors",
+   "value": "offset=8 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Max discard size; 0 disables DISCARD.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxDiscardSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_discard.max_write_zeroes_sectors",
+   "value": "offset=12 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Max write-zeroes size; 0 disables WRITE_ZEROES.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxWriteZeroesSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_discard.max_discard_segments",
+   "value": "offset=16 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Must be 1.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxDiscardSegments`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_discard.reserved0",
+   "value": "offset=18 size=2 __u16",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Reserved.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved0`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_devt",
+   "value": "sizeof=16",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "UBLK_PARAM_TYPE_DEVT: device numbers, filled by GET_PARAMS (setting it is EINVAL).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblkParamDevt`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_devt.char_major",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "Major of /dev/ublkcN.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`CharMajor`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_devt.char_minor",
+   "value": "offset=4 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "Minor of /dev/ublkcN (= dev id).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`CharMinor`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_devt.disk_major",
+   "value": "offset=8 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "Major of /dev/ublkbN (0 before START_DEV).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DiskMajor`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_devt.disk_minor",
+   "value": "offset=12 size=4 __u32",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "Minor of /dev/ublkbN (0 before START_DEV).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DiskMinor`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_zoned",
+   "value": "sizeof=32",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "UBLK_PARAM_TYPE_ZONED limits.",
+   "details": "Validated (`ublk_dev_param_zoned_validate`): device must be ZONED; `max_zone_append_sectors != 0`; open/active <= nr_zones (= dev_sectors / chunk_sectors).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Set from `ZonedParams`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_zoned.max_open_zones",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Max open zones (0 = no limit).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxOpenZones`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_zoned.max_active_zones",
+   "value": "offset=4 size=4 __u32",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Max active zones (0 = no limit).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxActiveZones`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_zoned.max_zone_append_sectors",
+   "value": "offset=8 size=4 __u32",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Max zone-append size; must be non-zero.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxZoneAppendSectors`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_zoned.reserved",
+   "value": "offset=12 size=20 __u8[20]",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "Reserved.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_dma_align",
+   "value": "sizeof=8",
+   "introduced": "v6.15",
+   "commit": "e84025d2a9cb",
+   "summary": "UBLK_PARAM_TYPE_DMA_ALIGN.",
+   "details": "`alignment` is a mask: alignment+1 must be a power of two and alignment < PAGE_SIZE. Default without it: 3 (since v6.10, 928b607d1a09).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblkParamDMAAlign`; `DeviceParams.DMAAlignment`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_dma_align.alignment",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.15",
+   "commit": "e84025d2a9cb",
+   "summary": "DMA alignment mask (e.g. 4095 for page alignment).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblkParamDMAAlign.Alignment`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_dma_align.pad",
+   "value": "offset=4 size=4 __u8[4]",
+   "introduced": "v6.15",
+   "commit": "e84025d2a9cb",
+   "summary": "Padding.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Pad`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_segment",
+   "value": "sizeof=16",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "UBLK_PARAM_TYPE_SEGMENT.",
+   "details": "seg_boundary_mask+1 power of two and >= 4096; max_segment_size >= 4096; a zero max_segments is undefined (header comment). Defaults without it: USHRT_MAX segments of UINT_MAX bytes (since v6.9-rc7, eaf4a9b19b99).",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblkParamSegment`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_segment.seg_boundary_mask",
+   "value": "offset=0 size=8 __u64",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "Segment boundary mask.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`SegBoundaryMask`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_segment.max_segment_size",
+   "value": "offset=8 size=4 __u32",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "Max segment size (>= 4096).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxSegmentSize`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_segment.max_segments",
+   "value": "offset=12 size=2 __u16",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "Max segments per request.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxSegments`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_segment.pad",
+   "value": "offset=14 size=2 __u8[2]",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "Padding.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Pad`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_param_integrity",
+   "value": "sizeof=16",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "UBLK_PARAM_TYPE_INTEGRITY: metadata / protection-information format.",
+   "details": "Validated: UBLK_F_INTEGRITY set; flags only LBMD_PI_CAP_INTEGRITY|LBMD_PI_CAP_REFTAG; csum_type one of LBMD_PI_CSUM_NONE/IP/CRC16_T10DIF/CRC64_NVME (tuple 0/8/8/16 bytes); metadata_size != 0; REFTAG needs a checksum; pi_offset + tuple <= metadata_size; 9 <= interval_exp <= logical_bs_shift. Applied as `queue_limits.integrity` at START_DEV.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Set from `IntegrityParams`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.flags",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "LBMD_PI_CAP_* (fs.h, v6.17+).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Flags`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.max_integrity_segments",
+   "value": "offset=4 size=2 __u16",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "0 = no limit (USHRT_MAX).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MaxIntegritySegments`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.interval_exp",
+   "value": "offset=6 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "log2 protection interval.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`IntervalExp`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.metadata_size",
+   "value": "offset=7 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "Metadata bytes per interval (non-zero).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`MetadataSize`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.pi_offset",
+   "value": "offset=8 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "Offset of the PI tuple in the metadata.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`PIOffset`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.csum_type",
+   "value": "offset=9 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "LBMD_PI_CSUM_*.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`CsumType`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.tag_size",
+   "value": "offset=10 size=1 __u8",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "Application tag size.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`TagSize`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_param_integrity.pad",
+   "value": "offset=11 size=5 __u8[5]",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "Padding.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Pad`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_params",
+   "value": "sizeof=152",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "SET_PARAMS/GET_PARAMS container: `len`, `types`, then every parameter block at a fixed offset.",
+   "details": "sizeof by version (8-byte aligned): 64 (v6.0\u2013v6.2: basic, discard), 80 (v6.3: +devt), 112 (v6.6: +zoned), 136 (v6.15: +dma, seg; seg is 8-byte aligned so 4 bytes of padding precede it), 152 (v7.0: +integrity). The kernel copies `min(len, sizeof)` both ways, so mismatched userspace/kernel sizes interoperate.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UblkParams` (marshal handles shorter kernel replies)."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.len",
+   "value": "offset=0 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "Byte length of the struct as sent/received; set by the caller for both SET and GET.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Len`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.types",
+   "value": "offset=4 size=4 __u32",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "UBLK_PARAM_TYPE_* present.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Types`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.basic",
+   "value": "offset=8 size=32 struct ublk_param_basic",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "BASIC block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Basic`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.discard",
+   "value": "offset=40 size=20 struct ublk_param_discard",
+   "introduced": "v6.0",
+   "commit": "0aa73170eba5",
+   "summary": "DISCARD block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Discard`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.devt",
+   "value": "offset=60 size=16 struct ublk_param_devt",
+   "introduced": "v6.3",
+   "commit": "abb864d38085",
+   "summary": "DEVT block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Devt`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.zoned",
+   "value": "offset=76 size=32 struct ublk_param_zoned",
+   "introduced": "v6.6",
+   "commit": "29802d7ca33b",
+   "summary": "ZONED block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Zoned`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.dma",
+   "value": "offset=108 size=8 struct ublk_param_dma_align",
+   "introduced": "v6.15",
+   "commit": "e84025d2a9cb",
+   "summary": "DMA_ALIGN block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`DMA`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.seg",
+   "value": "offset=120 size=16 struct ublk_param_segment",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "SEGMENT block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Seg`."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_params.integrity",
+   "value": "offset=136 size=16 struct ublk_param_integrity",
+   "introduced": "v7.0",
+   "commit": "98bf2256855e",
+   "summary": "INTEGRITY block.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Integrity`."
+   }
+  },
+  {
+   "kind": "struct",
+   "name": "struct ublk_shmem_buf_reg",
+   "value": "sizeof=24",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "REG_BUF argument (pointed to by ctrl_cmd.addr).",
+   "details": "`len` was widened from __u32 to __u64 within the v7.1 merge window (23b3b6f0b584), so every release has the 24-byte form.",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled; used by the internal RegBuf. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_shmem_buf_reg.addr",
+   "value": "offset=0 size=8 __u64",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Page-aligned VA of the shared mapping.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblkShmemBufReg.Addr`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_shmem_buf_reg.len",
+   "value": "offset=8 size=8 __u64",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Page-aligned length, 1 byte..4 GiB.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Len`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_shmem_buf_reg.flags",
+   "value": "offset=16 size=4 __u32",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "UBLK_SHMEM_BUF_READ_ONLY.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Flags`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "struct_field",
+   "name": "ublk_shmem_buf_reg.reserved",
+   "value": "offset=20 size=4 __u32",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Must be 0.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`Reserved`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_FEATURES_LEN",
+   "value": "8",
+   "introduced": "v6.5",
+   "commit": "b5bbc52fd012",
+   "summary": "Required `len` for GET_FEATURES.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UBLK_FEATURES_LEN`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_RES_OK",
+   "value": "0",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Fetch CQE result: a request is ready in the descriptor.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Engine dispatch."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_RES_NEED_GET_DATA",
+   "value": "1",
+   "introduced": "v6.0",
+   "commit": "4e18403d9485",
+   "summary": "Fetch CQE result: WRITE needs UBLK_U_IO_NEED_GET_DATA first.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Engine issues NEED_GET_DATA."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_RES_ABORT",
+   "value": "-ENODEV (-19)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Fetch CQE result: tag cancelled (stop, quiesce, exit); do not re-fetch.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "The header: \"only ABORT means that no re-fetch\". Since v7.1-rc3 (845db023a8ae) a command issued from fallback task work can also complete with -ECANCELED.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Engine retires the tag (also on -ECANCELED)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLKSRV_CMD_BUF_OFFSET",
+   "value": "0",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "mmap offset of queue 0's descriptor array.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.CmdBufMmapOffset`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLKSRV_IO_BUF_OFFSET",
+   "value": "0x80000000",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Base file offset for USER_COPY pread/pwrite.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Defined in v6.0 but unused until USER_COPY (v6.5).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`uapi.UserCopyOffset`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_MAX_QUEUE_DEPTH",
+   "value": "4096",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Max tags per queue; also fixes the descriptor mmap stride.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Validated."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_BUF_OFF",
+   "value": "0",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Bit offset of the byte offset in a user-copy position.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_BUF_BITS",
+   "value": "25",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Byte-offset width: 32 MiB per request in user copy.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_BUF_BITS_MASK",
+   "value": "(1ULL<<25)-1",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Byte-offset mask.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_TAG_OFF",
+   "value": "25",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Bit offset of the tag in a user-copy position.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_TAG_BITS",
+   "value": "16",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Tag width.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_TAG_BITS_MASK",
+   "value": "0xffff",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Tag mask.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_QID_OFF",
+   "value": "41",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Bit offset of the queue id in a user-copy position.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_QID_BITS",
+   "value": "12",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Queue-id width.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_QID_BITS_MASK",
+   "value": "0xfff",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Queue-id mask.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_MAX_NR_QUEUES",
+   "value": "4096",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Max hardware queues (ADD_DEV enforces it since v6.16).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Validated."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLKSRV_IO_BUF_TOTAL_BITS",
+   "value": "53",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Total user-copy position bits.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLKSRV_IO_BUF_TOTAL_SIZE",
+   "value": "1ULL<<53",
+   "introduced": "v6.5",
+   "commit": "62fe99cef94a",
+   "summary": "Size of the user-copy position space.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_INTEGRITY_FLAG_OFF",
+   "value": "62",
+   "introduced": "v7.0",
+   "commit": "be82a89066d5",
+   "summary": "Bit selecting the integrity buffer in a user-copy position.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Used by the integrity user-copy path."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLKSRV_IO_INTEGRITY_FLAG",
+   "value": "1ULL<<62",
+   "introduced": "v7.0",
+   "commit": "be82a89066d5",
+   "summary": "OR into the pread/pwrite offset to copy the integrity buffer.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "EINVAL without UBLK_F_INTEGRITY.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Integrity pread/pwrite position (`uapi.UserCopyIntegrityOffset`)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_SHMEM_BUF_READ_ONLY",
+   "value": "1U<<0",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "REG_BUF flag: pin without FOLL_WRITE (works with write-sealed memfds); buffer matches only WRITEs.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_AUTO_BUF_REG_FALLBACK",
+   "value": "1<<0",
+   "introduced": "v6.16",
+   "commit": "53f427e7944b",
+   "summary": "auto_buf_reg flag: on registration failure deliver the request with UBLK_IO_F_NEED_REG_BUF instead of failing it.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Always set by the zero-copy engine."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_AUTO_BUF_REG_F_MASK",
+   "value": "UBLK_AUTO_BUF_REG_FALLBACK",
+   "introduced": "v6.16",
+   "commit": "53f427e7944b",
+   "summary": "All valid auto_buf_reg flags.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Always set by the zero-copy engine."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_BATCH_F_HAS_ZONE_LBA",
+   "value": "1<<0",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Batch elements carry a __u64 zone_lba (needs ZONED).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Set for batch I/O on zoned devices."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_BATCH_F_HAS_BUF_ADDR",
+   "value": "1<<1",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Batch elements carry a __u64 buf_addr (copy mode only).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Set for batch I/O in copy mode."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_BATCH_F_AUTO_BUF_REG_FALLBACK",
+   "value": "1<<2",
+   "introduced": "v7.0",
+   "commit": "e86f89ab24f5",
+   "summary": "Batch equivalent of UBLK_AUTO_BUF_REG_FALLBACK (excludes HAS_BUF_ADDR).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Set for batch I/O with zero copy: elements carry buf_index = tag, with the NEED_REG_BUF fallback handled by a manual REGISTER_IO_BUF."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_MIN_SEGMENT_SIZE",
+   "value": "4096",
+   "introduced": "v6.15",
+   "commit": "ebf695f12936",
+   "summary": "Minimum seg_boundary_mask+1 and max_segment_size.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_SHMEM_ZC_OFF_MASK",
+   "value": "0xffffffff",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "SHMEM_ZC addr bits 0-31: byte offset.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_SHMEM_ZC_IDX_OFF",
+   "value": "32",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "SHMEM_ZC addr: index shift.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_SHMEM_ZC_IDX_MASK",
+   "value": "0xffff",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "SHMEM_ZC addr bits 32-47: buffer index (48-63 reserved).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Modeled. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublksrv_get_op()",
+   "value": "static inline",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Header helper: `op_flags & 0xff`.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblksrvIODesc.GetOp`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublksrv_get_flags()",
+   "value": "static inline",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Header helper: `op_flags >> 8` (note: shifted, so compare with UBLK_IO_F_* >> 8).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`GetFlags`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublk_sqe_addr_to_auto_buf_reg()",
+   "value": "static inline",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "Header helper: unpack sqe->addr into ublk_auto_buf_reg.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`AutoBufRegFromSQEAddr`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublk_auto_buf_reg_to_sqe_addr()",
+   "value": "static inline",
+   "introduced": "v6.16",
+   "commit": "99c1e4eb6a3f",
+   "summary": "Header helper: pack ublk_auto_buf_reg into sqe->addr.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`UblkAutoBufReg.SQEAddr`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublk_shmem_zc_addr()",
+   "value": "static inline",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Header helper: `(index << 32) | offset`.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ShmemZCAddr`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublk_shmem_zc_index()",
+   "value": "static inline",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Header helper: buffer index from a SHMEM_ZC addr.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ShmemZCIndex`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublk_shmem_zc_offset()",
+   "value": "static inline",
+   "introduced": "v7.1",
+   "commit": "2fb0ded237bb",
+   "summary": "Header helper: byte offset from a SHMEM_ZC addr.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "`ShmemZCOffset`. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "LBMD_PI_CAP_INTEGRITY",
+   "value": "1<<0",
+   "introduced": "v6.17",
+   "commit": "9eb22f7fedfc",
+   "summary": "linux/fs.h: device verifies/generates PI (maps to BLK_INTEGRITY_DEVICE_CAPABLE).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Defined in include/uapi/linux/fs.h, not ublk_cmd.h; referenced by ublk_param_integrity.flags (v7.0+).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Mapped from `IntegrityParams`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "LBMD_PI_CAP_REFTAG",
+   "value": "1<<1",
+   "introduced": "v6.17",
+   "commit": "9eb22f7fedfc",
+   "summary": "linux/fs.h: PI includes a reference tag (BLK_INTEGRITY_REF_TAG); requires a checksum type.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "fs.h constant used by ublk_param_integrity.flags.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Mapped from `IntegrityParams` (`IntegrityCsum*`, `RefTag`)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "LBMD_PI_CSUM_NONE",
+   "value": "0",
+   "introduced": "v6.17",
+   "commit": "9eb22f7fedfc",
+   "summary": "linux/fs.h: no PI checksum (metadata only; tuple size 0).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "fs.h constant used by ublk_param_integrity.csum_type.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Mapped from `IntegrityParams` (`IntegrityCsum*`, `RefTag`)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "LBMD_PI_CSUM_IP",
+   "value": "1",
+   "introduced": "v6.17",
+   "commit": "9eb22f7fedfc",
+   "summary": "linux/fs.h: IP checksum guard (8-byte tuple).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "fs.h constant.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Mapped from `IntegrityParams` (`IntegrityCsum*`, `RefTag`)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "LBMD_PI_CSUM_CRC16_T10DIF",
+   "value": "2",
+   "introduced": "v6.17",
+   "commit": "9eb22f7fedfc",
+   "summary": "linux/fs.h: T10-DIF CRC16 guard (8-byte tuple).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "fs.h constant.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Mapped from `IntegrityParams` (`IntegrityCsum*`, `RefTag`)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "LBMD_PI_CSUM_CRC64_NVME",
+   "value": "4",
+   "introduced": "v6.17",
+   "commit": "9eb22f7fedfc",
+   "summary": "linux/fs.h: NVMe CRC64 guard (16-byte tuple).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "fs.h constant.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Mapped from `IntegrityParams` (`IntegrityCsum*`, `RefTag`)."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "CONFIG_BLK_DEV_UBLK",
+   "value": "tristate (m/y/n)",
+   "introduced": "v6.0",
+   "commit": "71f28f3136af",
+   "summary": "Kconfig: builds ublk_drv (\"Userspace block driver (Experimental)\", selects IO_URING).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not a header element. Module name ublk_drv; no devname alias, so `modprobe ublk_drv` is needed before /dev/ublk-control exists. Distro status: distro-kernels.md.",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "Runtime requirement; `Probe` explains a missing module."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "CONFIG_BLKDEV_UBLK_LEGACY_OPCODES",
+   "value": "bool, default y",
+   "introduced": "v6.4",
+   "commit": "2d786e66c966",
+   "summary": "Kconfig: keep accepting the raw (pre-6.4) opcodes.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not a header element. With =n, `ublk_check_cmd_op` rejects any opcode whose `_IOC_TYPE` is not 'u' with EOPNOTSUPP. Ubuntu (all kernels) and AL2023 kernel6.18 build it =n.",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": "Irrelevant: go-ublk only sends ioctl-encoded opcodes."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "ublks_max (module parameter)",
+   "value": "default 64",
+   "introduced": "v6.3",
+   "commit": "403ebc877832",
+   "summary": "Module parameter limiting how many devices may be added.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not a header element. v6.3\u2013v6.6: read-only (0444), limits *all* devices; v6.7 (6eba24aeb5e2): writable at runtime, 0..2^20; v6.15 (80bdfbb3545b): limits only UBLK_F_UNPRIVILEGED_DEV devices (internally `unprivileged_ublks_max`). Exceeding it: ADD_DEV EACCES. Device ids are allocated lowest-free from 0 up to 2^20-1 (bounded since v6.7, 56974c07f2c7).",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "ListDevices enumerates /sys/class/ublk-char, so device IDs beyond 63 are found; the 0..63 probe is only a fallback without sysfs."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_MAX_UBLKS (driver)",
+   "value": "1<<20 (UBLK_MINORS)",
+   "introduced": "v6.7",
+   "commit": "56974c07f2c7",
+   "summary": "Driver-internal: device ids must be < 2^20 (char minor space).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not in the UAPI header.",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": ""
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_MAX_IO_DESC_SIZE (driver)",
+   "value": "256",
+   "introduced": "v7.3-rc1",
+   "commit": "5c0958d80190",
+   "summary": "Driver-internal: largest io_desc_size accepted with UBLK_F_IO_DESC_SIZE.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not in the UAPI header.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Validated by `ctrl.ValidateFeatures`."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_SHMEM_BUF_SIZE_MAX (driver)",
+   "value": "1ULL<<32",
+   "introduced": "v7.1",
+   "commit": "23b3b6f0b584",
+   "summary": "Driver-internal: largest REG_BUF length (4 GiB).",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Not in the UAPI header.",
+   "go_ublk": {
+    "status": "supported",
+    "notes": "Documented on RegBuf. Used by shared-memory zero copy."
+   }
+  },
+  {
+   "kind": "constant",
+   "name": "UBLK_IO_F_PREFLUSH (removed)",
+   "value": "1U<<14",
+   "introduced": "never released",
+   "commit": "5f8bcc837a96",
+   "summary": "Pre-release flag removed in the v6.0 merge window.",
+   "details": "",
+   "requires": [],
+   "conflicts": [],
+   "notes": "Present only in the initial commit 71f28f3136af; removed before v6.0 (5f8bcc837a96). Never in a released header.",
+   "go_ublk": {
+    "status": "not-applicable",
+    "notes": ""
+   }
+  }
+ ]
 }

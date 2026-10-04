@@ -263,7 +263,12 @@ func (e *engine) setup() error {
 
 func (e *engine) batchFlags() uint16 {
 	var f uint16
-	if !e.cfg.userCopy {
+	switch {
+	case e.cfg.zeroCopy != nil:
+		// Zero copy: the kernel auto-registers each request's buffer at the
+		// element's buf_index, falling back to NEED_REG_BUF if it can't.
+		f |= uapi.UBLK_BATCH_F_AUTO_BUF_REG_FALLBACK
+	case !e.cfg.userCopy:
 		f |= uapi.UBLK_BATCH_F_HAS_BUF_ADDR // copy mode: each element names the tag's buffer
 	}
 	if e.cfg.zoned {
@@ -277,6 +282,9 @@ func (e *engine) batchFlags() uint16 {
 func (e *engine) putElem(b []byte, flags uint16, tag uint16, result int32, lba uint64) {
 	h := (*uapi.UblkElemHeader)(unsafe.Pointer(&b[0]))
 	h.Tag, h.BufIndex, h.Result = tag, 0, result
+	if e.cfg.zeroCopy != nil {
+		h.BufIndex = tag // the tag's slot in the ring's sparse buffer table
+	}
 	off := 8
 	if flags&uapi.UBLK_BATCH_F_HAS_BUF_ADDR != 0 {
 		*(*uint64)(unsafe.Pointer(&b[off])) = uint64(uintptr(e.buffer(int(tag))))
@@ -901,7 +909,15 @@ func (e *engine) commit(r *Request) {
 	if e.cfg.batch {
 		// Sent with the round's other completions by flushBatchCommits. The
 		// handler is done with it; the tag returns to the kernel once the
-		// commit is consumed.
+		// commit is consumed. A buffer we registered ourselves (an automatic
+		// registration that fell back) is unregistered first; the SQE goes
+		// in before the commit's, and UNREGISTER_IO_BUF completes inline.
+		if r.zcManual {
+			if err := e.prepBufCmd(uapi.UBLK_IO_UNREGISTER_IO_BUF, kindUnreg, int(r.Tag)-e.cfg.tagLo, 0); err != nil {
+				e.fail(err)
+			}
+			r.zcManual = false
+		}
 		r.state.Store(reqIdle)
 		r.Data, r.Integrity = nil, nil
 		e.handlers.Add(-1)

@@ -24,7 +24,7 @@ The October 2026 overhaul (see the [changelog](/go-ublk/releases/)) closed what 
 
 ## Kernel features not yet implemented
 
-None: as of v0.2.0 go-ublk implements every `UBLK_F_*` feature, control command and parameter block in the 7.3-rc5 UAPI. Combinations not supported yet: batch I/O with zero copy, and shared-memory zero copy with zero copy. The [UAPI reference](/reference/uapi/) has per-item status.
+None: as of v0.2.0 go-ublk implements every `UBLK_F_*` feature, control command, I/O command and parameter block in the 7.3-rc5 UAPI. The one combination not supported is shared-memory zero copy together with file zero copy. The [UAPI reference](/reference/uapi/) has per-item status.
 
 ## Testing and releases
 
@@ -43,4 +43,4 @@ None: as of v0.2.0 go-ublk implements every `UBLK_F_*` feature, control command 
 
 ## Performance
 
-Only after the above. Candidates: io_uring `SQPOLL`, measuring and tuning the goroutine-per-request dispatch against `Inline` and batch I/O, and batch I/O combined with zero copy.
+Only after the above. Candidates: io_uring `SQPOLL`, measuring and tuning the goroutine-per-request dispatch against `Inline` and batch I/O.

@@ -143,7 +143,8 @@ type DeviceParams struct {
 
 	// BatchIO fetches and commits requests many at a time per command
 	// (UBLK_F_BATCH_IO, kernel 7.0+) instead of one command per request.
-	// Not with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1.
+	// Not with NeedGetData or ThreadsPerQueue > 1; with EnableZeroCopy it
+	// needs automatic buffer registration (6.16+, always true with 7.0).
 	BatchIO bool
 
 	// NoPartitionScan stops the kernel scanning the device for a partition
@@ -357,8 +358,8 @@ func validateParams(params *DeviceParams) error {
 	if params.SharedMemoryZeroCopy && params.EnableZeroCopy {
 		return fmt.Errorf("SharedMemoryZeroCopy cannot be combined with EnableZeroCopy")
 	}
-	if params.BatchIO && (params.EnableZeroCopy || params.NeedGetData || params.ThreadsPerQueue > 1) {
-		return fmt.Errorf("BatchIO cannot be combined with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1")
+	if params.BatchIO && (params.NeedGetData || params.ThreadsPerQueue > 1) {
+		return fmt.Errorf("BatchIO cannot be combined with NeedGetData or ThreadsPerQueue > 1")
 	}
 	if params.Recovery < RecoveryNone || params.Recovery > RecoveryFailIO {
 		return fmt.Errorf("Recovery is %d; not a RecoveryMode", params.Recovery)

@@ -52,6 +52,12 @@ func init() {
 		})
 	}
 	register("features/zero-copy", 3*time.Minute, testZeroCopy)
+	register("features/batch-io-zero-copy", 3*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureBatchIO | ublk.FeatureZeroCopy | ublk.FeatureAutoBufReg); err != nil {
+			return err
+		}
+		return zeroCopyTest(t, func(p *ublk.DeviceParams) { p.BatchIO = true })
+	})
 	register("features/batch-io-close-under-load", 2*time.Minute, func(t *T) error {
 		if err := needFeatures(ublk.FeatureBatchIO); err != nil {
 			return err
@@ -663,6 +669,10 @@ func testZeroCopy(t *T) error {
 	if err := needFeatures(ublk.FeatureZeroCopy); err != nil {
 		return err
 	}
+	return zeroCopyTest(t, nil)
+}
+
+func zeroCopyTest(t *T, mutate func(*ublk.DeviceParams)) error {
 	const size = 64 << 20
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-zc-%d", os.Getpid()))
 	t.Cleanup(func() { _ = os.Remove(path) })
@@ -675,6 +685,9 @@ func testZeroCopy(t *T) error {
 	params.EnableZeroCopy = true
 	params.EnableFUA = true
 	params.NumQueues, params.QueueDepth = 2, 64
+	if mutate != nil {
+		mutate(&params)
+	}
 	dev, err := newDevice(t, params)
 	if err != nil {
 		return err
