@@ -127,6 +127,11 @@ type DeviceParams struct {
 	// trip per write and buys nothing with go-ublk's fixed per-tag buffers.
 	NeedGetData bool
 
+	// BatchIO fetches and commits requests many at a time per command
+	// (UBLK_F_BATCH_IO, kernel 7.0+) instead of one command per request.
+	// Not with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1.
+	BatchIO bool
+
 	// NoPartitionScan stops the kernel scanning the device for a partition
 	// table when it starts (UBLK_F_NO_AUTO_PART_SCAN, kernel 7.0+).
 	NoPartitionScan bool
@@ -328,6 +333,9 @@ func validateParams(params *DeviceParams) error {
 			return fmt.Errorf("Integrity: MetadataSize %d must be 1..255 and IntervalSize %d a power of two from 512 to LogicalBlockSize",
 				ip.MetadataSize, iv)
 		}
+	}
+	if params.BatchIO && (params.EnableZeroCopy || params.NeedGetData || params.ThreadsPerQueue > 1) {
+		return fmt.Errorf("BatchIO cannot be combined with EnableZeroCopy, NeedGetData or ThreadsPerQueue > 1")
 	}
 	if params.Recovery < RecoveryNone || params.Recovery > RecoveryFailIO {
 		return fmt.Errorf("Recovery is %d; not a RecoveryMode", params.Recovery)
@@ -1234,6 +1242,9 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	}
 	if params.ThreadsPerQueue > 1 {
 		flags |= uapi.UBLK_F_PER_IO_DAEMON
+	}
+	if params.BatchIO {
+		flags |= uapi.UBLK_F_BATCH_IO
 	}
 	ctrlParams.Flags = flags
 	return ctrlParams

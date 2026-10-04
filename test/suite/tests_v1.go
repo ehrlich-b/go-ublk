@@ -33,6 +33,10 @@ func init() {
 		{"user-copy", ublk.FeatureUserCopy, func(p *ublk.DeviceParams) { p.EnableUserCopy = true }},
 		{"need-get-data", ublk.FeatureNeedGetData, func(p *ublk.DeviceParams) { p.NeedGetData = true }},
 		{"threads-per-queue", ublk.FeaturePerIODaemon, func(p *ublk.DeviceParams) { p.ThreadsPerQueue = 4 }},
+		{"batch-io", ublk.FeatureBatchIO, func(p *ublk.DeviceParams) { p.BatchIO = true }},
+		{"batch-io-user-copy", ublk.FeatureBatchIO | ublk.FeatureUserCopy, func(p *ublk.DeviceParams) {
+			p.BatchIO, p.EnableUserCopy = true, true
+		}},
 	} {
 		m := m
 		register("features/integrity-"+m.name, 3*time.Minute, func(t *T) error {
@@ -46,6 +50,28 @@ func init() {
 		})
 	}
 	register("features/zero-copy", 3*time.Minute, testZeroCopy)
+	register("features/batch-io-close-under-load", 2*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureBatchIO); err != nil {
+			return err
+		}
+		return closeUnderLoad(t, func(p *ublk.DeviceParams) { p.BatchIO = true })
+	})
+	register("features/zero-copy-close-under-load", 2*time.Minute, func(t *T) error {
+		if err := needFeatures(ublk.FeatureZeroCopy); err != nil {
+			return err
+		}
+		path := filepath.Join(os.TempDir(), fmt.Sprintf("ublk-suite-zcl-%d", os.Getpid()))
+		t.Cleanup(func() { _ = os.Remove(path) })
+		fb, err := openFileBackend(path, 64<<20)
+		if err != nil {
+			return err
+		}
+		t.Cleanup(func() { _ = fb.Close() })
+		return closeUnderLoad(t, func(p *ublk.DeviceParams) {
+			p.Backend = zcFile{fb}
+			p.EnableZeroCopy = true
+		})
+	})
 	register("features/handler-async", 3*time.Minute, testHandlerAsync)
 	register("features/fua", time.Minute, testFUA)
 	register("features/tag-find", time.Minute, testTagFind)

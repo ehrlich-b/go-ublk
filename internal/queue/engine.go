@@ -35,8 +35,33 @@ const (
 	kindReg   uint64 = 3 << 56 // zero copy: REGISTER_IO_BUF for a tag
 	kindZC    uint64 = 4 << 56 // zero copy: the backing-file operation for a tag
 	kindUnreg uint64 = 5 << 56 // zero copy: UNREGISTER_IO_BUF for a tag
+	kindPrep  uint64 = 6 << 56 // batch: PREP_IO_CMDS
+	kindFetch uint64 = 7 << 56 // batch: the multishot FETCH_IO_CMDS
+	kindBatch uint64 = 8 << 56 // batch: a COMMIT_IO_CMDS; low bits index the commit buffer
 	kindMask  uint64 = 0xff << 56
 )
+
+// Batch I/O (UBLK_F_BATCH_IO, 7.0): one PREP_IO_CMDS registers every tag, a
+// multishot FETCH_IO_CMDS delivers ready tags as u16 lists into a
+// provided-buffer ring, and completions go back many at a time in
+// COMMIT_IO_CMDS element buffers.
+const (
+	batchTagBufs    = 16  // provided buffers for tag lists
+	batchTagBufSize = 256 // bytes each: 128 tags, the kernel's per-CQE maximum
+	batchCommitBufs = 4   // COMMIT_IO_CMDS element buffers in flight at once
+)
+
+// tagRing is the provided-buffer ring FETCH_IO_CMDS writes tag lists into.
+type tagRing interface {
+	Add(buf []byte, bid uint16, offset int)
+	Advance(count int)
+}
+
+// tagRingProvider is implemented by the engine's ring when it can register a
+// provided-buffer ring (uring.IoUring, wrapped by defaultRing).
+type tagRingProvider interface {
+	NewTagRing(bgid uint16, entries uint32) (tagRing, error)
+}
 
 // Per-tag states, owned by the engine thread.
 const (
@@ -76,6 +101,8 @@ type engineConfig struct {
 	bufSize      int
 	userCopy     bool // UBLK_F_USER_COPY: data moves by pread/pwrite on charFd
 	zeroCopy     *zeroCopyConfig
+	batch        bool // UBLK_F_BATCH_IO
+	zoned        bool // batch elements carry the zone-append LBA
 	// UBLK_F_INTEGRITY: per-tag metadata buffers of integSize bytes, holding
 	// integMeta bytes per integInterval bytes of data.
 	integ         unsafe.Pointer
@@ -116,6 +143,14 @@ type engine struct {
 	wakeArmed bool // an eventfd read is in the kernel, targeting wakeBuf
 
 	stopping atomic.Bool // abandon: stop dispatching, drain handlers, exit
+
+	// batch I/O state (engine thread only)
+	tagBufs       []byte
+	tags16        tagRing
+	prepBuf       []byte
+	commitBufs    [batchCommitBufs][]byte
+	commitSent    [batchCommitBufs][]*Request // nil slot: buffer free
+	pendingCommit []*Request
 
 	// testBeforeSleep, if set, runs between draining completions and publishing
 	// sleeping: the window a lost-wakeup bug lives in. Tests only.
@@ -205,16 +240,222 @@ func (e *engine) setup() error {
 	if err := e.armWake(); err != nil {
 		return err
 	}
-	for i := range e.tags {
-		if err := e.prepIO(uapi.UBLK_IO_FETCH_REQ, i, 0); err != nil {
+	if e.cfg.batch {
+		if err := e.setupBatch(); err != nil {
 			return err
 		}
-		e.tags[i] = tagFetching
+	} else {
+		for i := range e.tags {
+			if err := e.prepIO(uapi.UBLK_IO_FETCH_REQ, i, 0); err != nil {
+				return err
+			}
+			e.tags[i] = tagFetching
+		}
 	}
 	if _, err := e.ring.Submit(); err != nil {
-		return fmt.Errorf("queue %d: submit FETCH_REQ: %w", e.cfg.queueID, err)
+		return fmt.Errorf("queue %d: submit fetches: %w", e.cfg.queueID, err)
 	}
 	return nil
+}
+
+func (e *engine) batchFlags() uint16 {
+	var f uint16
+	if !e.cfg.userCopy {
+		f |= uapi.UBLK_BATCH_F_HAS_BUF_ADDR // copy mode: each element names the tag's buffer
+	}
+	if e.cfg.zoned {
+		f |= uapi.UBLK_BATCH_F_HAS_ZONE_LBA
+	}
+	return f
+}
+
+// putElem writes one batch element: header, then the buffer address and zone
+// LBA if the flags call for them.
+func (e *engine) putElem(b []byte, flags uint16, tag uint16, result int32, lba uint64) {
+	h := (*uapi.UblkElemHeader)(unsafe.Pointer(&b[0]))
+	h.Tag, h.BufIndex, h.Result = tag, 0, result
+	off := 8
+	if flags&uapi.UBLK_BATCH_F_HAS_BUF_ADDR != 0 {
+		*(*uint64)(unsafe.Pointer(&b[off])) = uint64(uintptr(e.buffer(int(tag))))
+		off += 8
+	}
+	if flags&uapi.UBLK_BATCH_F_HAS_ZONE_LBA != 0 {
+		*(*uint64)(unsafe.Pointer(&b[off])) = lba
+	}
+}
+
+func (e *engine) prepBatchCmd(op uint32, flags uint16, nr int, elemBytes uint8, buf []byte, ud uint64) error {
+	sqe, err := e.getSQE()
+	if err != nil {
+		return err
+	}
+	uring.PrepUringCmd(sqe, int32(e.cfg.charFd), op, nil)
+	h := (*uapi.UblkBatchIO)(unsafe.Pointer(sqe.Cmd()))
+	h.QID, h.Flags, h.NrElem, h.ElemBytes = e.cfg.queueID, flags, uint16(nr), elemBytes
+	if buf != nil {
+		sqe.Addr = uint64(uintptr(unsafe.Pointer(&buf[0])))
+	}
+	sqe.UserData = ud
+	return nil
+}
+
+func (e *engine) setupBatch() error {
+	tp, ok := e.ring.(tagRingProvider)
+	if !ok {
+		return fmt.Errorf("queue %d: batch I/O needs a ring with provided-buffer rings", e.cfg.queueID)
+	}
+	var err error
+	if e.tagBufs, err = uring.AllocOffHeap(batchTagBufs * batchTagBufSize); err != nil {
+		return err
+	}
+	if e.tags16, err = tp.NewTagRing(0, batchTagBufs); err != nil {
+		return fmt.Errorf("queue %d: register tag buffer ring: %w", e.cfg.queueID, err)
+	}
+	for i := 0; i < batchTagBufs; i++ {
+		e.tags16.Add(e.tagBufs[i*batchTagBufSize:(i+1)*batchTagBufSize], uint16(i), i)
+	}
+	e.tags16.Advance(batchTagBufs)
+
+	flags := e.batchFlags()
+	eb := int(uapi.BatchElemBytes(flags))
+	n := e.cfg.tagHi - e.cfg.tagLo
+	if e.prepBuf, err = uring.AllocOffHeap(n * eb); err != nil {
+		return err
+	}
+	for i := 0; i < n; i++ {
+		e.putElem(e.prepBuf[i*eb:], flags, uint16(e.cfg.tagLo+i), 0, 0)
+		e.tags[i] = tagFetching
+	}
+	for i := range e.commitBufs {
+		if e.commitBufs[i], err = uring.AllocOffHeap(n * eb); err != nil {
+			return err
+		}
+	}
+	if err := e.prepBatchCmd(uapi.UBLK_U_IO_PREP_IO_CMDS, flags, n, uint8(eb), e.prepBuf, kindPrep); err != nil {
+		return err
+	}
+	e.live = 1 // in batch mode the multishot fetch is what keeps the engine alive
+	return e.armFetch()
+}
+
+func (e *engine) armFetch() error {
+	sqe, err := e.getSQE()
+	if err != nil {
+		return err
+	}
+	uring.PrepUringCmd(sqe, int32(e.cfg.charFd), uapi.UBLK_U_IO_FETCH_IO_CMDS, nil)
+	h := (*uapi.UblkBatchIO)(unsafe.Pointer(sqe.Cmd()))
+	h.QID, h.ElemBytes = e.cfg.queueID, 2
+	setMultishot(sqe)
+	sqe.UserData = kindFetch
+	return nil
+}
+
+// setMultishot makes a FETCH_IO_CMDS multishot, selecting tag-list buffers
+// from group 0.
+func setMultishot(sqe *uring.SQE) {
+	sqe.OpFlags |= uring.IORING_URING_CMD_MULTISHOT
+	sqe.SetBufferSelect(0)
+}
+
+func (e *engine) handleFetch(res int32, flags uint32) {
+	bid, hasBuf := uint16(flags>>uring.IORING_CQE_BUFFER_SHIFT), flags&uring.IORING_CQE_F_BUFFER != 0
+	if hasBuf {
+		buf := e.tagBufs[int(bid)*batchTagBufSize : (int(bid)+1)*batchTagBufSize]
+		if res > 0 {
+			for k := 0; k+1 < int(res); k += 2 {
+				tag := int(buf[k]) | int(buf[k+1])<<8
+				i := tag - e.cfg.tagLo
+				if i < 0 || i >= len(e.tags) || e.tags[i] != tagFetching {
+					e.fail(fmt.Errorf("queue %d: batch fetch delivered tag %d in state %v", e.cfg.queueID, tag, i))
+					continue
+				}
+				if e.stopping.Load() {
+					e.tags[i] = tagOrphaned
+					continue
+				}
+				e.dispatch(i)
+			}
+		}
+		e.tags16.Add(buf, bid, 0)
+		e.tags16.Advance(1)
+	}
+	if flags&uring.IORING_CQE_F_MORE != 0 {
+		return
+	}
+	switch {
+	case res == uapi.UBLK_IO_RES_ABORT || res == -int32(syscall.ECANCELED):
+		e.live = 0 // stopped, quiesced or cancelled: no more requests
+	case res >= 0 || res == -int32(syscall.ENOBUFS):
+		if !e.stopping.Load() {
+			if err := e.armFetch(); err != nil {
+				e.fail(err)
+			}
+		} else {
+			e.live = 0
+		}
+	default:
+		e.fail(fmt.Errorf("queue %d: FETCH_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
+		e.live = 0
+	}
+}
+
+// flushBatchCommits sends the completions gathered this round as one
+// COMMIT_IO_CMDS, if a commit buffer is free.
+func (e *engine) flushBatchCommits() {
+	if len(e.pendingCommit) == 0 {
+		return
+	}
+	slot := -1
+	for i := range e.commitSent {
+		if e.commitSent[i] == nil {
+			slot = i
+			break
+		}
+	}
+	if slot < 0 {
+		return // all commit buffers in flight; retried when one completes
+	}
+	flags := e.batchFlags()
+	eb := int(uapi.BatchElemBytes(flags))
+	n := min(len(e.pendingCommit), len(e.commitBufs[slot])/eb)
+	sent := append([]*Request(nil), e.pendingCommit[:n]...)
+	for k, r := range sent {
+		lba := uint64(0)
+		if r.Op == OpZoneAppend && r.result >= 0 {
+			lba = r.lba
+		}
+		e.putElem(e.commitBufs[slot][k*eb:], flags, r.Tag, r.result, lba)
+	}
+	if err := e.prepBatchCmd(uapi.UBLK_U_IO_COMMIT_IO_CMDS, flags, n, uint8(eb), e.commitBufs[slot], kindBatch|uint64(slot)); err != nil {
+		e.fail(err)
+		return
+	}
+	e.pendingCommit = e.pendingCommit[n:]
+	e.commitSent[slot] = sent
+}
+
+// committed handles a COMMIT_IO_CMDS completion: res is the bytes of the
+// element buffer consumed; elements after the first failure were not
+// committed and go back on the pending list.
+func (e *engine) committed(slot int, res int32) {
+	sent := e.commitSent[slot]
+	e.commitSent[slot] = nil
+	eb := int32(uapi.BatchElemBytes(e.batchFlags()))
+	done := 0
+	if res > 0 {
+		done = int(res / eb)
+	}
+	for _, r := range sent[:done] {
+		e.tags[int(r.Tag)-e.cfg.tagLo] = tagFetching
+	}
+	if done < len(sent) {
+		if res < 0 && done == 0 && res != -int32(syscall.EBUSY) {
+			e.fail(fmt.Errorf("queue %d: COMMIT_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
+		}
+		// Not consumed: still owned by us; send them again.
+		e.pendingCommit = append(append([]*Request(nil), sent[done:]...), e.pendingCommit...)
+	}
 }
 
 // teardown runs on the engine thread. Closing the ring cancels any command
@@ -238,6 +479,16 @@ func (e *engine) teardown() {
 	if e.wakeBuf != nil && !e.wakeArmed {
 		_ = uring.FreeOffHeap(e.wakeBuf)
 		e.wakeBuf = nil
+	}
+	// Batch buffers: the ring (and with it the tag buffer ring) is closed,
+	// and finished() waited for every commit, so the kernel holds none.
+	if e.ring != nil && e.cfg.batch {
+		for _, b := range append([][]byte{e.tagBufs, e.prepBuf}, e.commitBufs[:]...) {
+			if b != nil {
+				_ = uring.FreeOffHeap(b)
+			}
+		}
+		e.tagBufs, e.prepBuf = nil, nil
 	}
 }
 
@@ -268,6 +519,9 @@ func (e *engine) retireWake() {
 func (e *engine) loop() {
 	for {
 		e.drainCompletions()
+		if e.cfg.batch {
+			e.flushBatchCommits()
+		}
 		if e.finished() {
 			return
 		}
@@ -292,9 +546,9 @@ func (e *engine) loop() {
 			if cqe == nil {
 				break
 			}
-			ud, res := cqe.UserData, cqe.Res
+			ud, res, flags := cqe.UserData, cqe.Res, cqe.Flags
 			e.ring.CQAdvance(1)
-			e.handleCQE(ud, res)
+			e.handleCQE(ud, res, flags)
 		}
 	}
 }
@@ -302,8 +556,13 @@ func (e *engine) loop() {
 // finished reports whether the engine can exit: every tag is done with the
 // kernel and no handler still holds a request (whose buffer it may be using).
 func (e *engine) finished() bool {
-	if e.handlers.Load() != 0 {
+	if e.handlers.Load() != 0 || len(e.pendingCommit) != 0 {
 		return false
+	}
+	for _, sent := range e.commitSent {
+		if sent != nil {
+			return false
+		}
 	}
 	if e.live == 0 {
 		return true
@@ -311,8 +570,17 @@ func (e *engine) finished() bool {
 	return e.stopping.Load()
 }
 
-func (e *engine) handleCQE(ud uint64, res int32) {
+func (e *engine) handleCQE(ud uint64, res int32, flags uint32) {
 	switch ud & kindMask {
+	case kindPrep:
+		if res < 0 {
+			e.fail(fmt.Errorf("queue %d: PREP_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
+			e.live = 0
+		}
+	case kindFetch:
+		e.handleFetch(res, flags)
+	case kindBatch:
+		e.committed(int(ud&0xff), res)
 	case kindWake:
 		e.wakeArmed = false
 		if !e.stopping.Load() || e.handlers.Load() != 0 {
@@ -598,6 +866,16 @@ func (e *engine) drainCompletions() {
 // commit sends a finished request's result and re-arms the tag's fetch with
 // one COMMIT_AND_FETCH_REQ. Engine thread only.
 func (e *engine) commit(r *Request) {
+	if e.cfg.batch {
+		// Sent with the round's other completions by flushBatchCommits. The
+		// handler is done with it; the tag returns to the kernel once the
+		// commit is consumed.
+		r.state.Store(reqIdle)
+		r.Data, r.Integrity = nil, nil
+		e.handlers.Add(-1)
+		e.pendingCommit = append(e.pendingCommit, r)
+		return
+	}
 	i := int(r.Tag) - e.cfg.tagLo
 	addr := uint64(0)
 	if e.cfg.zeroCopy != nil {

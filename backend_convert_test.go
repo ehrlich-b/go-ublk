@@ -61,6 +61,7 @@ func TestConvertFieldSetCompleteness(t *testing.T) {
 		"HandlerWriteZeroes": "CanWriteZeroes",
 		"Zoned":              "ZoneSectors and the zoned limits",
 		"Integrity":          "a uapi.UblkParamIntegrity built from it",
+		"BatchIO":            "UBLK_F_BATCH_IO in Flags",
 	}
 	for f := range pubFields {
 		if _, ok := elsewhere[f]; ok {

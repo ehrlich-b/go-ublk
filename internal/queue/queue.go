@@ -59,7 +59,27 @@ type Queue struct {
 	closed  bool
 }
 
+// ioRing is the production ring: uring.IoUring plus the provided-buffer ring
+// registration batch I/O needs.
+type ioRing struct{ *uring.IoUring }
+
+func (r ioRing) NewTagRing(bgid uint16, entries uint32) (tagRing, error) {
+	br, err := r.RegisterBufRing(bgid, entries)
+	if err != nil {
+		return nil, err
+	}
+	return br, nil
+}
+
 func defaultRing(entries uint32) (ring, error) {
+	u, err := newIoUring(entries)
+	if err != nil {
+		return nil, err
+	}
+	return ioRing{u}, nil
+}
+
+func newIoUring(entries uint32) (*uring.IoUring, error) {
 	return uring.NewIoUring(uring.SetupOptions{
 		Entries:   entries,
 		CQEntries: 2 * entries,
@@ -95,6 +115,9 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 	}
 	if cfg.Threads > cfg.Depth {
 		cfg.Threads = cfg.Depth
+	}
+	if cfg.Flags&uapi.UBLK_F_BATCH_IO != 0 {
+		cfg.Threads = 1 // one PREP and one multishot fetch per queue
 	}
 	if cfg.newRing == nil {
 		cfg.newRing = defaultRing
@@ -163,6 +186,8 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 			bufSize:       cfg.MaxIOSize,
 			userCopy:      cfg.Flags&uapi.UBLK_F_USER_COPY != 0,
 			zeroCopy:      zc,
+			batch:         cfg.Flags&uapi.UBLK_F_BATCH_IO != 0,
+			zoned:         cfg.Flags&uapi.UBLK_F_ZONED != 0,
 			integ:         integPtr,
 			integSize:     integSize,
 			integInterval: cfg.IntegrityInterval,
