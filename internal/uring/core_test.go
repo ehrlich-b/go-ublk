@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"testing"
@@ -16,6 +17,34 @@ import (
 // Real-ring tests for IoUring. They need a kernel that permits io_uring
 // (inside a default-seccomp container io_uring_setup fails with EPERM, so
 // there they skip). Kernel 6.6 has everything they use.
+
+// kernelBefore reports whether the running kernel is older than major.minor.
+func kernelBefore(major, minor int) bool {
+	var u unix.Utsname
+	if unix.Uname(&u) != nil {
+		return false
+	}
+	var ma, mi int
+	if _, err := fmt.Sscanf(unix.ByteSliceToString(u.Release[:]), "%d.%d", &ma, &mi); err != nil {
+		return false
+	}
+	return ma < major || ma == major && mi < minor
+}
+
+// requireBufRings skips a test on a kernel older than 7.0 that rejects a
+// provided buffer ring in user memory with EINVAL, as Ubuntu's 6.8 builds do
+// (mainline 6.8 accepts it). Only batch I/O, which needs 7.0, uses them.
+func requireBufRings(t *testing.T) {
+	t.Helper()
+	r := newTestIoUring(t, SetupOptions{Entries: 8})
+	br, err := r.RegisterBufRing(1, 8)
+	if errors.Is(err, unix.EINVAL) && kernelBefore(7, 0) {
+		t.Skipf("this kernel rejects provided buffer rings: %v", err)
+	}
+	if err == nil {
+		_ = r.UnregisterBufRing(br)
+	}
+}
 
 func newTestIoUring(t testing.TB, opts SetupOptions) *IoUring {
 	t.Helper()
@@ -485,6 +514,9 @@ func TestCQOverflowIsFlushedNotDropped(t *testing.T) {
 // CQ only when the owning thread enters with GETEVENTS, and the kernel turns
 // away other threads with EEXIST.
 func TestDeferTaskrunSingleIssuer(t *testing.T) {
+	if kernelBefore(6, 1) {
+		t.Skip("IORING_SETUP_DEFER_TASKRUN needs Linux 6.1")
+	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	r := newTestIoUring(t, SetupOptions{

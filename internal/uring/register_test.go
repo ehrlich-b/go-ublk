@@ -140,6 +140,7 @@ func TestFixedFiles(t *testing.T) {
 // Provided buffer ring: each read takes a buffer and reports its ID; an empty
 // ring fails reads with -ENOBUFS until a buffer is returned.
 func TestProvidedBufferRing(t *testing.T) {
+	requireBufRings(t)
 	r := newTestIoUring(t, SetupOptions{Entries: 8})
 	const entries, size, group = 8, 64, 7
 	br, err := r.RegisterBufRing(group, entries)
@@ -203,6 +204,7 @@ func TestProvidedBufferRing(t *testing.T) {
 // Close must release everything an IoUring registered or mapped, including
 // buffer-ring memory, and a Ring its control staging buffer.
 func TestIoUringCloseReleasesRegistrations(t *testing.T) {
+	requireBufRings(t)
 	quietLogs(t)
 	_, fd := tempFileFd(t)
 	assertNoLeak(t, func() error {
