@@ -233,7 +233,7 @@ t_suite() {
 # of plain WRITEs), and patterns planted across the range tell whether the
 # whole range really reads back as zeros.
 t_wzcheck() {
-	local log=$W/wz-daemon.log dev pid q s0 s1 t1 off bad="" detail st=pass
+	local log=$W/wz-daemon.log dev pid q s0 s1 t1 off bad="" detail st=pass zrc
 	need_ublk wzcheck || return
 	start wzcheck
 	ublk-mem --zip --size=6G --queues=1 --depth=64 >"$log" 2>&1 3>&- &
@@ -251,7 +251,9 @@ t_wzcheck() {
 	done
 	s0=$(tr -s ' ' <"$q/stat")
 	t1=$(now)
-	timeout 900 blkdiscard -z -o 1048576 -l 5368709120 "$dev" 2>"$W/wz.err" || st=fail
+	timeout 900 blkdiscard -z -o 1048576 -l 5368709120 "$dev" 2>"$W/wz.err"
+	zrc=$?
+	[ "$zrc" = 0 ] || st=fail
 	t1=$(since "$t1")
 	s1=$(tr -s ' ' <"$q/stat")
 	for off in $offs; do
@@ -261,7 +263,7 @@ t_wzcheck() {
 	[ -n "$bad" ] && st=fail
 	# /sys/block/X/stat fields 5 and 7: write I/Os and write sectors.
 	detail="write_zeroes_max_bytes=$(cat "$q/queue/write_zeroes_max_bytes") max_hw_sectors_kb=$(cat "$q/queue/max_hw_sectors_kb")"
-	detail="$detail; BLKZEROOUT 5GiB took ${t1}s rc=$([ "$st" = pass ] && echo 0 || echo fail) $(cat "$W/wz.err")"
+	detail="$detail; BLKZEROOUT 5GiB took ${t1}s, blkdiscard exit $zrc $(cat "$W/wz.err")"
 	detail="$detail; write I/Os +$(($(echo "$s1" | awk '{print $5}') - $(echo "$s0" | awk '{print $5}')))"
 	detail="$detail, write sectors +$(($(echo "$s1" | awk '{print $7}') - $(echo "$s0" | awk '{print $7}')))"
 	detail="$detail; patterns still present at:${bad:- none}"

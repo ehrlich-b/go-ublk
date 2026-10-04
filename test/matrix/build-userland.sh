@@ -24,6 +24,21 @@ $DOCKER run --rm -v "$MATRIX_DIR:/matrix:ro" -v "$BUILD:/out" "$ALPINE_IMAGE" sh
 	printf '#!/bin/sh\nexec \"\$@\"\n' >/rootfs/usr/local/bin/sudo
 	chmod 0755 /rootfs/usr/local/bin/sudo
 	find /rootfs/var/cache/apk /rootfs/usr/share/man /rootfs/usr/share/doc -mindepth 1 -delete 2>/dev/null || true
+	# busybox links its applets into bin, sbin, usr/bin and usr/sbin; drop any
+	# link that would shadow the real tool installed under another of them
+	# (busybox's /usr/bin/blkdiscard has no -z, util-linux's /sbin one does).
+	cd /rootfs
+	for d in bin sbin usr/bin usr/sbin; do
+		for f in \$d/*; do
+			[ -L \"\$f\" ] && [ \"\$(readlink \"\$f\")\" = /bin/busybox ] || continue
+			n=\${f##*/}
+			for o in bin sbin usr/bin usr/sbin; do
+				[ \"\$o\" = \"\$d\" ] && continue
+				if [ -e \"\$o/\$n\" ] && [ \"\$(readlink \"\$o/\$n\")\" != /bin/busybox ]; then rm \"\$f\"; break; fi
+			done
+		done
+	done
+	cd /
 	python3 /matrix/mkcpio.py /out/userland.cpio.tmp /rootfs \
 		--node /dev/console:c:5:1:0600 --node /dev/null:c:1:3:0666 --node /dev/ttyS0:c:4:64:0600
 	mv /out/userland.cpio.tmp /out/userland.cpio

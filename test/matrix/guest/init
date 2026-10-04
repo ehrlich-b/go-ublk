@@ -6,7 +6,9 @@
 # the results channel and carries nothing but JSON lines, so the host never has
 # to untangle results from interleaved printk output. Every result line is also
 # echoed to the console with an @@GOUBLK@@ prefix as a fallback channel.
-/bin/busybox --install -s 2>/dev/null
+# The userland ships busybox's links already; only fill in if they are missing
+# (a blanket --install would re-create links that shadow util-linux tools).
+[ -e /bin/sh ] || /bin/busybox --install -s 2>/dev/null
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=/root TERM=dumb
 
