@@ -76,12 +76,18 @@ type engineConfig struct {
 	bufSize      int
 	userCopy     bool // UBLK_F_USER_COPY: data moves by pread/pwrite on charFd
 	zeroCopy     *zeroCopyConfig
-	handler      Handler
-	inline       bool
-	cpu          int // -1: no affinity
-	logger       interfaces.Logger
-	newRing      func(entries uint32) (ring, error)
-	waitInterval time.Duration
+	// UBLK_F_INTEGRITY: per-tag metadata buffers of integSize bytes, holding
+	// integMeta bytes per integInterval bytes of data.
+	integ         unsafe.Pointer
+	integSize     int
+	integInterval int
+	integMeta     int
+	handler       Handler
+	inline        bool
+	cpu           int // -1: no affinity
+	logger        interfaces.Logger
+	newRing       func(entries uint32) (ring, error)
+	waitInterval  time.Duration
 }
 
 // engine serves a range of one queue's tags on one OS thread with one
@@ -427,6 +433,16 @@ func (e *engine) dispatch(i int) {
 			clear(r.Data)
 		}
 	}
+	r.Integrity = nil
+	if r.Flags&FlagIntegrity != 0 && e.cfg.integ != nil {
+		n := int(r.Length) / e.cfg.integInterval * e.cfg.integMeta
+		if n > e.cfg.integSize {
+			r.state.Store(reqAsync)
+			r.Complete(fmt.Errorf("%d-byte integrity buffer exceeds %d: %w", n, e.cfg.integSize, syscall.EIO))
+			return
+		}
+		r.Integrity = unsafe.Slice((*byte)(unsafe.Add(e.cfg.integ, tag*e.cfg.integSize)), n)
+	}
 
 	if e.cfg.inline {
 		r.state.Store(reqDispatching)
@@ -458,6 +474,12 @@ func (e *engine) call(r *Request) {
 		if err := e.copyIn(r); err != nil {
 			r.Complete(err)
 			return
+		}
+		if r.Integrity != nil {
+			if err := e.copyIntegrity(r, false); err != nil {
+				r.Complete(err)
+				return
+			}
 		}
 	}
 	e.cfg.handler.HandleRequest(r)
@@ -503,8 +525,36 @@ func (e *engine) beforeCommit(r *Request) {
 	if e.cfg.userCopy && r.result > 0 && (r.Op == OpRead || r.Op == OpReportZones) {
 		if err := e.copyOut(r, int(r.result)); err != nil {
 			r.result = -Errno(err)
+		} else if r.Integrity != nil {
+			if err := e.copyIntegrity(r, true); err != nil {
+				r.result = -Errno(err)
+			}
 		}
 	}
+}
+
+// copyIntegrity moves a request's integrity metadata: from the kernel for a
+// write, to it for a read (the same user-copy position with
+// UBLKSRV_IO_INTEGRITY_FLAG set).
+func (e *engine) copyIntegrity(r *Request, out bool) error {
+	pos := userCopyPos(r.Queue, r.Tag, 0) | uapi.UBLKSRV_IO_INTEGRITY_FLAG
+	for done := 0; done < len(r.Integrity); {
+		var n int
+		var err error
+		if out {
+			n, err = unix.Pwrite(e.cfg.charFd, r.Integrity[done:], pos+int64(done))
+		} else {
+			n, err = unix.Pread(e.cfg.charFd, r.Integrity[done:], pos+int64(done))
+		}
+		if err != nil {
+			return fmt.Errorf("integrity user copy: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("integrity user copy: short transfer at %d of %d: %w", done, len(r.Integrity), syscall.EIO)
+		}
+		done += n
+	}
+	return nil
 }
 
 // partialReadsOK reports whether the kernel honors a short read result by

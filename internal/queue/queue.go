@@ -38,7 +38,11 @@ type QueueConfig struct {
 	// automatic buffer registration when Flags has UBLK_F_AUTO_BUF_REG.
 	ZeroCopyFile int
 	ZeroCopyBase int64
-	Logger       interfaces.Logger
+	// IntegrityInterval and IntegrityMetadata describe UBLK_F_INTEGRITY
+	// metadata: bytes of metadata per interval of data. Zero: none.
+	IntegrityInterval int
+	IntegrityMetadata int
+	Logger            interfaces.Logger
 
 	newRing func(entries uint32) (ring, error) // tests substitute a fake kernel
 }
@@ -49,6 +53,7 @@ type Queue struct {
 	cfg     QueueConfig
 	desc    []byte
 	bufs    []byte
+	integ   []byte
 	engines []*engine
 	done    chan struct{}
 	closed  bool
@@ -127,25 +132,46 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 		bufPtr = unsafe.Pointer(&bufs[0])
 	}
 
-	q := &Queue{cfg: cfg, desc: desc, bufs: bufs, done: make(chan struct{})}
+	var integ []byte
+	var integPtr unsafe.Pointer
+	integSize := 0
+	if cfg.IntegrityInterval > 0 && cfg.IntegrityMetadata > 0 {
+		integSize = (cfg.MaxIOSize/cfg.IntegrityInterval + 1) * cfg.IntegrityMetadata
+		integ, err = unix.Mmap(-1, 0, cfg.Depth*integSize, unix.PROT_READ|unix.PROT_WRITE,
+			unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+		if err != nil {
+			_ = unix.Munmap(desc)
+			if bufs != nil {
+				_ = unix.Munmap(bufs)
+			}
+			return nil, fmt.Errorf("queue %d: allocate integrity buffers: %w", cfg.QueueID, err)
+		}
+		integPtr = unsafe.Pointer(&integ[0])
+	}
+
+	q := &Queue{cfg: cfg, desc: desc, bufs: bufs, integ: integ, done: make(chan struct{})}
 	per := (cfg.Depth + cfg.Threads - 1) / cfg.Threads
 	for lo := 0; lo < cfg.Depth; lo += per {
 		q.engines = append(q.engines, newEngine(engineConfig{
-			queueID:    cfg.QueueID,
-			tagLo:      lo,
-			tagHi:      min(lo+per, cfg.Depth),
-			charFd:     cfg.CharFd,
-			desc:       unsafe.Pointer(&desc[0]),
-			descStride: uintptr(cfg.DescSize),
-			bufs:       bufPtr,
-			bufSize:    cfg.MaxIOSize,
-			userCopy:   cfg.Flags&uapi.UBLK_F_USER_COPY != 0,
-			zeroCopy:   zc,
-			handler:    cfg.Handler,
-			inline:     cfg.Inline,
-			cpu:        cfg.CPU,
-			logger:     cfg.Logger,
-			newRing:    cfg.newRing,
+			queueID:       cfg.QueueID,
+			tagLo:         lo,
+			tagHi:         min(lo+per, cfg.Depth),
+			charFd:        cfg.CharFd,
+			desc:          unsafe.Pointer(&desc[0]),
+			descStride:    uintptr(cfg.DescSize),
+			bufs:          bufPtr,
+			bufSize:       cfg.MaxIOSize,
+			userCopy:      cfg.Flags&uapi.UBLK_F_USER_COPY != 0,
+			zeroCopy:      zc,
+			integ:         integPtr,
+			integSize:     integSize,
+			integInterval: cfg.IntegrityInterval,
+			integMeta:     cfg.IntegrityMetadata,
+			handler:       cfg.Handler,
+			inline:        cfg.Inline,
+			cpu:           cfg.CPU,
+			logger:        cfg.Logger,
+			newRing:       cfg.newRing,
 		}))
 	}
 	return q, nil
@@ -233,9 +259,12 @@ func (q *Queue) Close() error {
 		}
 	}
 	q.closed = true
-	var bufErr error
+	var bufErr, integErr error
 	if q.bufs != nil {
 		bufErr = unix.Munmap(q.bufs)
 	}
-	return errors.Join(unix.Munmap(q.desc), bufErr)
+	if q.integ != nil {
+		integErr = unix.Munmap(q.integ)
+	}
+	return errors.Join(unix.Munmap(q.desc), bufErr, integErr)
 }

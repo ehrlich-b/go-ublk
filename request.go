@@ -113,3 +113,18 @@ const (
 	ZoneCondFull         = queue.ZoneCondFull
 	ZoneCondOffline      = queue.ZoneCondOffline
 )
+
+// IntegrityBackend is the Backend interface for devices with
+// DeviceParams.Integrity: alongside ReadAt and WriteAt for the data, it
+// stores and returns each request's integrity metadata (MetadataSize bytes
+// per IntervalSize bytes of data, for the same offset). With a checksum type
+// the kernel generates the protection information and verifies it on read, so
+// metadata returned wrong fails the read. For blocks never written, return
+// all 0xff bytes: the T10 escape value (application tag 0xffff), which tells
+// the kernel not to check them — otherwise even the partition scan at start
+// fails verification.
+type IntegrityBackend interface {
+	Backend
+	ReadIntegrity(meta []byte, off int64) error
+	WriteIntegrity(meta []byte, off int64) error
+}

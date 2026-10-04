@@ -116,6 +116,12 @@ type DeviceParams struct {
 	// devices always use user copy.
 	Zoned ZonedParams
 
+	// Integrity gives every block integrity metadata (kernel 7.0+, needs
+	// CONFIG_BLK_DEV_INTEGRITY). Requests then carry Request.Integrity; a
+	// Backend must implement IntegrityBackend. User copy is turned on
+	// automatically, as the kernel requires.
+	Integrity *IntegrityParams
+
 	// NeedGetData makes the kernel ask for a write's buffer before copying its
 	// data (UBLK_F_NEED_GET_DATA). Supported for completeness; it costs a round
 	// trip per write and buys nothing with go-ublk's fixed per-tag buffers.
@@ -189,6 +195,39 @@ type ZonedParams struct {
 	// MaxZoneAppendSize is the largest zone append in bytes (0: MaxIOSize).
 	MaxZoneAppendSize int
 }
+
+// IntegrityParams describes per-block integrity metadata
+// (UBLK_PARAM_TYPE_INTEGRITY). With a checksum type the kernel's block layer
+// generates protection information on write and verifies it on read; the
+// server only stores and returns the metadata.
+type IntegrityParams struct {
+	// MetadataSize is the metadata bytes per interval (required).
+	MetadataSize int
+	// IntervalSize is the data bytes each metadata entry covers: a power of
+	// two from 512 to LogicalBlockSize (0: LogicalBlockSize).
+	IntervalSize int
+	// Checksum is the protection-information format, IntegrityCsum*.
+	Checksum IntegrityCsum
+	// RefTag checks the reference tag (the low 32 bits of the block number),
+	// as in T10 Type 1 protection; needs a checksum.
+	RefTag bool
+	// PIOffset is where the protection tuple starts within the metadata.
+	PIOffset int
+	// TagSize is the size of an application tag, if any.
+	TagSize int
+	// MaxIntegritySegments limits metadata segments per request (0: none).
+	MaxIntegritySegments uint16
+}
+
+// IntegrityCsum selects the protection-information checksum.
+type IntegrityCsum uint8
+
+const (
+	IntegrityCsumNone      IntegrityCsum = uapi.LBMD_PI_CSUM_NONE         // metadata only
+	IntegrityCsumIP        IntegrityCsum = uapi.LBMD_PI_CSUM_IP           // IP checksum, 8-byte tuple
+	IntegrityCsumCRC16     IntegrityCsum = uapi.LBMD_PI_CSUM_CRC16_T10DIF // T10-DIF CRC16, 8-byte tuple
+	IntegrityCsumCRC64NVMe IntegrityCsum = uapi.LBMD_PI_CSUM_CRC64_NVME   // NVMe CRC64, 16-byte tuple
+)
 
 // RecoveryMode selects what happens to a device whose server exits without
 // deleting it (a crash, or Device.Detach). With any mode but RecoveryNone the
@@ -270,6 +309,24 @@ func validateParams(params *DeviceParams) error {
 		}
 		if params.EnableZeroCopy || params.EnableUnprivileged {
 			return fmt.Errorf("EnableZoned cannot be combined with EnableZeroCopy or EnableUnprivileged")
+		}
+	}
+	if ip := params.Integrity; ip != nil {
+		if params.Handler == nil {
+			if _, ok := params.Backend.(IntegrityBackend); !ok {
+				return fmt.Errorf("Integrity needs a Handler or a Backend that implements IntegrityBackend")
+			}
+		}
+		if params.EnableZeroCopy || params.EnableUnprivileged {
+			return fmt.Errorf("Integrity cannot be combined with EnableZeroCopy or EnableUnprivileged")
+		}
+		iv := ip.IntervalSize
+		if iv == 0 {
+			iv = params.LogicalBlockSize
+		}
+		if ip.MetadataSize < 1 || ip.MetadataSize > 255 || iv < uapi.SectorSize || iv > params.LogicalBlockSize || iv&(iv-1) != 0 {
+			return fmt.Errorf("Integrity: MetadataSize %d must be 1..255 and IntervalSize %d a power of two from 512 to LogicalBlockSize",
+				ip.MetadataSize, iv)
 		}
 	}
 	if params.Recovery < RecoveryNone || params.Recovery > RecoveryFailIO {
@@ -672,6 +729,9 @@ func (d *Device) startQueues() error {
 			Logger:       d.options.Logger,
 			ZeroCopyFile: zcFile,
 			ZeroCopyBase: zcBase,
+
+			IntegrityInterval: d.integrityInterval(),
+			IntegrityMetadata: d.integrityMetadata(),
 		})
 		if err == nil {
 			d.runners = append(d.runners, q)
@@ -683,6 +743,24 @@ func (d *Device) startQueues() error {
 		}
 	}
 	return nil
+}
+
+func (d *Device) integrityInterval() int {
+	ip := d.params.Integrity
+	if ip == nil || d.flags&uapi.UBLK_F_INTEGRITY == 0 {
+		return 0
+	}
+	if ip.IntervalSize > 0 {
+		return ip.IntervalSize
+	}
+	return d.blockSize
+}
+
+func (d *Device) integrityMetadata() int {
+	if d.integrityInterval() == 0 {
+		return 0
+	}
+	return d.params.Integrity.MetadataSize
 }
 
 // openCharDevice opens /dev/ublkcN, waiting briefly for the node to appear and
@@ -1123,6 +1201,30 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 		ctrlParams.MaxZoneAppendSectors = uint32(appendMax / uapi.SectorSize)
 	}
 
+	if ip := params.Integrity; ip != nil {
+		ctrlParams.EnableUserCopy = true // the kernel requires it for integrity
+		iv := ip.IntervalSize
+		if iv == 0 {
+			iv = params.LogicalBlockSize
+		}
+		var capFlags uint32
+		if ip.Checksum != IntegrityCsumNone {
+			capFlags |= uapi.LBMD_PI_CAP_INTEGRITY
+		}
+		if ip.RefTag {
+			capFlags |= uapi.LBMD_PI_CAP_REFTAG
+		}
+		ctrlParams.Integrity = &uapi.UblkParamIntegrity{
+			Flags:                capFlags,
+			MaxIntegritySegments: ip.MaxIntegritySegments,
+			IntervalExp:          uint8(sizeShift(iv)),
+			MetadataSize:         uint8(ip.MetadataSize),
+			PIOffset:             uint8(ip.PIOffset),
+			CsumType:             uint8(ip.Checksum),
+			TagSize:              uint8(ip.TagSize),
+		}
+	}
+
 	flags := params.Recovery.flags()
 	if params.NeedGetData {
 		flags |= uapi.UBLK_F_NEED_GET_DATA
@@ -1135,6 +1237,14 @@ func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {
 	}
 	ctrlParams.Flags = flags
 	return ctrlParams
+}
+
+func sizeShift(n int) int {
+	s := 0
+	for ; n > 1; n >>= 1 {
+		s++
+	}
+	return s
 }
 
 // fuaHonored reports whether the server acts on per-I/O FUA: a Handler is

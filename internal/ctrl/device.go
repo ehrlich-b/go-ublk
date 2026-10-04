@@ -72,6 +72,10 @@ func deviceUblkParams(params *DeviceParams) *uapi.UblkParams {
 		p.Zoned.MaxActiveZones = params.MaxActiveZones
 		p.Zoned.MaxZoneAppendSectors = params.MaxZoneAppendSectors
 	}
+	if params.Integrity != nil {
+		p.Types |= uapi.UBLK_PARAM_TYPE_INTEGRITY
+		p.Integrity = *params.Integrity
+	}
 	if params.DMAAlignment != 0 {
 		p.Types |= uapi.UBLK_PARAM_TYPE_DMA_ALIGN
 		p.DMA.Alignment = params.DMAAlignment
@@ -184,6 +188,10 @@ func (c *Controller) buildFeatureFlags(params *DeviceParams) uint64 {
 
 	if params.EnableZoned {
 		flags |= uapi.UBLK_F_ZONED
+	}
+
+	if params.Integrity != nil {
+		flags |= uapi.UBLK_F_INTEGRITY
 	}
 
 	return flags | params.Flags

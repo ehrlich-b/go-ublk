@@ -63,6 +63,10 @@ type DeviceParams struct {
 	MaxOpenZones         uint32
 	MaxActiveZones       uint32
 	MaxZoneAppendSectors uint32
+
+	// Integrity, if set, is sent as UBLK_PARAM_TYPE_INTEGRITY with
+	// UBLK_F_INTEGRITY (which needs USER_COPY).
+	Integrity *uapi.UblkParamIntegrity
 }
 
 // DeviceSize is the device size in bytes.

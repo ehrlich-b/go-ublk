@@ -944,3 +944,115 @@ func testZoned(t *T) error {
 	}
 	return nil
 }
+
+func init() {
+	register("features/integrity", 3*time.Minute, testIntegrity)
+}
+
+// integMem is a RAM backend that also stores integrity metadata.
+type integMem struct {
+	*memBackend
+	mu       sync.Mutex
+	meta     map[int64][]byte // per interval offset
+	interval int64
+	metaSize int
+	writes   atomic.Int64
+}
+
+func (m *integMem) WriteIntegrity(meta []byte, off int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.writes.Add(1)
+	for i := 0; i*m.metaSize < len(meta); i++ {
+		m.meta[off+int64(i)*m.interval] = append([]byte(nil), meta[i*m.metaSize:(i+1)*m.metaSize]...)
+	}
+	return nil
+}
+
+func (m *integMem) ReadIntegrity(meta []byte, off int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := 0; i*m.metaSize < len(meta); i++ {
+		if v, ok := m.meta[off+int64(i)*m.interval]; ok {
+			copy(meta[i*m.metaSize:], v)
+		} else {
+			// Never written: the T10 escape (application tag 0xffff) tells the
+			// block layer not to check this block.
+			for j := i * m.metaSize; j < (i+1)*m.metaSize; j++ {
+				meta[j] = 0xff
+			}
+		}
+	}
+	return nil
+}
+
+// testIntegrity: with T10-DIF CRC16 protection and reference tags, the block
+// layer generates protection information on write and verifies it on read.
+// The backend must receive non-zero metadata, reads must verify, and
+// corrupting one stored tuple must fail exactly that block's read.
+func testIntegrity(t *T) error {
+	if err := needFeatures(ublk.FeatureIntegrity | ublk.FeatureUserCopy); err != nil {
+		return err
+	}
+	b := &integMem{memBackend: newMemBackend(16 << 20), meta: map[int64][]byte{}, interval: 512, metaSize: 8}
+	params := ublk.DefaultParams(b)
+	params.NumQueues, params.QueueDepth = 1, 32
+	params.Integrity = &ublk.IntegrityParams{MetadataSize: 8, IntervalSize: 512,
+		Checksum: ublk.IntegrityCsumCRC16, RefTag: true}
+	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
+	if err != nil {
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.EOPNOTSUPP) {
+			return skipf("kernel refused integrity parameters (CONFIG_BLK_DEV_INTEGRITY?): %v", err)
+		}
+		return err
+	}
+	t.Cleanup(func() { _ = dev.Close() })
+	if err := waitForNode(dev.Path, 5*time.Second); err != nil {
+		return err
+	}
+	name := dev.Path[len("/dev/"):]
+	if fmtb, err := os.ReadFile("/sys/block/" + name + "/integrity/format"); err == nil {
+		t.Logf("integrity format %s", bytes.TrimSpace(fmtb))
+	}
+	f, err := os.OpenFile(dev.Path, os.O_RDWR|syscall.O_DIRECT, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fd := int(f.Fd())
+	p := alignedBuf(64 << 10)
+	newRNG(21).fill(p)
+	if err := pwriteFull(fd, p, 1<<20); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	if b.writes.Load() == 0 {
+		return fmt.Errorf("the backend never received integrity metadata for a write")
+	}
+	b.mu.Lock()
+	tuple := b.meta[1<<20]
+	b.mu.Unlock()
+	if len(tuple) != 8 || bytes.Equal(tuple, make([]byte, 8)) {
+		return fmt.Errorf("stored metadata for the first block is %x; the block layer should have generated a PI tuple", tuple)
+	}
+	q := alignedBuf(len(p))
+	if err := preadFull(fd, q, 1<<20); err != nil {
+		return fmt.Errorf("read with verification: %w", err)
+	}
+	if !bytes.Equal(p, q) {
+		return fmt.Errorf("read back differs")
+	}
+	// Corrupt the guard tag of the block at 1 MiB + 8 KiB.
+	b.mu.Lock()
+	b.meta[1<<20+8192][0] ^= 0xff
+	b.mu.Unlock()
+	one := alignedBuf(4096)
+	if err := preadFull(fd, one, 1<<20+8192); err == nil {
+		return fmt.Errorf("a block with a corrupted PI tuple read back without error")
+	} else {
+		t.Logf("corrupted block read failed as it should: %v", err)
+	}
+	if err := preadFull(fd, one, 1<<20+16384); err != nil {
+		return fmt.Errorf("an intact block failed to read after another was corrupted: %w", err)
+	}
+	return nil
+}

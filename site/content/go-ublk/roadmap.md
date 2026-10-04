@@ -15,6 +15,7 @@ The October 2026 overhaul (see the [changelog](/go-ublk/releases/)) closed what 
 - **Asynchronous backends**: a goroutine per request by default, and a raw `Handler` that can complete from anywhere.
 - **Full control-plane coverage** of the 7.3-rc5 UAPI: every command typed and tested, `GET_FEATURES` negotiation that refuses rather than silently degrades, unprivileged devices, every parameter block.
 - **Lifecycle defects** #17–#23: the ring leak, `STOP_DEV` failures, use-after-unmap, silent queue death, unpinned control buffers, the context-cancel wedge, and the restart crash.
+- **Integrity metadata** (T10-DIF, IP and NVMe CRC64 protection information, verified end to end by the kernel).
 - **Zoned devices** (host-managed, through a `Handler`, with zone reports and zone append).
 - **Zero copy** for file-backed devices (`REGISTER_IO_BUF`, `AUTO_BUF_REG`): fixed-buffer file I/O on the queue's ring, no copy through Go memory.
 - Per-write FUA, `UPDATE_SIZE`, errno pass-through, `TRY_STOP_DEV`, `NO_AUTO_PART_SCAN`, user copy, `NEED_GET_DATA`, per-I/O threads, a public `GET_DEV_INFO`, the shipped systemd units with SIGHUP handling.
@@ -25,7 +26,6 @@ In priority order:
 
 - **Shared-memory zero copy** — `UBLK_F_SHMEM_ZC` and `REG_BUF` (7.1): requests whose pages live in memory the server registered arrive without a copy. The control commands exist; the data path does not use them.
 - **Batch I/O** — `UBLK_F_BATCH_IO` (7.0): fetch and commit many requests per command with multishot `FETCH_IO_CMDS`.
-- **Integrity metadata** — `UBLK_F_INTEGRITY` (7.0): protection-information buffers, through user copy.
 - **`UBLK_F_IO_DESC_SIZE`** (7.3): larger descriptors. The engine already honors a descriptor stride; nothing requests the feature yet.
 
 ## Testing and releases

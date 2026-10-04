@@ -33,6 +33,13 @@ type FUABackend interface {
 	WriteAtFUA(p []byte, off int64) (n int, err error)
 }
 
+// IntegrityBackend stores per-block integrity metadata alongside the data.
+type IntegrityBackend interface {
+	Backend
+	ReadIntegrity(meta []byte, off int64) error
+	WriteIntegrity(meta []byte, off int64) error
+}
+
 // Logger interface for optional logging.
 type Logger interface {
 	Printf(format string, args ...interface{})

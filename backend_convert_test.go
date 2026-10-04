@@ -60,6 +60,7 @@ func TestConvertFieldSetCompleteness(t *testing.T) {
 		"HandlerDiscard":     "CanDiscard",
 		"HandlerWriteZeroes": "CanWriteZeroes",
 		"Zoned":              "ZoneSectors and the zoned limits",
+		"Integrity":          "a uapi.UblkParamIntegrity built from it",
 	}
 	for f := range pubFields {
 		if _, ok := elsewhere[f]; ok {
