@@ -41,7 +41,6 @@ func startEngineWait(t *testing.T, k *fakeKernel, h Handler, inline bool, wait t
 		userCopy:     k.ufile >= 0,
 		handler:      h,
 		inline:       inline,
-		cpu:          -1,
 		newRing:      func(uint32) (ring, error) { return k, nil },
 		waitInterval: wait,
 	})
@@ -397,7 +396,7 @@ func TestEngineNoLostWakeup(t *testing.T) {
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
 		handler: HandlerFunc(func(r *Request) { pending = r }),
-		inline:  true, cpu: -1, waitInterval: time.Hour,
+		inline:  true, waitInterval: time.Hour,
 		newRing: func(uint32) (ring, error) { return k, nil },
 	})
 	e.testBeforeSleep = func() {
@@ -423,10 +422,10 @@ func startZeroCopyEngine(t *testing.T, k *fakeKernel, auto bool) *engine {
 	e := newEngine(engineConfig{
 		tagLo: 0, tagHi: k.depth, charFd: 99,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
-		bufSize:  testBufSize,
-		zeroCopy: &zeroCopyConfig{fd: 77, base: 1 << 20, auto: auto},
-		cpu:      -1, waitInterval: 20 * time.Millisecond,
-		newRing: func(uint32) (ring, error) { return k, nil },
+		bufSize:      testBufSize,
+		zeroCopy:     &zeroCopyConfig{fd: 77, base: 1 << 20, auto: auto},
+		waitInterval: 20 * time.Millisecond,
+		newRing:      func(uint32) (ring, error) { return k, nil },
 	})
 	if err := e.start(); err != nil {
 		t.Fatalf("start: %v", err)
@@ -505,7 +504,7 @@ func startBatchEngine(t *testing.T, k *fakeKernel, h Handler, inline bool) *engi
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
 		userCopy: k.ufile >= 0, batch: true,
-		handler: h, inline: inline, cpu: -1, waitInterval: 20 * time.Millisecond,
+		handler: h, inline: inline, waitInterval: 20 * time.Millisecond,
 		newRing: func(uint32) (ring, error) { return k, nil },
 	})
 	if err := e.start(); err != nil {
@@ -581,7 +580,7 @@ func TestEngineSharedMemory(t *testing.T) {
 	e := newEngine(engineConfig{
 		tagLo: 0, tagHi: 2, charFd: -1, desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize, shmem: shm,
-		handler: h, inline: true, cpu: -1, waitInterval: 20 * time.Millisecond,
+		handler: h, inline: true, waitInterval: 20 * time.Millisecond,
 		newRing: func(uint32) (ring, error) { return k, nil },
 	})
 	if err := e.start(); err != nil {
@@ -604,5 +603,23 @@ func TestEngineSharedMemory(t *testing.T) {
 	}
 	if !bytes.Equal(region[65536:65536+4096], pattern(4096, 9)) {
 		t.Fatalf("shared-memory read did not land in the region")
+	}
+}
+
+// TestEngineZeroCopyWriteZeroesFallsBackToPunch: on a filesystem without
+// FALLOC_FL_ZERO_RANGE (tmpfs) write-zeroes is retried as a hole punch.
+func TestEngineZeroCopyWriteZeroesFallsBackToPunch(t *testing.T) {
+	k := newFakeKernel(t, 1, testBufSize)
+	k.noZeroRange = true
+	startZeroCopyEngine(t, k, true)
+	k.inject(0, fkReq{op: uapi.UBLK_IO_OP_WRITE_ZEROES, sector: 8, nr: 8, id: 1})
+	if c := k.waitCommits(1, 5*time.Second); c[0].result != 0 {
+		t.Fatalf("write-zeroes committed %d, want 0 after the punch fallback", c[0].result)
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	last := k.fileOps[len(k.fileOps)-1]
+	if last.mode&unix.FALLOC_FL_PUNCH_HOLE == 0 {
+		t.Fatalf("last file op %+v is not a hole punch", last)
 	}
 }

@@ -546,3 +546,56 @@ func testChaos(t *T) error {
 	}
 	return nil
 }
+
+func init() {
+	register("lifecycle/list-high-id", time.Minute, testListHighID)
+	register("lifecycle/delete-async", 2*time.Minute, testDeleteAsync)
+}
+
+// testListHighID: ListDevices must find a device whose ID is beyond the old
+// 0-63 probe range.
+func testListHighID(t *T) error {
+	params, _ := memParams(16 << 20)
+	params.DeviceID = 100
+	dev, err := ublk.CreateAndServe(context.Background(), params, nil)
+	if err != nil {
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.EDQUOT) {
+			return skipf("kernel refused device ID 100: %v", err)
+		}
+		return err
+	}
+	t.Cleanup(func() { _ = dev.Close() })
+	if ok, err := listed(100); err != nil || !ok {
+		return fmt.Errorf("ListDevices does not include device 100 (%v)", err)
+	}
+	return nil
+}
+
+// testDeleteAsync reaps a dead server's device with DEL_DEV_ASYNC.
+func testDeleteAsync(t *T) error {
+	if err := needFeatures(0); err != nil {
+		return err
+	}
+	cmd, id, err := startServer(t, 16<<20)
+	if err != nil {
+		return err
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	if err := ublk.DeleteDeviceAsync(id); err != nil {
+		if errors.Is(err, syscall.EOPNOTSUPP) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.Errno(524)) {
+			return skipf("kernel lacks DEL_DEV_ASYNC (6.11+): %v", err)
+		}
+		return err
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if ok, err := listed(id); err == nil && !ok {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("device %d still listed 30s after DEL_DEV_ASYNC", id)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

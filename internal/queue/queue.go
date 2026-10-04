@@ -30,8 +30,8 @@ type QueueConfig struct {
 	DescSize  int    // bytes per I/O descriptor (dev_info.io_desc_size); 0 means 24
 	Handler   Handler
 	Inline    bool
-	Threads   int // engines (OS threads) per queue; >1 needs UBLK_F_PER_IO_DAEMON
-	CPU       int // CPU to pin the queue's threads to, or -1
+	Threads   int   // engines (OS threads) per queue; >1 needs UBLK_F_PER_IO_DAEMON
+	CPUs      []int // CPUs to pin the queue's threads to; empty: no affinity
 	// ZeroCopyFile, if >= 0, serves every request zero-copy against this
 	// file descriptor (device offset 0 = file offset ZeroCopyBase); Handler
 	// is then unused. Needs UBLK_F_SUPPORT_ZERO_COPY in Flags, and uses
@@ -197,7 +197,7 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 			integMeta:     cfg.IntegrityMetadata,
 			handler:       cfg.Handler,
 			inline:        cfg.Inline,
-			cpu:           cfg.CPU,
+			cpus:          cfg.CPUs,
 			logger:        cfg.Logger,
 			newRing:       cfg.newRing,
 		}))

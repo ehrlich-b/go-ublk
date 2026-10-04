@@ -48,7 +48,8 @@ type fakeKernel struct {
 	bufTable    int          // sparse buffer table size, 0 = none registered
 	registered  map[int]bool // buffer-table slots holding a request's pages
 	fileOps     []fkFileOp
-	fileShortBy int // shorten READ_FIXED results by this many bytes
+	fileShortBy int  // shorten READ_FIXED results by this many bytes
+	noZeroRange bool // fail FALLOC_FL_ZERO_RANGE with EOPNOTSUPP, like tmpfs
 
 	// batch I/O
 	batch       bool
@@ -386,7 +387,11 @@ func (k *fakeKernel) consume() int {
 			k.post(sqe.UserData, res)
 		case uring.IORING_OP_FALLOCATE:
 			k.fileOps = append(k.fileOps, fkFileOp{opcode: sqe.Opcode, off: sqe.Off, length: sqe.Addr, mode: sqe.Len})
-			k.post(sqe.UserData, 0)
+			if k.noZeroRange && sqe.Len&unix.FALLOC_FL_ZERO_RANGE != 0 {
+				k.post(sqe.UserData, -int32(syscall.EOPNOTSUPP))
+			} else {
+				k.post(sqe.UserData, 0)
+			}
 		case uring.IORING_OP_FSYNC, uring.IORING_OP_NOP:
 			k.fileOps = append(k.fileOps, fkFileOp{opcode: sqe.Opcode, rwFlags: sqe.OpFlags})
 			k.post(sqe.UserData, 0)

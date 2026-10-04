@@ -199,8 +199,11 @@ type DeviceParams struct {
 	// Advanced options
 	DeviceID int32 // Specific device ID to request (-1 for auto)
 	// Deprecated: ublk devices have no names; this has no effect.
-	DeviceName  string
-	CPUAffinity []int // CPU affinity mask for queue threads
+	DeviceName string
+	// CPUAffinity pins queue i's threads to CPUAffinity[i % len]. Empty (the
+	// default) pins each queue to the CPUs the kernel routes to it
+	// (GET_QUEUE_AFFINITY).
+	CPUAffinity []int
 }
 
 // ZonedParams describes a zoned device's zones.
@@ -748,10 +751,28 @@ func (d *Device) startQueues() error {
 	if threads > 1 && d.flags&uapi.UBLK_F_PER_IO_DAEMON == 0 {
 		threads = 1
 	}
+	var affinity func(q uint16) []int
+	if len(d.params.CPUAffinity) == 0 {
+		// Default placement: each queue's threads run on the CPUs whose I/O
+		// the block layer routes to that queue (GET_QUEUE_AFFINITY), keeping
+		// a request and its completion on the CPUs that issued it.
+		if c, err := createController(); err == nil {
+			defer c.Close()
+			affinity = func(q uint16) []int {
+				cpus, err := c.GetQueueAffinity(context.Background(), d.ID, q)
+				if err != nil {
+					return nil
+				}
+				return cpus
+			}
+		}
+	}
 	for i := 0; i < d.queues; i++ {
-		cpu := -1
+		var cpus []int
 		if n := len(d.params.CPUAffinity); n > 0 {
-			cpu = d.params.CPUAffinity[i%n]
+			cpus = []int{d.params.CPUAffinity[i%n]}
+		} else if affinity != nil {
+			cpus = affinity(uint16(i))
 		}
 		zcFile, zcBase := -1, int64(0)
 		if zc, ok := d.params.Backend.(ZeroCopyBackend); ok && d.flags&uapi.UBLK_F_SUPPORT_ZERO_COPY != 0 {
@@ -766,7 +787,7 @@ func (d *Device) startQueues() error {
 			Handler:      d.handler,
 			Inline:       d.params.Inline,
 			Threads:      threads,
-			CPU:          cpu,
+			CPUs:         cpus,
 			Logger:       d.options.Logger,
 			ZeroCopyFile: zcFile,
 			ZeroCopyBase: zcBase,

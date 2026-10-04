@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
 	"syscall"
 
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
-// maxScanDeviceID bounds the ID space ListDevices probes. The kernel offers no
-// "list devices" control command — the only way to enumerate is to ask each ID
-// for its info — and ublk_drv's ublks_max defaults to 64.
+// maxScanDeviceID bounds the ID space ListDevices probes when sysfs is not
+// available. The kernel offers no "list devices" control command.
 const maxScanDeviceID = 64
 
 // ListDevices returns the IDs of every ublk device currently registered with
@@ -25,7 +26,39 @@ func ListDevices() ([]uint32, error) {
 		return nil, fmt.Errorf("open control device: %w", err)
 	}
 	defer c.Close()
-	return scanDevices(func(id uint32) (*uapi.UblksrvCtrlDevInfo, error) { return c.GetDevInfo(context.Background(), id) })
+	getInfo := func(id uint32) (*uapi.UblksrvCtrlDevInfo, error) { return c.GetDevInfo(context.Background(), id) }
+	// Every registered device has a ublkcN entry in the ublk-char class, so
+	// sysfs lists them all, whatever their IDs; fall back to probing IDs
+	// where sysfs is not mounted.
+	if ids, ok := sysfsDevices(); ok {
+		var live []uint32
+		for _, id := range ids {
+			if _, err := getInfo(id); err == nil {
+				live = append(live, id)
+			} else if !errors.Is(err, syscall.ENODEV) {
+				return nil, fmt.Errorf("query device %d: %w", id, err)
+			}
+		}
+		return live, nil
+	}
+	return scanDevices(getInfo)
+}
+
+// sysfsDevices lists device IDs from /sys/class/ublk-char.
+func sysfsDevices() ([]uint32, bool) {
+	ents, err := os.ReadDir("/sys/class/ublk-char")
+	if err != nil {
+		return nil, false
+	}
+	var ids []uint32
+	for _, e := range ents {
+		var id uint32
+		if _, err := fmt.Sscanf(e.Name(), "ublkc%d", &id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids, true
 }
 
 func scanDevices(getInfo func(uint32) (*uapi.UblksrvCtrlDevInfo, error)) ([]uint32, error) {
@@ -65,6 +98,25 @@ func DeleteDevice(id uint32) error {
 	}
 	_ = c.StopDev(context.Background(), id)
 	if err := c.DelDev(context.Background(), id); err != nil {
+		return fmt.Errorf("device %d: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteDeviceAsync is DeleteDevice without waiting for the device's last
+// reference to go away (DEL_DEV_ASYNC, kernel 6.11+): the ID is freed once
+// every opener has closed it.
+func DeleteDeviceAsync(id uint32) error {
+	c, err := createController()
+	if err != nil {
+		return fmt.Errorf("open control device: %w", err)
+	}
+	defer c.Close()
+	if _, err := c.GetDevInfo(context.Background(), id); err != nil {
+		return fmt.Errorf("device %d: %w", id, err)
+	}
+	_ = c.StopDev(context.Background(), id)
+	if err := c.DelDevAsync(context.Background(), id); err != nil {
 		return fmt.Errorf("device %d: %w", id, err)
 	}
 	return nil

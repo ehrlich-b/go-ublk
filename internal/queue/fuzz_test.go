@@ -69,7 +69,7 @@ func FuzzEngine(f *testing.F) {
 			tagLo: 0, tagHi: depth, charFd: -1,
 			desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 			bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-			handler: h, inline: inline, batch: batch, cpu: -1, waitInterval: 5 * time.Millisecond,
+			handler: h, inline: inline, batch: batch, waitInterval: 5 * time.Millisecond,
 			newRing: func(uint32) (ring, error) { return k, nil },
 		})
 		if err := e.start(); err != nil {

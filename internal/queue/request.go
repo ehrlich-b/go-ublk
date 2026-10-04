@@ -113,6 +113,7 @@ type Request struct {
 
 	zcManual      bool // zero copy: we registered the request's buffer and must unregister it
 	zcUnsupported bool // zero copy: the op has no file equivalent
+	zcPunched     bool // zero copy: write-zeroes retried as a hole punch
 }
 
 // Request completion states. A request is handed to the handler in

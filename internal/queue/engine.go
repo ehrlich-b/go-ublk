@@ -112,7 +112,7 @@ type engineConfig struct {
 	integMeta     int
 	handler       Handler
 	inline        bool
-	cpu           int // -1: no affinity
+	cpus          []int // CPUs to run on; empty: no affinity
 	logger        interfaces.Logger
 	newRing       func(entries uint32) (ring, error)
 	waitInterval  time.Duration
@@ -204,9 +204,11 @@ func (e *engine) run(started chan<- error) {
 }
 
 func (e *engine) setup() error {
-	if e.cfg.cpu >= 0 {
+	if len(e.cfg.cpus) > 0 {
 		var set unix.CPUSet
-		set.Set(e.cfg.cpu)
+		for _, c := range e.cfg.cpus {
+			set.Set(c)
+		}
 		_ = unix.SchedSetaffinity(0, &set) // best effort
 	}
 	n := e.cfg.tagHi - e.cfg.tagLo
@@ -1067,6 +1069,22 @@ func (e *engine) fileIODone(i int, res int32) {
 		return
 	}
 	r := &e.reqs[i]
+	if res == -int32(syscall.EOPNOTSUPP) && r.Op == OpWriteZeroes && !r.zcPunched {
+		// Some filesystems (tmpfs) have no FALLOC_FL_ZERO_RANGE; a punched
+		// hole reads back as zeros too.
+		r.zcPunched = true
+		sqe, err := e.getSQE()
+		if err != nil {
+			e.fail(err)
+			return
+		}
+		zc := e.cfg.zeroCopy
+		uring.PrepFallocate(sqe, int32(zc.fd), unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE,
+			uint64(zc.base+r.Offset), uint64(r.Length))
+		sqe.UserData = kindZC | uint64(r.Tag)
+		return
+	}
+	r.zcPunched = false
 	e.tags[i] = tagHandling
 	r.state.Store(reqAsync)
 	switch {
