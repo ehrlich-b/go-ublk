@@ -77,7 +77,8 @@ timings from that run mean nothing.
 **Still unverified / open (see roadmap):**
 - Host power cut, as opposed to a guest reset: `sysrq-b` drops the guest page cache but not
   macOS's cache of the VM's disk, so the last link in the durability chain is untested.
-- Teardown and lifecycle defects #17-#21 below (found 2026-10-03 by code audit, #17 measured).
+- Teardown and lifecycle defects #18-#21 below (found 2026-10-03 by code audit; #17 fixed
+  2026-10-04, #21's io_uring side too).
 
 **Host kernel caveats (rechecked 2026-08-22) — these are KERNEL bugs, not go-ublk bugs:**
 - **UPSTREAM MOVED, 2026-08-22 — the fix is now GA and a new HWE track landed.**
@@ -344,11 +345,17 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
     them. Reproduced on arm64 7.0.0-30 (2G/3G/4G discards failed), fixed and re-verified there and
     on x86_64 7.0.0-38; `TestRunnerRangeOperationResultIsNonNegative` fails against the old code.
 
-17. **[OPEN — measured] Every io_uring the library creates leaks until process exit.**
-    `minimalRing.Close` closes the fd but never unmaps the SQ, CQ and SQE regions, and the mappings
-    keep the ring alive. Measured on 7.0.0-38: 50 `ListDevices` calls leave 150 io_uring mappings;
-    each device create/close cycle leaves 4 rings (two controllers plus one per queue). A
-    long-lived daemon that creates devices on demand grows without bound.
+17. **[FIXED — 2026-10-04] Every io_uring the library creates leaked until process exit.**
+    `minimalRing.Close` closed the fd but never unmapped the SQ, CQ and SQE regions, and the
+    mappings kept the ring alive. Measured on 7.0.0-38: 50 `ListDevices` calls left 150 io_uring
+    mappings; each device create/close cycle left 4 rings. `internal/uring` is now a general
+    io_uring core (`IoUring`) under the ublk `Ring`; its `Close` is idempotent, unregisters the
+    buffer rings, buffers and files it registered, unmaps every mapping and closes the fd.
+    `TestRingCloseReleasesMappingsAndFds` creates and closes 5000 rings: `/proc/self/maps` 26 -> 26
+    lines and fds unchanged now, 29 -> 15032 lines on the old code (kernel 6.6, WSL rig). Since
+    unmapping makes a racing caller fault where it used to touch orphaned memory, `Ring.Close`
+    defers teardown until any goroutine still inside a `Ring` method returns (a parked
+    `WaitForCompletion` does within 100ms), and later calls fail with `ErrRingClosed`.
 
 18. **[OPEN] `Device.Close` ignores a failed STOP_DEV and tears the queues down anyway.**
     `backend.go` discards the STOP_DEV error, then cancels and joins the ioLoops. The control
@@ -359,17 +366,25 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
     ioLoop does not exit within 2s (a backend call slower than that, e.g. an fsync behind a
     FLUSH), Close unmaps the descriptor and data buffers the goroutine is still using: a fault,
     EFAULT, or silent corruption if the range is remapped. Leaking is the safe failure here.
+    The ring itself is safe since 2026-10-04 (teardown deferred, see #17); the descriptor and
+    data buffer unmaps are not.
 
 20. **[OPEN] A queue's ioLoop can die silently while the device stays LIVE.** Any unexpected
     completion makes `processRequests` return before `FlushSubmissions`, dropping COMMITs already
     prepared for I/O the backend completed. Nothing supervises the loop or tells `Device`, so I/O
     on that queue hangs until STOP_DEV.
 
-21. **[OPEN] Buffers handed to asynchronous control commands are not pinned for the kernel's use.**
-    SET_PARAMS' buffer was only reachable via a uintptr (fixed in the 2026-10-02 hardening merge);
-    ADD_DEV returns before its KeepAlive on the 10s timeout, so a late kernel write lands in freed
-    memory; GET_DEV_INFO's buffer may be stack-allocated and move. Pin with `runtime.Pinner` and
-    leak on timeout.
+21. **[OPEN — uring side FIXED 2026-10-04] Buffers handed to asynchronous control commands are not
+    pinned for the kernel's use.** SET_PARAMS' buffer was only reachable via a uintptr (fixed in
+    the 2026-10-02 hardening merge); ADD_DEV returns before its KeepAlive on the 10s timeout, so a
+    late kernel write lands in freed memory; GET_DEV_INFO's buffer may be stack-allocated and move.
+    `Ring.SubmitCtrlCmd` no longer hands the kernel the caller's buffer: it copies `Len` bytes at
+    `Addr` into ring-owned off-heap (mmap'd) memory, points the SQE there and copies back after the
+    CQE. On timeout (now `ErrCtrlTimeout`; `Config.CtrlTimeout` < 0 waits without one) that staging
+    buffer is abandoned, never reused or unmapped, so a late write cannot reach the Go heap, and the
+    late CQE is told apart by an internal user_data tag instead of being taken for the next
+    command's. Left for the ctrl side: callers' buffers must be heap or off-heap, not stack, and
+    reachable until `SubmitCtrlCmd` returns, because the address still arrives as an integer.
 
 ---
 
