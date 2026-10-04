@@ -3,7 +3,7 @@
   "kernel": "v7.3-rc5",
   "header": "include/uapi/linux/ublk_cmd.h",
   "generated": "2026-10-04",
-  "go_ublk_commit": "next",
+  "go_ublk_commit": "599f54a",
   "method": "git log -S / tag-range rev-list on a blobless torvalds/linux clone; semantics from drivers/block/ublk_drv.c"
  },
  "items": [
