@@ -67,9 +67,17 @@ wedges the host's reboot about one time in five; run as a correctly ordered syst
 zero. **This is a deployment requirement, not a code bug** — see Critical Bugs #15 for the numbers,
 the mechanism, and the one piece still unexplained (why the daemon coredumps during teardown).
 
+**x86_64 on `linux-hwe-7.0` CONFIRMED (2026-10-03)** in a disposable QEMU guest on the WSL rig
+(TCG, Ubuntu 24.04 + `7.0.0-38-generic`, ublk_drv srcversion `6CF423FB6E75AB0FBD69592`), at
+`8712a16`: unit tests 9/9 packages as root, the guarded large-I/O public-runner test, integrity
+sweep **24/24** byte-exact, `vm-loop-e2e` **14/14**, discards of 1G-8G and a 3G write-zeroes
+clean (#16), no leftover devices, no oops, `boot_id` unchanged. Emulated CPU, so op counts and
+timings from that run mean nothing.
+
 **Still unverified / open (see roadmap):**
 - Host power cut, as opposed to a guest reset: `sysrq-b` drops the guest page cache but not
   macOS's cache of the VM's disk, so the last link in the durability chain is untested.
+- Teardown and lifecycle defects #17-#21 below (found 2026-10-03 by code audit, #17 measured).
 
 **Host kernel caveats (rechecked 2026-08-22) — these are KERNEL bugs, not go-ublk bugs:**
 - **UPSTREAM MOVED, 2026-08-22 — the fix is now GA and a new HWE track landed.**
@@ -82,11 +90,11 @@ the mechanism, and the one piece still unexplained (why the daemon coredumps dur
     three ublk teardown fixes are 7.0/7.1-era mainline commits (`845db023a8ae` don't issue
     uring_cmd from fallback task work; `0842186d2c4e` reset per-IO canceled flag on each fetch;
     `f7700a4415af` fix use-after-free in `ublk_cancel_cmd()`), all touching only `ublk_drv.c`.
-    NOT CONFIRMED that 7.0.0-30 actually carries them — that is an inference from the version
-    numbers, and it stays an inference: the full suite is now green on 7.0.0-30 (see above) but
-    a clean suite does not prove the teardown fixes are present, because that bug has never
-    reproduced on demand on any kernel. Confirming it needs the module source or a disassembly,
-    the same way the -1019/-1020 A/B settled the NUMA one.
+    **CORRECTED 2026-10-03: it does not carry two of them.** `845db023a8ae` and `f7700a4415af`
+    first appear in v7.1-rc3, have no Cc: stable, are not in 7.0.y (EOL at 7.0.14), and are in no
+    `linux-hwe-7.0` changelog through 7.0.0-39 (proposed). Only `0842186d2c4e` (CVE-2026-53124)
+    reached 7.0.10, so hwe-7.0 has it from 7.0.0-28. `f7700a4415af` also covers the
+    USER_RECOVERY reset path, which matters before recovery is built on hwe-7.0.
   - `linux-aws-6.17` is still 6.17.0-1020 in noble updates/security, i.e. the build already
     A/B-proven good on x86.
 - **ADD_DEV NULL-deref on Ubuntu 6.17.0-{~29..40}:** their NUMA backport `529d4d632788` landed
@@ -318,6 +326,51 @@ Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 81
     demonstrate) a systemd unit with the correct ordering. Shipping without it means a host
     reboot mid-backup can lose acknowledged writeback and, one time in five, hang the host.
 
+    **Re-diagnosis to test (2026-10-03):** "Blocked by coredump" may not mean a core dump.
+    `synchronize_group_exit()` sets `PF_POSTCOREDUMP` on every exiting thread, so hung_task
+    prints it for any thread stuck in `do_exit`. A plausible chain: logind's session scope sends
+    SIGTERM then SIGHUP; neither example handles SIGHUP, so Go's default kills the process while
+    STOP_DEV is running in an `iou-wrk` worker (`del_gendisk` -> `sync_filesystem`), and the
+    exiting threads wait on that worker, which waits on I/O only the dead daemon could complete.
+    Check by handling SIGHUP in the examples and re-running the unsupervised storm arm, and by
+    capturing `/proc/<tid>/stack` of the stuck threads.
+
+16. **[FIXED — 2026-10-03] A discard or write-zeroes of 2GiB or more failed with EIO.**
+    `submitCommitAndFetch` reported `int32(NrSectors) << 9` for every op. From 4194304 sectors
+    that wraps negative, and the kernel fails any negative result even though the backend had
+    already done the work. `DefaultMaxDiscardSectors` is `0xffffffff`, so the block layer sends
+    ~4GiB requests: `blkdiscard`, `blkdiscard -z`, and `mkfs.ext4`'s whole-device discard on any
+    device over 2GiB all hit it. Range ops now complete with 0, which is all the kernel reads for
+    them. Reproduced on arm64 7.0.0-30 (2G/3G/4G discards failed), fixed and re-verified there and
+    on x86_64 7.0.0-38; `TestRunnerRangeOperationResultIsNonNegative` fails against the old code.
+
+17. **[OPEN — measured] Every io_uring the library creates leaks until process exit.**
+    `minimalRing.Close` closes the fd but never unmaps the SQ, CQ and SQE regions, and the mappings
+    keep the ring alive. Measured on 7.0.0-38: 50 `ListDevices` calls leave 150 io_uring mappings;
+    each device create/close cycle leaves 4 rings (two controllers plus one per queue). A
+    long-lived daemon that creates devices on demand grows without bound.
+
+18. **[OPEN] `Device.Close` ignores a failed STOP_DEV and tears the queues down anyway.**
+    `backend.go` discards the STOP_DEV error, then cancels and joins the ioLoops. The control
+    wait gives up at 10s, and STOP_DEV on a mounted, dirty device syncs the filesystem through the
+    daemon, which can take longer — at which point this strands in-flight I/O exactly as #8 did.
+
+19. **[OPEN] `Runner.Close` frees the ring and buffers after a join that timed out.** If the
+    ioLoop does not exit within 2s (a backend call slower than that, e.g. an fsync behind a
+    FLUSH), Close unmaps the descriptor and data buffers the goroutine is still using: a fault,
+    EFAULT, or silent corruption if the range is remapped. Leaking is the safe failure here.
+
+20. **[OPEN] A queue's ioLoop can die silently while the device stays LIVE.** Any unexpected
+    completion makes `processRequests` return before `FlushSubmissions`, dropping COMMITs already
+    prepared for I/O the backend completed. Nothing supervises the loop or tells `Device`, so I/O
+    on that queue hangs until STOP_DEV.
+
+21. **[OPEN] Buffers handed to asynchronous control commands are not pinned for the kernel's use.**
+    SET_PARAMS' buffer was only reachable via a uintptr (fixed in the 2026-10-02 hardening merge);
+    ADD_DEV returns before its KeepAlive on the 10s timeout, so a late kernel write lands in freed
+    memory; GET_DEV_INFO's buffer may be stack-allocated and move. Pin with `runtime.Pinner` and
+    leak on timeout.
+
 ---
 
 ## Production Roadmap (BCDR use)
@@ -459,17 +512,6 @@ make vm-shutdown-storm # Systemd shutdown storm: reboot NORMALLY under load, hun
 make vm-benchmark      # Performance benchmark
 make vm-stress         # 10x alternating e2e + benchmark
 ```
-
----
-
-## Known Issues
-
-### Slow Device Initialization
-**Symptom:** Device takes `queue_depth * 250ms` to initialize (9+ seconds for QD=32)
-
-**Cause:** Each FETCH_REQ takes ~250ms to complete during setup.
-
-**Status:** Low priority - doesn't affect operation once device is running.
 
 ---
 
