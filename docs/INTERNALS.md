@@ -191,10 +191,12 @@ Critical for shared memory correctness:
 // Before reading descriptor (after CQE received)
 atomic.LoadUint32(&desc.OpFlags)  // acquire semantics
 
-// Before updating SQ tail
-Sfence()  // store fence
+// After writing SQEs: the atomic store is a release (STLR on arm64,
+// XCHG on amd64), so no separate fence is needed
 atomic.StoreUint32(sqTail, newTail)
 ```
+
+See the "Memory ordering" comment in `internal/uring/ring.go` for the full SQ/CQ protocol.
 
 ## Key Files
 
@@ -202,7 +204,8 @@ atomic.StoreUint32(sqTail, newTail)
 |------|---------|
 | `internal/uapi/structs.go` | Kernel struct definitions with size checks |
 | `internal/uapi/constants.go` | Command codes, flags, limits |
-| `internal/uring/minimal.go` | io_uring ring setup and operations |
+| `internal/uring/ring.go` | io_uring core: setup, SQ/CQ, submit and wait |
+| `internal/uring/minimal.go` | ublk command ring (`Ring`) on top of the core |
 | `internal/queue/runner.go` | I/O loop state machine |
 | `internal/ctrl/control.go` | Device lifecycle (ADD, START, STOP, DEL) |
 
