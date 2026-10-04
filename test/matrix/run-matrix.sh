@@ -28,9 +28,16 @@ for f in "$KERNELS"/*/kinfo.json; do
 done
 [ ${#ids[@]} -gt 0 ] || die "no extracted kernels match: ${pats[*]}"
 mkdir -p "$rundir"
+# RESUME=1 skips kernels that already have a result in this run dir.
+if [ "${RESUME:-}" = 1 ]; then
+	todo=()
+	for id in "${ids[@]}"; do [ -f "$rundir/$id${ID_SUFFIX:-}/run.json" ] || todo+=("$id"); done
+	ids=("${todo[@]}")
+	[ ${#ids[@]} -gt 0 ] || log "run $RUN_ID: nothing left to run"
+fi
 log "run $RUN_ID: ${#ids[@]} kernels, $JOBS at a time -> $rundir"
 export ACCEL QEMU MEM SMP TIMEOUT SCALE PROFILE TESTS SUITE_RUN SUITE_SKIP EXTRA_APPEND ID_SUFFIX MATRIX_HOME 2>/dev/null
-printf '%s\n' "${ids[@]}" | xargs -P "$JOBS" -I{} bash "$MATRIX_DIR/run-one.sh" {} "$rundir"
+[ ${#ids[@]} -eq 0 ] || printf '%s\n' "${ids[@]}" | xargs -P "$JOBS" -I{} bash "$MATRIX_DIR/run-one.sh" {} "$rundir"
 
 python3 "$MATRIX_DIR/fetch.py" manifest
 python3 "$MATRIX_DIR/report.py" aggregate "$rundir" --out "$rundir" --manifest "$CACHE/kernels.json"

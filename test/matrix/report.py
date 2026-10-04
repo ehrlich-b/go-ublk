@@ -94,9 +94,13 @@ def cmd_parse(a):
                             "duration_s": round(float(r.get("duration_s") or 0), 2),
                             "detail": str(r.get("detail") or "")})
 
-    timed_out = a.rc in (124, 137)
     booted = "boot" in meta.get("phases", [])
     finished = "done" in meta.get("phases", [])
+    timed_out = a.rc in (124, 137) and not finished
+    if a.hung_poweroff:
+        results.append({"test": "poweroff", "status": "fail", "duration_s": 45.0,
+                        "detail": "payload finished but the guest did not power off within 45s "
+                                  "(kernel shutdown blocked, typically by a wedged ublk device); killed by the host"})
 
     # The test in flight when the guest died: its RUN line has no result.
     if booted and not finished:
@@ -273,8 +277,15 @@ def markdown(matrix, runs):
         for r in notable:
             out.append(f"### {r['id']} ({r['kernel']}): {r['status']}")
             for x in r["results"]:
-                if x["status"] in ("fail", "error", "timeout"):
-                    out.append(f"- `{x['test']}` {x['status']}: {x['detail'][:600]}")
+                if x["status"] not in ("fail", "error", "timeout"):
+                    continue
+                d = x["detail"]
+                if "\n" in d:  # kernel log excerpts keep their lines
+                    out += [f"- `{x['test']}` {x['status']}:", "  ```"]
+                    out += ["  " + l for l in d[:2000].splitlines()]
+                    out.append("  ```")
+                else:
+                    out.append(f"- `{x['test']}` {x['status']}: {d[:600]}")
             out.append("")
     return "\n".join(out) + "\n"
 
@@ -290,6 +301,7 @@ def main():
     p.add_argument("--accel", default="tcg")
     p.add_argument("--boot", default="initramfs")
     p.add_argument("--append", default="", help="extra kernel command line this run used")
+    p.add_argument("--hung-poweroff", action="store_true", help="the host killed a finished guest stuck in power-off")
     p.add_argument("--oops-in-dmesg-only", action="store_true",
                    help="scan only the dmesg block (native runs, where the console is not the kernel log)")
     p.add_argument("--timeout", type=int, default=0)

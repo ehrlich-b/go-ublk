@@ -61,17 +61,36 @@ append="$append goublk.profile=$PROFILE goublk.scale=$SCALE"
 
 log "$rid: booting ($ACCEL, ${SMP} cpu, ${MEM}M, timeout ${TIMEOUT}s)"
 t0=$(date +%s)
+: >"$out/results.log"
 # shellcheck disable=SC2086
 timeout -k 15 "$TIMEOUT" $QEMU "${accel[@]}" -m "$MEM" -smp "$SMP" \
 	-nodefaults -no-user-config -display none -no-reboot \
 	-kernel "$k/vmlinuz" -initrd "$initrd" -append "$append" \
 	-serial "file:$out/console.log" -serial "file:$out/results.log" \
-	>"$out/qemu.log" 2>&1
+	>"$out/qemu.log" 2>&1 &
+qpid=$!
+# A guest whose payload finished but that cannot power off (a wedged ublk
+# device blocks the kernel's shutdown path) is killed after a grace period
+# instead of sitting out the whole timeout; that is recorded, not hidden.
+hung_poweroff=
+while kill -0 "$qpid" 2>/dev/null; do
+	if grep -q '"phase":"done"' "$out/results.log" 2>/dev/null; then
+		for _ in $(seq 1 45); do kill -0 "$qpid" 2>/dev/null || break; sleep 1; done
+		if kill -0 "$qpid" 2>/dev/null; then
+			hung_poweroff=1
+			kill -TERM "$qpid" 2>/dev/null
+		fi
+		break
+	fi
+	sleep 2
+done
+wait "$qpid"
 rc=$?
 wall=$(($(date +%s) - t0))
 rm -f "$initrd"
 
 python3 "$MATRIX_DIR/report.py" parse "$out" --id "$rid" --rc "$rc" --wall "$wall" \
 	--accel "$ACCEL" --timeout "$TIMEOUT" --kinfo "$k/kinfo.json" \
-	--fetch "$k/fetch.json" --commit-file "$BUILD/payload/COMMIT" --append "${EXTRA_APPEND:-}"
+	--fetch "$k/fetch.json" --commit-file "$BUILD/payload/COMMIT" --append "${EXTRA_APPEND:-}" \
+	${hung_poweroff:+--hung-poweroff}
 log "$rid: $(json_get "$out/run.json" status) after ${wall}s (qemu rc=$rc)"
