@@ -19,8 +19,9 @@ itself and the go-ublk reference.
 - **Concurrent by default**: each request runs on its own goroutine, so a
   latency-bound backend (network, object storage) keeps every queue full.
 - **User recovery**: devices survive their server. A crashed or upgraded server
-  hands the device to a new process (`Detach`, `Recover`) with no error reaching
-  the application; tested under systemd with a mounted filesystem.
+  hands the device to a new process (`Detach`, `Recover`); with `RecoveryReissue`
+  no error reaches the application. Tested under systemd with a mounted
+  filesystem.
 - **Zero copy** for file-backed devices: data moves between the request and the
   file with io_uring fixed buffers, never through Go memory. Also shared-memory
   zero copy (`SHMEM_ZC`).

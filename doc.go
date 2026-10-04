@@ -33,8 +33,8 @@
 // With [DeviceParams].Recovery set, a device outlives the process serving it.
 // [Device.Detach] hands it off on purpose (an upgrade); a crash does the same.
 // [Recover] attaches a new process to it, and [FindDevices] finds it by
-// [DeviceParams].Tag. With [RecoveryReissue] or [RecoveryQueue], applications
-// using the device see a pause, not an error.
+// [DeviceParams].Tag. With [RecoveryReissue], applications using the device
+// see a pause, not an error.
 //
 // # Kernel features
 //
