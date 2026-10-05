@@ -72,7 +72,7 @@ type DeviceParams struct {
 	// Feature flags
 	EnableZeroCopy     bool // Enable zero-copy if supported
 	EnableUnprivileged bool // Allow unprivileged operation
-	EnableUserCopy     bool // Use user-copy mode
+	EnableUserCopy     bool // Unsupported: creation returns ErrNotImplemented
 	EnableZoned        bool // Enable zoned storage support
 	EnableIoctlEncode  bool // Use ioctl encoding instead of URING_CMD
 
@@ -100,6 +100,9 @@ type DeviceParams struct {
 func validateParams(params *DeviceParams) error {
 	if params.Backend == nil {
 		return fmt.Errorf("Backend is nil")
+	}
+	if params.EnableUserCopy {
+		return fmt.Errorf("%w: EnableUserCopy requires character-device pread/pwrite support", ErrNotImplemented)
 	}
 
 	// The kernel requires 9 <= logical_bs_shift <= PAGE_SHIFT, i.e. a power of
@@ -290,7 +293,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	// Create controller
 	ctrl, err := createController()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create controller: %v", err)
+		return nil, fmt.Errorf("failed to create controller: %w", err)
 	}
 	defer ctrl.Close()
 
@@ -300,7 +303,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	// Create device using control plane
 	deviceInfo, err := ctrl.AddDevice(&ctrlParams)
 	if err != nil {
-		return nil, fmt.Errorf("failed to add device: %v", err)
+		return nil, fmt.Errorf("failed to add device: %w", err)
 	}
 	deviceID := deviceInfo.DevID
 	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, deviceInfo); err != nil {
@@ -312,7 +315,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	err = ctrl.SetParams(deviceID, &ctrlParams)
 	if err != nil {
 		_ = ctrl.DeleteDevice(deviceID) // Cleanup, ignore error
-		return nil, fmt.Errorf("failed to set parameters: %v", err)
+		return nil, fmt.Errorf("failed to set parameters: %w", err)
 	}
 
 	// Initialize metrics and observer
@@ -362,7 +365,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 			break
 		}
 		if err != syscall.ENOENT {
-			return nil, fmt.Errorf("failed to open %s: %v", charPath, err)
+			return nil, fmt.Errorf("failed to open %s: %w", charPath, err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -427,7 +430,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		runner, err := queue.NewRunner(device.ctx, runnerConfig)
 		if err != nil {
 			teardownPartial()
-			return nil, fmt.Errorf("failed to create queue runner %d: %v", i, err)
+			return nil, fmt.Errorf("failed to create queue runner %d: %w", i, err)
 		}
 		device.runners[i] = runner
 
@@ -435,7 +438,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 		// This must happen before creating the next queue
 		if err := runner.Start(); err != nil {
 			teardownPartial()
-			return nil, fmt.Errorf("failed to start queue runner %d: %v", i, err)
+			return nil, fmt.Errorf("failed to start queue runner %d: %w", i, err)
 		}
 	}
 
@@ -446,7 +449,7 @@ func CreateAndServe(ctx context.Context, params DeviceParams, options *Options) 
 	err = ctrl.StartDevice(deviceID)
 	if err != nil {
 		teardownPartial()
-		return nil, fmt.Errorf("failed to START_DEV: %v", err)
+		return nil, fmt.Errorf("failed to START_DEV: %w", err)
 	}
 
 	device.started = true
@@ -493,7 +496,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	// Create controller
 	controller, err := createController()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create controller: %v", err)
+		return nil, fmt.Errorf("failed to create controller: %w", err)
 	}
 	defer controller.Close()
 
@@ -503,7 +506,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	// Create device using control plane
 	deviceInfo, err := controller.AddDevice(&ctrlParams)
 	if err != nil {
-		return nil, fmt.Errorf("failed to add device: %v", err)
+		return nil, fmt.Errorf("failed to add device: %w", err)
 	}
 	deviceID := deviceInfo.DevID
 	if err := applyNegotiatedDeviceInfo(&params, &ctrlParams, deviceInfo); err != nil {
@@ -515,7 +518,7 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	err = controller.SetParams(deviceID, &ctrlParams)
 	if err != nil {
 		_ = controller.DeleteDevice(deviceID) // Cleanup, ignore error
-		return nil, fmt.Errorf("failed to set parameters: %v", err)
+		return nil, fmt.Errorf("failed to set parameters: %w", err)
 	}
 
 	// Initialize metrics and observer
@@ -585,7 +588,7 @@ func (d *Device) Start(ctx context.Context) error {
 			break
 		}
 		if err != syscall.ENOENT {
-			return fmt.Errorf("failed to open %s: %v", charPath, err)
+			return fmt.Errorf("failed to open %s: %w", charPath, err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -624,7 +627,7 @@ func (d *Device) Start(ctx context.Context) error {
 				}
 			}
 			d.runners = nil
-			return fmt.Errorf("failed to create queue runner %d: %v", i, err)
+			return fmt.Errorf("failed to create queue runner %d: %w", i, err)
 		}
 		d.runners[i] = runner
 	}
@@ -638,7 +641,7 @@ func (d *Device) Start(ctx context.Context) error {
 				}
 			}
 			d.runners = nil
-			return fmt.Errorf("failed to start queue runner %d: %v", i, err)
+			return fmt.Errorf("failed to start queue runner %d: %w", i, err)
 		}
 	}
 
@@ -654,7 +657,7 @@ func (d *Device) Start(ctx context.Context) error {
 			}
 		}
 		d.runners = nil
-		return fmt.Errorf("failed to create controller for start: %v", err)
+		return fmt.Errorf("failed to create controller for start: %w", err)
 	}
 	defer controller.Close()
 
@@ -667,7 +670,7 @@ func (d *Device) Start(ctx context.Context) error {
 			}
 		}
 		d.runners = nil
-		return fmt.Errorf("failed to START_DEV: %v", err)
+		return fmt.Errorf("failed to START_DEV: %w", err)
 	}
 
 	d.started = true
@@ -705,7 +708,7 @@ func (d *Device) Stop() error {
 	// Create controller to stop device
 	controller, err := createController()
 	if err != nil {
-		return fmt.Errorf("failed to create controller for stop: %v", err)
+		return fmt.Errorf("failed to create controller for stop: %w", err)
 	}
 	defer controller.Close()
 
@@ -715,7 +718,7 @@ func (d *Device) Stop() error {
 	// first strands the in-flight I/O and STOP_DEV blocks (Critical Bug #8).
 	err = controller.StopDevice(d.ID)
 	if err != nil {
-		return fmt.Errorf("failed to stop device: %v", err)
+		return fmt.Errorf("failed to stop device: %w", err)
 	}
 
 	// Device is drained and DEAD; cancel the ioLoop contexts and join them,
@@ -752,7 +755,7 @@ func (d *Device) Close() error {
 	// Create controller for cleanup
 	controller, err := createController()
 	if err != nil {
-		return fmt.Errorf("failed to create controller for close: %v", err)
+		return fmt.Errorf("failed to create controller for close: %w", err)
 	}
 	defer controller.Close()
 
@@ -796,7 +799,7 @@ func (d *Device) Close() error {
 	// references are released, so DEL_DEV no longer blocks on the refcount.
 	err = controller.DeleteDevice(d.ID)
 	if err != nil {
-		return fmt.Errorf("failed to delete device: %v", err)
+		return fmt.Errorf("failed to delete device: %w", err)
 	}
 
 	d.closed = true
@@ -941,10 +944,9 @@ func (d *Device) MetricsSnapshot() MetricsSnapshot {
 	return d.metrics.Snapshot()
 }
 
-// createController creates a new control plane controller
-func createController() (*ctrl.Controller, error) {
-	return ctrl.NewController()
-}
+// createController opens the control plane. Tests replace it to inject failures
+// without opening a kernel device; production callers never change it.
+var createController = ctrl.NewController
 
 // convertToCtrlParams converts public DeviceParams to internal ctrl.DeviceParams
 func convertToCtrlParams(params DeviceParams) ctrl.DeviceParams {

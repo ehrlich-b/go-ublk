@@ -42,9 +42,9 @@ func TestUnitUAPISizes(t *testing.T) {
 		t.Errorf("sizeof(ublk_param_zoned) = %d, want 32", got)
 	}
 
-	// Go rounds struct ublk_params (108 bytes of content) up to an 8-byte
-	// multiple (112) for array alignment; the kernel ABI size is the sum of
-	// its parts. The marshaler emits the compact 108-byte kernel layout.
+	// Both Go and C round this version of ublk_params (108 bytes of fields)
+	// up to 112 for alignment. The marshaler may send the 108-byte prefix
+	// through the last selected field, omitting only tail padding.
 	if got := unsafe.Sizeof(UblkParams{}); got != 112 {
 		t.Errorf("sizeof(UblkParams) = %d, want 112 (Go alignment pad, see below)", got)
 	}

@@ -6,7 +6,9 @@ import (
 	"unsafe"
 )
 
-// Marshal converts a struct to bytes using the system's native byte order
+// Marshal converts a UAPI struct to bytes on the supported little-endian hosts.
+// Explicit command fields use little-endian order; parameter blocks and the
+// direct-copy fallback use native order. Big-endian hosts are not supported.
 func Marshal(v interface{}) []byte {
 	switch val := v.(type) {
 	case *UblksrvCtrlCmd:
@@ -138,22 +140,35 @@ func unmarshalIOCmd(data []byte, cmd *UblksrvIOCmd) error {
 	return nil
 }
 
-// paramsSize returns the on-wire byte length of the parameters actually present.
+// Linux keeps parameter blocks at fixed offsets, even if preceding types are
+// absent. Send the prefix through the last selected block, without C tail padding.
+const (
+	paramsHeaderSize    = 8
+	paramsBasicOffset   = 8
+	paramsDiscardOffset = 40
+	paramsDevtOffset    = 60
+	paramsZonedOffset   = 76
+	paramsBasicEnd      = 40
+	paramsDiscardEnd    = 60
+	paramsDevtEnd       = 76
+	paramsZonedEnd      = 108
+)
+
+// paramsSize returns the prefix length needed for all selected known blocks.
 func paramsSize(params *UblkParams) int {
-	size := 8 // len + types
-	if params.HasBasic() {
-		size += int(unsafe.Sizeof(params.Basic))
-	}
-	if params.HasDiscard() {
-		size += int(unsafe.Sizeof(params.Discard))
+	if params.HasZoned() {
+		return paramsZonedEnd
 	}
 	if params.HasDevt() {
-		size += int(unsafe.Sizeof(params.Devt))
+		return paramsDevtEnd
 	}
-	if params.HasZoned() {
-		size += int(unsafe.Sizeof(params.Zoned))
+	if params.HasDiscard() {
+		return paramsDiscardEnd
 	}
-	return size
+	if params.HasBasic() {
+		return paramsBasicEnd
+	}
+	return paramsHeaderSize
 }
 
 // marshalParams handles the complex UblkParams structure
@@ -170,29 +185,24 @@ func marshalParamsInto(params *UblkParams, buf []byte) (int, error) {
 		return 0, ErrBufferTooSmall
 	}
 
-	offset := 0
-	// len + types
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(size))
-	offset += 4
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], params.Types)
-	offset += 4
+	// Clear holes in reused buffers, while leaving bytes after the prefix alone.
+	clear(buf[:size])
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(size))
+	binary.LittleEndian.PutUint32(buf[4:8], params.Types)
 
-	// Each present parameter block is copied unshrunk (native byte order,
-	// matching kernel layout exactly; Go layouts have no internal padding).
+	// Copy each selected block to its fixed kernel offset. These individual
+	// Go block layouts have no internal padding on supported architectures.
 	if params.HasBasic() {
-		rawCopy(buf[offset:], unsafe.Pointer(&params.Basic), int(unsafe.Sizeof(params.Basic)))
-		offset += int(unsafe.Sizeof(params.Basic))
+		rawCopy(buf[paramsBasicOffset:paramsBasicEnd], unsafe.Pointer(&params.Basic), 32)
 	}
 	if params.HasDiscard() {
-		rawCopy(buf[offset:], unsafe.Pointer(&params.Discard), int(unsafe.Sizeof(params.Discard)))
-		offset += int(unsafe.Sizeof(params.Discard))
+		rawCopy(buf[paramsDiscardOffset:paramsDiscardEnd], unsafe.Pointer(&params.Discard), 20)
 	}
 	if params.HasDevt() {
-		rawCopy(buf[offset:], unsafe.Pointer(&params.Devt), int(unsafe.Sizeof(params.Devt)))
-		offset += int(unsafe.Sizeof(params.Devt))
+		rawCopy(buf[paramsDevtOffset:paramsDevtEnd], unsafe.Pointer(&params.Devt), 16)
 	}
 	if params.HasZoned() {
-		rawCopy(buf[offset:], unsafe.Pointer(&params.Zoned), int(unsafe.Sizeof(params.Zoned)))
+		rawCopy(buf[paramsZonedOffset:paramsZonedEnd], unsafe.Pointer(&params.Zoned), 32)
 	}
 
 	return size, nil
@@ -200,48 +210,51 @@ func marshalParamsInto(params *UblkParams, buf []byte) (int, error) {
 
 // unmarshalParams handles the complex UblkParams structure
 func unmarshalParams(data []byte, params *UblkParams) error {
-	if len(data) < 8 {
+	return decodeParams(data, params, false)
+}
+
+// UnmarshalParamsResponse decodes a GET_PARAMS buffer. Linux retains the length
+// supplied to SET_PARAMS (or zero before SET_PARAMS), even when it adds DEVT to
+// GET_PARAMS. Thus response Len is metadata, not a bound on populated fields.
+// The caller must pass the buffer capacity supplied to GET_PARAMS; known blocks
+// are bounded by that slice. Unmarshal remains strict for serialized records.
+func UnmarshalParamsResponse(data []byte, params *UblkParams) error {
+	return decodeParams(data, params, true)
+}
+
+func decodeParams(data []byte, params *UblkParams, kernelResponse bool) error {
+	if len(data) < paramsHeaderSize {
 		return ErrInsufficientData
 	}
 
-	length := binary.LittleEndian.Uint32(data[0:4])
-	params.Len = length
-	params.Types = binary.LittleEndian.Uint32(data[4:8])
-
-	if int(length) > len(data) {
+	// Validate before mutating the destination. Use a widening comparison so a
+	// malicious length cannot wrap int on 32-bit builds. In strict serialized
+	// records, trailing data outside Len cannot satisfy a selected block;
+	// kernel response Len instead retains SET metadata as described above.
+	decoded := UblkParams{
+		Len:   binary.LittleEndian.Uint32(data[0:4]),
+		Types: binary.LittleEndian.Uint32(data[4:8]),
+	}
+	required := paramsSize(&decoded)
+	if len(data) < required {
 		return ErrInsufficientData
 	}
-
-	offset := 8
-
-	// Unmarshal each parameter type that's present
-	if params.HasBasic() {
-		if err := directUnmarshal(data[offset:], &params.Basic); err != nil {
-			return err
-		}
-		offset += int(unsafe.Sizeof(params.Basic))
+	if !kernelResponse && (uint64(decoded.Len) > uint64(len(data)) || decoded.Len < uint32(required)) {
+		return ErrInsufficientData
 	}
-
-	if params.HasDiscard() {
-		if err := directUnmarshal(data[offset:], &params.Discard); err != nil {
-			return err
-		}
-		offset += int(unsafe.Sizeof(params.Discard))
+	if decoded.HasBasic() {
+		_ = directUnmarshal(data[paramsBasicOffset:paramsBasicEnd], &decoded.Basic)
 	}
-
-	if params.HasDevt() {
-		if err := directUnmarshal(data[offset:], &params.Devt); err != nil {
-			return err
-		}
-		offset += int(unsafe.Sizeof(params.Devt))
+	if decoded.HasDiscard() {
+		_ = directUnmarshal(data[paramsDiscardOffset:paramsDiscardEnd], &decoded.Discard)
 	}
-
-	if params.HasZoned() {
-		if err := directUnmarshal(data[offset:], &params.Zoned); err != nil {
-			return err
-		}
+	if decoded.HasDevt() {
+		_ = directUnmarshal(data[paramsDevtOffset:paramsDevtEnd], &decoded.Devt)
 	}
-
+	if decoded.HasZoned() {
+		_ = directUnmarshal(data[paramsZonedOffset:paramsZonedEnd], &decoded.Zoned)
+	}
+	*params = decoded
 	return nil
 }
 

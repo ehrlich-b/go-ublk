@@ -2,9 +2,26 @@ package ublk
 
 import (
 	"errors"
+	"fmt"
 	"syscall"
 	"testing"
 )
+
+func TestWrapErrorPreservesNestedClassification(t *testing.T) {
+	for _, errno := range []syscall.Errno{syscall.ENOENT, syscall.EOPNOTSUPP, syscall.EACCES, syscall.ETIMEDOUT} {
+		inner := fmt.Errorf("control command: %w", errno)
+		got := WrapError("CREATE", inner)
+		if got.Code != mapErrnoToCode(errno) || got.Errno != errno || !errors.Is(got, errno) || !errors.Is(got, inner) {
+			t.Fatalf("wrapped %v loses classification or chain: %+v", errno, got)
+		}
+	}
+	original := &Error{Op: "START", DevID: 42, Queue: 3, Code: ErrCodeDeviceBusy, Errno: syscall.EBUSY, Msg: "busy", Inner: syscall.EBUSY}
+	inner := fmt.Errorf("outer context: %w", original)
+	got := WrapError("CREATE", inner)
+	if got.Op != "CREATE" || got.DevID != 42 || got.Queue != 3 || got.Code != original.Code || got.Errno != original.Errno || !errors.Is(got, original) || !errors.Is(got, inner) {
+		t.Fatalf("structured context lost: %+v", got)
+	}
+}
 
 func TestStructuredError(t *testing.T) {
 	// Test basic error creation

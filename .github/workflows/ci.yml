@@ -33,3 +33,6 @@ jobs:
 
       - name: Run go vet
         run: go vet ./...
+
+      - name: Bounded synthetic UAPI fuzzing
+        run: make test-uapi-fuzz FUZZ_TIME=15s FUZZ_PARALLEL=2

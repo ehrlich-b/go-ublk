@@ -2,6 +2,7 @@ package ctrl
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -27,7 +28,7 @@ type Controller struct {
 func NewController() (*Controller, error) {
 	fd, err := syscall.Open(UblkControlPath, syscall.O_RDWR, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open %s: %v", UblkControlPath, err)
+		return nil, fmt.Errorf("failed to open %s: %w", UblkControlPath, err)
 	}
 
 	config := uring.Config{
@@ -39,7 +40,7 @@ func NewController() (*Controller, error) {
 	ring, err := uring.NewRing(config)
 	if err != nil {
 		syscall.Close(fd)
-		return nil, fmt.Errorf("failed to create io_uring: %v", err)
+		return nil, fmt.Errorf("failed to create io_uring: %w", err)
 	}
 
 	return &Controller{
@@ -50,11 +51,28 @@ func NewController() (*Controller, error) {
 }
 
 func (c *Controller) Close() error {
+	var ringErr, fdErr error
 	if c.ring != nil {
-		c.ring.Close()
+		ring := c.ring
+		c.ring = nil
+		ringErr = ring.Close()
 	}
 	if c.controlFd >= 0 {
-		return syscall.Close(c.controlFd)
+		fd := c.controlFd
+		c.controlFd = -1
+		fdErr = syscall.Close(fd)
+	}
+	return errors.Join(ringErr, fdErr)
+}
+
+// controlResultError preserves both transport errors and negative kernel CQEs
+// for errors.Is/errors.As, including callers' structured errno classification.
+func controlResultError(op string, result uring.Result, err error) error {
+	if err != nil {
+		return fmt.Errorf("%s submit failed: %w", op, err)
+	}
+	if result.Value() < 0 {
+		return fmt.Errorf("%s failed: %w", op, syscall.Errno(-int64(result.Value())))
 	}
 	return nil
 }
@@ -91,7 +109,7 @@ func (c *Controller) AddDevice(params *DeviceParams) (*uapi.UblksrvCtrlDevInfo, 
 	// Marshal device info (64-byte format matches kernel 6.6+)
 	deviceInfoBytes := uapi.Marshal(devInfo)
 
-	// Build control header (48-byte variant)
+	// Build the 32-byte control header.
 	cmd := &uapi.UblksrvCtrlCmd{
 		DevID:      devInfo.DevID,
 		QueueID:    0xFFFF,
@@ -114,18 +132,12 @@ func (c *Controller) AddDevice(params *DeviceParams) (*uapi.UblksrvCtrlDevInfo, 
 	// Use ioctl encoding - required by modern kernels (6.11+)
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_ADD_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return nil, fmt.Errorf("ADD_DEV submit failed: %v", err)
+	runtime.KeepAlive(deviceInfoBytes)
+	if err := controlResultError("ADD_DEV", result, err); err != nil {
+		return nil, err
 	}
 
 	c.logger.Info("ADD_DEV completed", "result", result.Value())
-
-	if result.Value() < 0 {
-		return nil, fmt.Errorf("ADD_DEV failed with error: %d", result.Value())
-	}
-
-	// Ensure device info buffer stays alive until after kernel copies it
-	runtime.KeepAlive(deviceInfoBytes)
 
 	info := uapi.UnmarshalCtrlDevInfo(deviceInfoBytes)
 	c.logger.Info("device created", "dev_id", info.DevID,
@@ -276,15 +288,12 @@ func (c *Controller) SetParams(deviceID uint32, params *DeviceParams) error {
 
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_SET_PARAMS)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return fmt.Errorf("SET_PARAMS failed: %v", err)
+	runtime.KeepAlive(buf)
+	if err := controlResultError("SET_PARAMS", result, err); err != nil {
+		return err
 	}
 
 	c.logger.Info("SET_PARAMS completed", "result", result.Value())
-
-	if result.Value() < 0 {
-		return fmt.Errorf("SET_PARAMS failed with error: %d", result.Value())
-	}
 
 	return nil
 }
@@ -303,15 +312,11 @@ func (c *Controller) StartDevice(deviceID uint32) error {
 	}
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_START_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return fmt.Errorf("START_DEV failed: %v", err)
+	if err := controlResultError("START_DEV", result, err); err != nil {
+		return err
 	}
 
 	c.logger.Info("START_DEV completed", "result", result.Value())
-
-	if result.Value() < 0 {
-		return fmt.Errorf("START_DEV failed with error: %d", result.Value())
-	}
 
 	return nil
 }
@@ -329,15 +334,7 @@ func (c *Controller) StopDevice(deviceID uint32) error {
 	}
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_STOP_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return fmt.Errorf("STOP_DEV failed: %v", err)
-	}
-
-	if result.Value() < 0 {
-		return fmt.Errorf("STOP_DEV failed with error: %d", result.Value())
-	}
-
-	return nil
+	return controlResultError("STOP_DEV", result, err)
 }
 
 func (c *Controller) DeleteDevice(deviceID uint32) error {
@@ -353,15 +350,7 @@ func (c *Controller) DeleteDevice(deviceID uint32) error {
 	}
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_DEL_DEV)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return fmt.Errorf("DEL_DEV failed: %v", err)
-	}
-
-	if result.Value() < 0 {
-		return fmt.Errorf("DEL_DEV failed with error: %d", result.Value())
-	}
-
-	return nil
+	return controlResultError("DEL_DEV", result, err)
 }
 
 func (c *Controller) GetDeviceInfo(deviceID uint32) (*uapi.UblksrvCtrlDevInfo, error) {
@@ -380,12 +369,9 @@ func (c *Controller) GetDeviceInfo(deviceID uint32) (*uapi.UblksrvCtrlDevInfo, e
 
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_DEV_INFO)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return nil, fmt.Errorf("GET_DEV_INFO failed: %v", err)
-	}
-
-	if result.Value() < 0 {
-		return nil, fmt.Errorf("GET_DEV_INFO failed with error: %d", result.Value())
+	runtime.KeepAlive(buf)
+	if err := controlResultError("GET_DEV_INFO", result, err); err != nil {
+		return nil, err
 	}
 
 	devInfo := uapi.UnmarshalCtrlDevInfo(buf)
@@ -394,8 +380,10 @@ func (c *Controller) GetDeviceInfo(deviceID uint32) (*uapi.UblksrvCtrlDevInfo, e
 
 // GetParams retrieves current device parameters (including devt majors/minors when available)
 func (c *Controller) GetParams(deviceID uint32) (*uapi.UblkParams, error) {
-	// Allocate a buffer big enough for common parameter sets (basic + devt)
-	buf := make([]byte, 128)
+	// GET_PARAMS reads this input header before copying the kernel's fixed
+	// layout back. Reserve room for newer appended blocks; decode known types.
+	buf := make([]byte, 256)
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(buf)))
 
 	cmd := &uapi.UblksrvCtrlCmd{
 		DevID:      deviceID,
@@ -410,15 +398,13 @@ func (c *Controller) GetParams(deviceID uint32) (*uapi.UblkParams, error) {
 
 	op := uapi.UblkCtrlCmd(uapi.UBLK_CMD_GET_PARAMS)
 	result, err := c.ring.SubmitCtrlCmd(op, cmd, 0)
-	if err != nil {
-		return nil, fmt.Errorf("GET_PARAMS failed: %v", err)
-	}
-	if result.Value() < 0 {
-		return nil, fmt.Errorf("GET_PARAMS failed with error: %d", result.Value())
+	runtime.KeepAlive(buf)
+	if err := controlResultError("GET_PARAMS", result, err); err != nil {
+		return nil, err
 	}
 	params := &uapi.UblkParams{}
-	if err := uapi.Unmarshal(buf, params); err != nil {
-		params.Len = uint32(len(buf))
+	if err := uapi.UnmarshalParamsResponse(buf, params); err != nil {
+		return nil, fmt.Errorf("GET_PARAMS decode failed: %w", err)
 	}
 	return params, nil
 }

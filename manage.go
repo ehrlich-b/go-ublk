@@ -1,9 +1,11 @@
 package ublk
 
 import (
+	"errors"
 	"fmt"
+	"syscall"
 
-	"github.com/ehrlich-b/go-ublk/internal/ctrl"
+	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
 // maxScanDeviceID bounds the ID space ListDevices probes. The kernel offers no
@@ -14,18 +16,28 @@ const maxScanDeviceID = 64
 // ListDevices returns the IDs of every ublk device currently registered with
 // the kernel, including devices with no live server behind them (for example
 // one left over from a daemon that was killed ungracefully). Requires root or
-// CAP_SYS_ADMIN.
+// CAP_SYS_ADMIN. A query failure other than an absent device returns an error;
+// callers must not treat an incomplete scan as an empty device list.
 func ListDevices() ([]uint32, error) {
-	c, err := ctrl.NewController()
+	c, err := createController()
 	if err != nil {
 		return nil, fmt.Errorf("open control device: %w", err)
 	}
 	defer c.Close()
+	return scanDevices(c.GetDeviceInfo)
+}
 
+func scanDevices(getInfo func(uint32) (*uapi.UblksrvCtrlDevInfo, error)) ([]uint32, error) {
 	var ids []uint32
 	for id := uint32(0); id < maxScanDeviceID; id++ {
-		if _, err := c.GetDeviceInfo(id); err == nil {
+		_, err := getInfo(id)
+		switch {
+		case err == nil:
 			ids = append(ids, id)
+		case errors.Is(err, syscall.ENODEV):
+			// The control protocol returns ENODEV for an unregistered ID.
+		default:
+			return nil, fmt.Errorf("query device %d: %w", id, err)
 		}
 	}
 	return ids, nil
@@ -41,7 +53,7 @@ func ListDevices() ([]uint32, error) {
 // The STOP step is best effort: a device whose server is already gone is
 // quiesced, and the error STOP_DEV reports for it is not interesting here.
 func DeleteDevice(id uint32) error {
-	c, err := ctrl.NewController()
+	c, err := createController()
 	if err != nil {
 		return fmt.Errorf("open control device: %w", err)
 	}

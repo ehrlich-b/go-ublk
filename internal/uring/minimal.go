@@ -197,7 +197,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 		0)
 	if errno != 0 {
 		logger.Error("io_uring_setup failed", "errno", errno)
-		return nil, fmt.Errorf("io_uring_setup failed: %v", errno)
+		return nil, fmt.Errorf("io_uring_setup failed: %w", errno)
 	}
 
 	logger.Debug("io_uring_setup succeeded", "ring_fd", ringFd)
@@ -215,7 +215,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	sqAddr, err := unix.Mmap(int(ringFd), IORING_OFF_SQ_RING, int(sqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
 		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap SQ: %v", err)
+		return nil, fmt.Errorf("failed to mmap SQ: %w", err)
 	}
 	// Map CQ ring
 	cqSize := params.cqOff.cqes + params.cqEntries*uint32(unsafe.Sizeof(cqe32{}))
@@ -223,7 +223,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 	if err != nil {
 		_ = unix.Munmap(sqAddr) // Cleanup, ignore error
 		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap CQ: %v", err)
+		return nil, fmt.Errorf("failed to mmap CQ: %w", err)
 	}
 	// Map SQEs array
 	sqesSize := int(params.sqEntries) * int(unsafe.Sizeof(sqe128{}))
@@ -232,7 +232,7 @@ func NewMinimalRing(entries uint32, ctrlFd int32) (Ring, error) {
 		_ = unix.Munmap(cqAddr) // Cleanup, ignore error
 		_ = unix.Munmap(sqAddr) // Cleanup, ignore error
 		syscall.Close(int(ringFd))
-		return nil, fmt.Errorf("failed to mmap SQEs: %v", err)
+		return nil, fmt.Errorf("failed to mmap SQEs: %w", err)
 	}
 
 	// Pre-allocate pool sizes based on queue depth
@@ -325,7 +325,7 @@ func (r *minimalRing) SubmitCtrlCmdAsync(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCm
 	// Call io_uring_enter to submit but don't wait
 	submitted, errno := r.submitOnly(1)
 	if errno != 0 || submitted != 1 {
-		return nil, fmt.Errorf("failed to submit: %v", errno)
+		return nil, fmt.Errorf("failed to submit: %w", errno)
 	}
 
 	logger.Debug("command submitted without waiting", "userData", userData)
@@ -471,7 +471,7 @@ func (r *minimalRing) RegisterFiles(fds []int32) error {
 		0, 0)
 
 	if errno != 0 {
-		return fmt.Errorf("io_uring_register files failed: %v", errno)
+		return fmt.Errorf("io_uring_register files failed: %w", errno)
 	}
 	return nil
 }
@@ -537,7 +537,7 @@ func (r *minimalRing) SubmitCtrlCmd(cmd uint32, ctrlCmd *uapi.UblksrvCtrlCmd, us
 	result, err := r.submitAndWait(sqe)
 	if err != nil {
 		logger.Error("submitAndWait failed", "error", err)
-		return nil, fmt.Errorf("failed to submit control command: %v", err)
+		return nil, fmt.Errorf("failed to submit control command: %w", err)
 	}
 
 	logger.Debug("URING_CMD completed", "result", result.Value(), "error", result.Error())
@@ -708,7 +708,7 @@ func (r *minimalRing) WaitForCompletion(timeout int) ([]Result, error) {
 			// Signal interrupted us, retry
 			continue
 		}
-		return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)
+		return nil, fmt.Errorf("io_uring_enter wait failed: %w", errno)
 	}
 
 	// Drain whatever arrived
@@ -827,7 +827,7 @@ func (r *minimalRing) submitAndWait(sqe *sqe128) (Result, error) {
 		}
 		if serrno != 0 {
 			logger.Error("io_uring_enter submit failed", "errno", serrno)
-			return nil, fmt.Errorf("io_uring_enter submit failed: %v", serrno)
+			return nil, fmt.Errorf("io_uring_enter submit failed: %w", serrno)
 		}
 		logger.Debug("control SQE submitted", "submitted", submitted)
 		break
@@ -867,7 +867,7 @@ func (r *minimalRing) waitCtrlCompletion() (Result, error) {
 		case 0, syscall.ETIME, syscall.EINTR:
 			// fall through to re-poll / re-wait
 		default:
-			return nil, fmt.Errorf("io_uring_enter wait failed: %v", errno)
+			return nil, fmt.Errorf("io_uring_enter wait failed: %w", errno)
 		}
 	}
 }
@@ -1037,7 +1037,7 @@ func (r *minimalRing) flushSubmissions() (uint32, error) {
 	// ONE syscall for the entire batch
 	submitted, errno := r.submitOnly(pending)
 	if errno != 0 {
-		return 0, fmt.Errorf("io_uring_enter failed: %v", errno)
+		return 0, fmt.Errorf("io_uring_enter failed: %w", errno)
 	}
 
 	return submitted, nil
@@ -1078,7 +1078,7 @@ func (r *minimalRing) submitOnlyCmd(sqe *sqe128) (uint32, error) {
 	// Submit without waiting
 	submitted, errno := r.submitOnly(1)
 	if errno != 0 {
-		return 0, fmt.Errorf("io_uring_enter failed: %v", errno)
+		return 0, fmt.Errorf("io_uring_enter failed: %w", errno)
 	}
 
 	return submitted, nil

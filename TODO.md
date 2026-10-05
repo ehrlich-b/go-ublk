@@ -117,7 +117,10 @@ the mechanism, and the one piece still unexplained (why the daemon coredumps dur
 Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 816k randwrite
 (RAM backend, Q=4) — the old "~100k IOPS" figures were buffered and are superseded.
 
-**Minimum kernel:** 6.8+ (IOCTL encoding required). Fixes verified on arm64, kernel 6.17.
+**Documented device requirement:** 6.8+. Encoded commands already exist in the
+upstream 6.6 header; that alone does not establish a lower tested device minimum.
+See [compatibility and acceptance evidence](docs/compatibility.md). Fixes were
+historically verified on arm64, kernel 6.17; the latest hardening needs device acceptance.
 
 ---
 
@@ -415,7 +418,11 @@ performance last.** Nothing holding customer data ships before Phase 2 closes.
 ### Phase 4 — Testing infrastructure (close the gap that shipped "stable")
 - [ ] Fault-injection suite: multi-queue, O_DIRECT, concurrent, long-running, under GC/memory pressure
 - [ ] CI that runs the real failure modes (not buffered happy-path dd/fio), on x86_64 + arm64
-- [ ] Fuzzing for UAPI marshal/unmarshal; invariant assertions around `unsafe`
+- [x] Bounded synthetic UAPI marshal/unmarshal fuzzing (2026-10-02): fixed commands,
+      descriptors, strict params and kernel-response params; all known masks,
+      atomic bounds failures and buffer canaries. Independent C header fixtures
+      cover 6.0/6.6/6.8/7.0 prefixes. Does not fuzz arbitrary pointer-bearing types
+      or real kernel/device operations; see [coverage matrix](docs/compatibility.md).
 - [ ] Graceful handling of kernel-version differences
 
 ### Phase 5 — Performance (only after correctness is proven)

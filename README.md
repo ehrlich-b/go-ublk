@@ -113,6 +113,12 @@ estimates. The four-job workloads reached about 80% of the loop baseline.
 - `ublk_drv` module loaded
 - Root or CAP_SYS_ADMIN
 
+The userspace validation and kernel/device coverage differ. See
+[the compatibility matrix](docs/compatibility.md) for tested headers, execution
+environments, historical device results, and the remaining acceptance gates.
+The 2026-10-02 WSL run tested userspace code without an available ublk driver;
+it does not establish device support for WSL or Linux 6.6.
+
 ## References
 
 - [Linux kernel ublk docs](https://docs.kernel.org/block/ublk.html)
