@@ -5,13 +5,13 @@ description: "UBLK_F_ZONED: exposing a zoned block device, zone operations, REPO
 weight: 110
 ---
 
-A zoned block device divides its capacity into fixed-size zones. Sequential zones must be written at their write pointer and reset before they are rewritten; conventional zones behave like an ordinary disk. SMR hard drives and NVMe ZNS SSDs work this way, and zoned-aware filesystems (f2fs, btrfs in zoned mode) and applications write to them directly.
+Zoned devices divide capacity into fixed-size zones. Sequential zones require writes at a write pointer and reset before rewriting; conventional zones permit ordinary random I/O. SMR disks and NVMe ZNS SSDs expose these semantics to applications and zoned f2fs/btrfs.
 
-{{< uapi "UBLK_F_ZONED" >}}, added in Linux 6.6, lets a ublk server present such a device. Typical uses are emulating zoned hardware for testing, and fronting a log-structured or append-only backend whose natural interface already looks like zones.
+{{< uapi "UBLK_F_ZONED" >}} (6.6) supports zoned emulation for testing and log-structured or append-only backends.
 
 ## Requirements
 
-A zoned ublk device needs all of the following, or `ADD_DEV`, `SET_PARAMS` or `START_DEV` fails:
+Creation/startup requirements:
 
 | Requirement | Where | If missing |
 |---|---|---|
@@ -22,13 +22,13 @@ A zoned ublk device needs all of the following, or `ADD_DEV`, `SET_PARAMS` or `S
 | `basic.chunk_sectors` set to the zone size, a power of two | `SET_PARAMS` | `-EINVAL` |
 | `zoned.max_zone_append_sectors` non-zero | `SET_PARAMS` | `-EINVAL` |
 
-Why user copy or zero copy: a zone append returns the sector it landed at, and the kernel takes it from `ublksrv_io_cmd.zone_append_lba`, which shares a union with `addr`. In copy mode `addr` must carry the next buffer, so there is no room. Automatic buffer registration alone does not qualify.
+Zone append returns its sector in ublksrv_io_cmd.zone_append_lba, sharing the addr union needed by copy mode's next buffer. Use USER_COPY or SUPPORT_ZERO_COPY; automatic registration alone is insufficient.
 
-6.17 only checked that `chunk_sectors` was non-zero; 7.3-rc5 requires a power of two. The driver computes the zone count as `dev_sectors >> log2(chunk_sectors)` in every version, so a trailing partial zone is simply not counted. Make the capacity a whole number of zones.
+6.17 requires non-zero chunk_sectors; 7.3-rc5 requires a power of two. All versions count zones as `dev_sectors >> log2(chunk_sectors)`, omitting partial trailing zones. Align capacity to whole zones.
 
 ## Zoned parameters
 
-`struct ublk_param_zoned` is 32 bytes at offset 76 of `struct ublk_params` (see [Device parameters](/guide/parameters/)):
+`struct ublk_param_zoned`: 32 bytes at ublk_params offset 76; see [parameters](/guide/parameters/).
 
 ```c
 struct ublk_param_zoned {
@@ -39,13 +39,13 @@ struct ublk_param_zoned {
 };
 ```
 
-Zone size itself comes from `ublk_param_basic.chunk_sectors`, in 512-byte sectors like every other sector count in ublk.
+ublk_param_basic.chunk_sectors gives zone size in 512-byte sectors.
 
 ## Starting a zoned device
 
-`START_DEV` does more for a zoned device. After applying the limits, and before the disk becomes visible, the kernel revalidates the zone layout, and that means sending `REPORT_ZONES` requests to your server. If they fail, `START_DEV` fails.
+Before exposing a zoned disk, START_DEV applies limits and revalidates layout through REPORT_ZONES. Failed reports fail startup.
 
-Your queue threads therefore have to be serving while `START_DEV` is still in flight on the control ring. A server whose queues are already fetching in their own threads gets this for free. A single-threaded server that issues `START_DEV` synchronously and only then starts processing completions will deadlock.
+Serve queues while START_DEV waits on the control ring. A single thread waiting synchronously before processing completions deadlocks.
 
 ## Operations
 
@@ -59,13 +59,13 @@ Your queue threads therefore have to be serving while `START_DEV` is still in fl
 | `UBLK_IO_OP_ZONE_RESET` | 15 | none | `start_sector` = zone start | 0 or -errno |
 | `UBLK_IO_OP_REPORT_ZONES` | 18 | report written by the server | `start_sector`, `nr_zones` | bytes written |
 
-READ, WRITE and FLUSH arrive as on any device. Writes to a sequential zone must start at its write pointer; the block layer orders writes per zone, but the server is the device, so it must track write pointers and fail a misplaced write rather than silently accept it.
+READ/WRITE/FLUSH work normally. The block layer orders sequential-zone writes, but the server must track write pointers and reject misplaced writes.
 
-On a device created without `UBLK_F_ZONED` the kernel fails zone requests itself; they never reach the server.
+Without UBLK_F_ZONED, the kernel rejects zone operations before delivery.
 
 ### Zone append
 
-A zone append writes data at a zone's current write pointer and tells the caller where it went. The descriptor's `start_sector` is the start of the target zone, not the write position. Read the data as for a WRITE (with `pread()` on `/dev/ublkcN` in user-copy mode), write it at the zone's write pointer, advance the pointer, and commit with both the byte count and the landing sector:
+Append targets the zone named by start_sector, writes at its current pointer, advances it, and returns the landing sector. Read payload as for WRITE (pread on `/dev/ublkcN` in user-copy mode); commit byte count and LBA:
 
 ```c
 struct ublksrv_io_cmd *cmd = sqe_cmd(sqe);
@@ -76,16 +76,16 @@ cmd->zone_append_lba = landed_sector;  /* absolute, 512-byte sectors */
 submit(UBLK_U_IO_COMMIT_AND_FETCH_REQ);
 ```
 
-The kernel copies `zone_append_lba` into the request's sector before completing it. In user-copy mode `addr` must otherwise be 0 at commit; zone append is the one exception, because the union holds the LBA. With [batch I/O](/guide/batch-io/) the LBA travels in the element's `zone_lba` field, with `UBLK_BATCH_F_HAS_ZONE_LBA` set on the commit.
+The kernel copies zone_append_lba into the completed request's sector. This is user-copy commit's exception to addr = 0. [Batch I/O](/guide/batch-io/) carries the LBA in zone_lba with UBLK_BATCH_F_HAS_ZONE_LBA.
 
 ### REPORT_ZONES
 
-Zone reports are driver-internal requests: no application issues them as I/O. The kernel creates one when someone asks for the zone layout (the `BLKREPORTZONE` ioctl, a filesystem mounting, the revalidation at `START_DEV`), allocates a zeroed buffer of up to `max_hw_sectors` bytes, and sends the server a descriptor with:
+The driver creates REPORT_ZONES for BLKREPORTZONE, filesystem mounts, and START_DEV revalidation, rather than application I/O. It allocates a zeroed buffer and supplies:
 
 - `start_sector`: the first sector of the first zone to report;
 - `nr_zones` (the union member that is `nr_sectors` for other ops): the most zones to report.
 
-The server fills the request buffer with an array of `struct blk_zone` from `<linux/blkzoned.h>` (64 bytes each), one per zone starting at `start_sector`, and writes it into the request with `pwrite()` at offset 0 of the tag's user-copy position. To report fewer zones than asked, end the array with a zeroed entry; the kernel stops at the first zone whose `len` is 0. A large report may be split into several requests, each with its own `start_sector`.
+Fill `struct blk_zone` entries from `<linux/blkzoned.h>` (64 bytes each), starting at start_sector, and pwrite them at byte offset 0 of the tag's user-copy position. End short reports with a zeroed entry; len = 0 terminates parsing. Large reports split across requests with advancing start_sector.
 
 ```c
 struct blk_zone z[nr_zones];
@@ -102,11 +102,11 @@ ssize_t n = pwrite(ublkc_fd, z, sizeof(z), ublk_user_copy_pos(q_id, tag, 0));
 commit(q_id, tag, n < 0 ? -EIO : (int)n);
 ```
 
-Commit the number of bytes you wrote (normally `nr_zones × 64`; rublk commits its `pwrite` return value), or a negative errno. Never commit 0 for a report on kernels before 7.3: there the result goes through `blk_update_request`, so 0 re-dispatches the request indefinitely, and a count shorter than the kernel's buffer re-dispatches the rest. From 7.3 any non-negative result completes it.
+Commit bytes written, normally `nr_zones × 64` (rublk uses pwrite's result), or negative errno. Before 7.3, blk_update_request re-dispatches a zero result indefinitely and re-dispatches the remainder after a short result. From 7.3, any non-negative result completes the report.
 
 ## A minimal zone model
 
-The server is the zoned device, so it owns the state machine. For each sequential zone keep a write pointer and a condition:
+Track each sequential zone's write pointer and condition:
 
 | Operation | Effect on the zone |
 |---|---|
@@ -118,10 +118,10 @@ The server is the zoned device, so it owns the state machine. For each sequentia
 | ZONE_RESET | `wp` = zone start, `EMPTY`; the zone's data may be discarded |
 | ZONE_RESET_ALL | reset every sequential zone |
 
-Enforce `max_open_zones` and `max_active_zones` if you advertised them. Conventional zones (`BLK_ZONE_TYPE_CONVENTIONAL`, condition `BLK_ZONE_COND_NOT_WP`) accept writes anywhere and ignore zone operations.
+Enforce advertised max_open_zones/max_active_zones. Conventional zones (BLK_ZONE_TYPE_CONVENTIONAL, BLK_ZONE_COND_NOT_WP) accept arbitrary writes and ignore zone operations.
 
-The kernel's selftest server has no zoned target. The Rust `rublk` server has one (`rublk add zoned`) and is a useful reference.
+The kernel selftest server lacks a zoned target; Rust rublk provides `rublk add zoned` as a reference.
 
 ## go-ublk
 
-`DeviceParams.EnableZoned` with `DeviceParams.Zoned` (zone size, open and active zone limits, maximum zone-append size) creates a host-managed zoned device (6.6+). User copy is turned on automatically, because the kernel requires it to return a zone append's LBA. Zone operations need a `Handler`: it receives `OpZoneOpen`, `OpZoneClose`, `OpZoneFinish`, `OpZoneReset`, `OpZoneResetAll`, `OpZoneAppend` (complete it with `Request.CompleteZoneAppend(lba)`) and `OpReportZones` (fill it with `Request.ReportZones`). The conformance suite tests this with an in-memory zoned device. Zoned devices cannot use zero copy or be unprivileged.
+Set DeviceParams.EnableZoned and Zoned (size, open/active limits, maximum append size) for host-managed zones (6.6+). go-ublk enables user copy to return append LBAs. A Handler receives OpZoneOpen/Close/Finish/Reset/ResetAll, OpZoneAppend (complete with `Request.CompleteZoneAppend(lba, err)`), and OpReportZones (`Request.ReportZones`). The suite uses in-memory zoned storage. go-ublk zoned devices exclude zero copy and unprivileged mode.
