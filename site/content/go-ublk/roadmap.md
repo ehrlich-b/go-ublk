@@ -5,41 +5,41 @@ description: "What go-ublk does not do yet, what is next, and the open defects, 
 weight: 100
 ---
 
-The ordering principle is the one a backup and disaster-recovery product needs: **correctness and recoverability first, performance last.** The [UAPI reference](/reference/uapi/) tracks go-ublk's status for every kernel item individually.
+Priorities for backup and disaster recovery: **correctness and recoverability first, performance last.** The [UAPI reference](/reference/uapi/) tracks individual kernel items.
 
 ## Done in v0.2.0
 
-The October 2026 overhaul (see the [changelog](/go-ublk/releases/)) closed what this page used to list as the priorities:
+The October 2026 [release](/go-ublk/releases/) completed:
 
-- **User recovery**: `RecoveryReissue`/`RecoveryQueue`/`RecoveryFailIO`, `Detach` (with `QUIESCE_DEV`), `Recover`, device tags. Tested against SIGKILL and live upgrade handoffs under load.
-- **Asynchronous backends**: a goroutine per request by default, and a raw `Handler` that can complete from anywhere.
-- **Full control-plane coverage** of the 7.3-rc5 UAPI: every command typed and tested, `GET_FEATURES` negotiation that refuses rather than silently degrades, unprivileged devices, every parameter block.
-- **Lifecycle defects** #17–#23: the ring leak, `STOP_DEV` failures, use-after-unmap, silent queue death, unpinned control buffers, the context-cancel wedge, and the restart crash.
-- **Shared-memory zero copy** (`SHMEM_ZC`, `REG_BUF`/`UNREG_BUF`) and **larger descriptors** (`IO_DESC_SIZE`).
-- **Batch I/O** (`PREP_IO_CMDS`, multishot `FETCH_IO_CMDS` into a provided-buffer ring, batched `COMMIT_IO_CMDS`).
-- **Integrity metadata** (T10-DIF, IP and NVMe CRC64 protection information, verified end to end by the kernel).
-- **Zoned devices** (host-managed, through a `Handler`, with zone reports and zone append).
-- **Zero copy** for file-backed devices (`REGISTER_IO_BUF`, `AUTO_BUF_REG`): fixed-buffer file I/O on the queue's ring, no copy through Go memory.
-- Per-write FUA, `UPDATE_SIZE`, errno pass-through, `TRY_STOP_DEV`, `NO_AUTO_PART_SCAN`, user copy, `NEED_GET_DATA`, per-I/O threads, a public `GET_DEV_INFO`, the shipped systemd units with SIGHUP handling.
+- **Recovery**: `RecoveryReissue`/`RecoveryQueue`/`RecoveryFailIO`, `Detach` with `QUIESCE_DEV`, `Recover`, and device tags. Tested SIGKILL and live upgrades under load.
+- **Asynchronous backends**: goroutine-per-request dispatch and a `Handler` that completes from anywhere.
+- **7.3-rc5 control plane**: typed, tested commands, strict feature negotiation, unprivileged devices, every parameter block.
+- **Lifecycle fixes #17–#23**: ring leaks, `STOP_DEV` failures, use-after-unmap, silent queue death, unpinned control buffers, context-cancel wedges, restart crashes.
+- **Shared memory**: `SHMEM_ZC`, `REG_BUF`/`UNREG_BUF`; larger descriptors through `IO_DESC_SIZE`.
+- **Batch I/O**: `PREP_IO_CMDS`, multishot `FETCH_IO_CMDS` with a provided-buffer ring, batched `COMMIT_IO_CMDS`.
+- **Integrity**: kernel-verified T10-DIF, IP and NVMe CRC64 metadata.
+- **Zoned devices**: host-managed zones, reports and append through a `Handler`.
+- **File zero copy**: `REGISTER_IO_BUF`/`AUTO_BUF_REG`, fixed-buffer I/O on the queue ring without Go-memory copies.
+- Per-write FUA, `UPDATE_SIZE`, errno pass-through, `TRY_STOP_DEV`, `NO_AUTO_PART_SCAN`, user copy, `NEED_GET_DATA`, per-I/O threads, public `GET_DEV_INFO`, systemd units and SIGHUP handling.
 
 ## Kernel features not yet implemented
 
-None: as of v0.2.0 go-ublk implements every `UBLK_F_*` feature, control command, I/O command and parameter block in the 7.3-rc5 UAPI. The one combination not supported is shared-memory zero copy together with file zero copy. The [UAPI reference](/reference/uapi/) has per-item status.
+Every 7.3-rc5 feature flag, control/I/O command and parameter block is implemented; see the [UAPI reference](/reference/uapi/). Some combinations are excluded, including shared-memory and file zero copy together. [Configuration](/go-ublk/configuration/) lists the restrictions.
 
 ## Testing and releases
 
-- **The kernel and distribution matrix** runs the conformance suite under every bootable kernel; results are on the [compatibility matrix](/reference/matrix/). Next: run it in CI on every release tag (a workflow with KVM exists and is untested).
-- An unprivileged end-to-end test (serving I/O as a non-root user with the udev rules in place).
-- A real host power cut, as opposed to a guest reset, in the power-fail test.
-- Soak tests over days, and fault injection under memory and GC pressure.
-- Longer fuzzing runs of the engine state machine and the UAPI decoders.
+- Run the [kernel/distribution matrix](/reference/matrix/) in CI on every release tag. The KVM workflow exists but is untested.
+- Test non-root I/O with installed udev rules; the existing unprivileged test simulates udev ownership changes.
+- Test a real host power cut; guest resets leave the host cache intact.
+- Run multi-day soaks and memory/GC-pressure fault injection.
+- Fuzz the engine state machine and UAPI decoders longer.
 
 ## Open defects
 
 | # | Defect | Impact |
 |---|---|---|
-| 15 | The shutdown-ordering wedge is solved by deployment (a systemd unit), and the examples now handle SIGHUP — the likeliest trigger — but the fix has not been re-run through the shutdown-storm test | Run the server as a systemd unit as documented |
+| 15 | Shutdown ordering is fixed and later storm runs passed. The original teardown hang remains unexplained; SIGHUP is a suspected trigger, now handled by the examples | Run the server as a systemd unit as documented |
 
 ## Performance
 
-Only after the above. Candidates: io_uring `SQPOLL`, measuring and tuning the goroutine-per-request dispatch against `Inline` and batch I/O.
+After correctness: measure `SQPOLL` and tune goroutine-per-request dispatch against `Inline` and batch I/O.
