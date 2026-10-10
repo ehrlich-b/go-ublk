@@ -1,149 +1,123 @@
-# TODO.md - Production Roadmap
+# TODO.md — production backlog
 
-## Current Status: Prototype — approaching usable, not yet production-hardened
+Reconciled 2026-10-09 against **v0.2.0 (`e4e39b0`)**. The
+[feature inventory](docs/FEATURES.md) records implementation, actual tests,
+per-feature matrix passes and support tiers. It supersedes the old “prototype”
+feature list and the 6.8 minimum: the copy baseline has recorded passes from 6.4.
+The saved matrix is at earlier revisions, not a fresh release-tip test run.
 
-go-ublk is a **pure Go** implementation of Linux ublk (userspace block device).
+Implemented modes include multi-queue, copy/user copy, manual/automatic zero
+copy, shared-memory zero copy, batching, OS-thread ownership, best-effort CPU
+placement, raw async Handler, FUA, recovery, zoned and integrity. Advanced modes
+remain experimental within the inventory's stated coverage. NBD and SQPOLL are
+absent. No current comparative performance claim is established by this backlog.
 
-**Works (single- AND multi-queue):**
-- Device lifecycle: ADD_DEV, SET_PARAMS, START_DEV, STOP_DEV, DEL_DEV
-- **Every control command in the v7.3-rc5 UAPI** (2026-10-04): `internal/ctrl` has one typed
-  method each — ADD_DEV, DEL_DEV, DEL_DEV_ASYNC, START_DEV, STOP_DEV, TRY_STOP_DEV, SET_PARAMS
-  and GET_PARAMS (all seven param types), GET_DEV_INFO, GET_DEV_INFO2, GET_QUEUE_AFFINITY,
-  GET_FEATURES, START/END_USER_RECOVERY, UPDATE_SIZE, QUIESCE_DEV, REG_BUF, UNREG_BUF — with
-  unprivileged-device dev-path support, feature negotiation against GET_FEATURES and ADD_DEV's
-  answer, context-aware calls, and safe concurrent use. `internal/uapi` models the whole header
-  and is checked field by field against a C build of it (`scripts/uapi-fixtures.sh`).
-  `make ctrltest` (test/ctrl) on x86_64 `7.0.0-38`: every command the kernel has, as root and as
-  an unprivileged user, plus a full QUIESCE -> QUIESCED -> START/END_USER_RECOVERY -> LIVE cycle
-  on the existing queue engine with data intact — 0 failures. REG_BUF/UNREG_BUF (v7.1) and
-  IO_DESC_SIZE (v7.3) are only checked to report unsupported there.
-- Block I/O: Read, Write, Flush, Discard, Write-Zeroes. Read/Write are verified byte-exact.
-  The kernel only delivers Flush when the device advertises a volatile write cache
-  (`VolatileCache`, now the fail-safe default — see #13), Discard when the backend implements
-  `DiscardBackend`, and Write-Zeroes when it implements `WriteZeroesBackend`. Before 2026-07-25
-  none of the three was reachable, because SET_PARAMS sent no attrs and no discard block.
-- **Logical block sizes 512 through PAGE_SIZE**, including 4Kn (#10). Sectors are counted in
-  512-byte units throughout, as the UAPI requires; params outside the kernel's rules are
-  rejected at Create instead of producing a device that reports the wrong capacity.
-- **Multi-queue (≥2) now correct** on arm64: the descriptor-mmap-offset bug that caused
-  data corruption and D-state hangs is fixed (Critical Bugs #1/#2). Verified Q=1/2/4/8,
-  O_DIRECT, concurrent read-after-write — 0 hangs / 0 mismatches across many runs.
-- Failed startup and killed daemons no longer wedge the host: startup tears down cleanly
-  (#7) and `ublk-mem --del=all` reaps zombie devices (now public API: `ublk.ListDevices`,
-  `ublk.DeleteDevice`).
-- **Two examples, both on the public API only** (2026-07-26): `ublk-mem` (RAM, `--zip` for
-  flate-compressed 64KB chunks — 128MB of compressible data in ~1MB, byte-exact) and
-  `ublk-loop` (exports a file like losetup: sparse, punch-hole discard, and both durability
-  modes — buffered + volatile cache, or `-sync` O_DSYNC + write-through). `make vm-loop-e2e`
-  covers offset-in-file mapping across teardown, space reclaim, cache attrs and read-only:
-  14/14 on arm64 6.17.0-41.
-- **Graceful stop of a BUSY device now works** (#8): STOP_DEV runs while the ioLoops still
-  drain in-flight I/O, and the control-plane completion wait is bounded. 50+ teardown-under-load
-  cycles (Q=1/4/8, O_DIRECT fio, SIGINT mid-load) exit in ~0.13s with 0 leaks / 0 D-state hangs.
+## Remaining work, ordered by risk
 
-**x86_64 CONFIRMED (2026-07-24)** on a c6i.xlarge spot box, kernel `6.17.0-1020-aws`:
-integrity sweep 24/24 byte-exact, 150/150 teardown-under-load cycles, 20/20 zero-I/O graceful
-stops — 0 hangs, 0 leaks, refcount→0. Same binary on the same box booted into `6.17.0-1019-aws`
-oopses instantly at ADD_DEV (see host-kernel caveats), which is the clean A/B proving the
-multi-queue and teardown fixes are correct on x86 and that the remaining failure is the kernel's.
+1. [ ] **Shutdown / #15 and teardown failure ownership.** Reproduce unsupervised
+   shutdown with SIGHUP handling already present, capture serial output and blocked
+   thread stacks, and distinguish group exit from a real core dump. Test busy/failed
+   unmount, STOP timeout, held Handler and late CQEs: preserve serving resources
+   until safe release; assert no writeback loss, D-state, device/fd/mmap leaks.
+2. [ ] **Zero-copy and shared-region lifetime.** Inject registration, file-I/O and
+   unregister errors and delayed/reordered CQEs in manual, auto, forced fallback
+   and batch-auto paths. Exercise SHMEM unregister/remap under held requests and
+   read-only regions; prove no early reuse/unpin and count registrations/resources.
+3. [ ] **Recovery failure states/combinations.** Test failure at every acquisition
+   between START/END_USER_RECOVERY, simultaneous recoverers, partial queue start,
+   timeout and quiesce failure. Cover every policy plus ZC/zoned; explicitly reject
+   or restore shared-region mappings. Verify acknowledged data and resource counts.
+4. [ ] **Unprivileged isolation and actual udev.** Run two owners and user namespaces
+   through the supplied rules/helper on a full distro; reject cross-owner access,
+   forged/stale paths, ID reuse and forbidden modes. Test delayed/failed node handoff.
+5. [ ] **Durability and application integrity.** Existing FLUSH/FUA dispatch and
+   SIGKILL/guest-reset tests need an independent ordering/crash oracle on durable
+   storage, including ZC and integrity metadata, with the backing host's cache
+   removed from the failure domain. Validate lost/torn/aliased detectors; keep
+   synced/unsynced witnesses. Application-layer checksums/verify-on-read remain
+   the backend/application's responsibility, separate from kernel PI support.
+6. [ ] **Untested semantics and adversarial progress.** Add NOUNMAP semantics tests
+   (Backend has no flag parameter; ZC fallback punches holes), zone append/reset-all,
+   alternate integrity formats, larger descriptor strides and DMA/segment behavior.
+   Add batch buffer exhaustion, partial SQ submissions, invalid/duplicate/late CQEs,
+   syscall/allocation failures, long tag reuse and device-supervisor fault tests.
+   Expand existing fuzz targets with deterministic schedule replay and resource
+   oracles; their current scope is documented in FEATURES.md.
+7. [ ] **Fresh candidate and CI coverage.** Coordinator runs Linux tests on real VMs:
+   x86_64 and arm64, feature-boundary kernels, selected full-distro shutdown/udev
+   runs, race/checkptr and GC/memory-pressure stress. Persist exact revision, kernel,
+   negotiated/exercised path and skip reason. Existing KVM Actions workflow is
+   manual-only and explicitly unverified there; unit/race/vet/fuzz CI already exists.
+8. [ ] **Minor compatibility leftovers / #26.** Apply `explainControlError` to the
+   ListDevices path reached by fixed-ID checks; make io_uring tests skip unavailable
+   SQE128/CQE32 or disabled io_uring. Preserve a precise unsupported result.
+9. [ ] **Performance, after affected correctness gates.** Profile existing copy,
+   user-copy, manual/auto ZC, batch, Inline/async and backend paths under equal CPU
+   budgets; verify effective affinity and expose placement failures. Measure
+   throughput, CPU/I/O, QD1 and tail latency, allocations/GC effects and noise.
+   Benchmark FLUSH/FUA coalescing only with a proven ordering oracle. SQPOLL/IOPOLL
+   are future experiments if profiles justify them; NBD is a separate product
+   expansion, not a prerequisite for optimizing the transport.
 
-**Crash / power-fail consistency TESTED (2026-07-26)** on arm64 `6.17.0-41`: 8 SIGKILL-mid-write
-cycles (both durability flavors) and 4 sysrq hard resets mid-write, all with 0 lost / 0 torn /
-0 aliased blocks, and clean host recovery every time. The oracle is shown able to fail — it
-detects injected lost/torn/aliased blocks, and the post-reset image checked against an
-over-claiming witness correctly reports loss. See Phase 2 for the design and for what the
-guest-level reset does not cover (the host's own cache of the virtual disk).
+The five highest-risk paths and concrete closing tests are in
+[FEATURES.md → Gaps](docs/FEATURES.md#gaps). Supervision and fencing under a
+permanently wedged backend remain part of the shutdown/recovery gates.
 
-**Re-verified 2026-08-22** on arm64 `6.17.0-41-generic` (ublk_drv srcversion
-`8F3FCC0225E19BF890B533B`, the same module source as the x86 `-1020-aws` build): unit tests 6/6
-packages, `vm-simple-e2e` pass, integrity sweep **24/24** byte-exact, `vm-loop-e2e` **14/14**,
-`vm-crash` **6/6** cycles with 0 lost / 0 torn / 0 aliased, 40-cycle churn with 0 leaks / 0 hangs /
-0 create failures. No oops, no D-state, `boot_id` unchanged throughout. The only dmesg noise is
-`Buffer I/O error ... lost async page write` from the churn's deliberate SIGKILL cycles, which is
-the block layer correctly reporting writes it cannot complete.
+## Implemented work — do not reopen as new features
 
-**`linux-hwe-7.0` CONFIRMED (2026-08-22) — go-ublk works on the kernel the fleet is moving to.**
-On a fresh Ubuntu 24.04.4 LTS arm64 VM running **`7.0.0-30-generic`** (the noble-updates HWE
-kernel published 2026-08-20; `ublk_drv` srcversion `3743E3FA998B95656BDA492`): unit tests 6/6
-packages, `vm-simple-e2e` pass, integrity sweep **24/24** byte-exact, `vm-loop-e2e` **14/14**,
-`vm-crash` **6/6** cycles with 0 lost / 0 torn / 0 aliased. No oops, no D-state, no leaked
-devices. Note `linux-image-generic-hwe-24.04` now resolves to 7.0.0-30, so this is what the next
-box cut gets by default. Caveats: arm64 only so far (x86 on 7.0 is untested), and the throughput
-in that run is meaningless because a second VM was loading the host concurrently.
-
-**Host-reboot-under-load TESTED (2026-08-22) — and it found the one real problem of the day.**
-`make vm-shutdown-storm` reboots the machine normally while an ext4 filesystem on a ublk device
-is under fio load. Run unsupervised, the daemon loses the unmount's writeback every time and
-wedges the host's reboot about one time in five; run as a correctly ordered systemd unit, both are
-zero. **This is a deployment requirement, not a code bug** — see Critical Bugs #15 for the numbers,
-the mechanism, and the one piece still unexplained (why the daemon coredumps during teardown).
-
-**x86_64 on `linux-hwe-7.0` CONFIRMED (2026-10-03)** in a disposable QEMU guest on the WSL rig
-(TCG, Ubuntu 24.04 + `7.0.0-38-generic`, ublk_drv srcversion `6CF423FB6E75AB0FBD69592`), at
-`8712a16`: unit tests 9/9 packages as root, the guarded large-I/O public-runner test, integrity
-sweep **24/24** byte-exact, `vm-loop-e2e` **14/14**, discards of 1G-8G and a 3G write-zeroes
-clean (#16), no leftover devices, no oops, `boot_id` unchanged. Emulated CPU, so op counts and
-timings from that run mean nothing.
-
-**Still unverified / open (see roadmap):**
-- Host power cut, as opposed to a guest reset: `sysrq-b` drops the guest page cache but not
-  macOS's cache of the VM's disk, so the last link in the durability chain is untested.
-- Teardown and lifecycle defects #18-#21 below (found 2026-10-03 by code audit; #17 fixed
-  2026-10-04, #21's io_uring side too).
-
-**Host kernel caveats (rechecked 2026-08-22) — these are KERNEL bugs, not go-ublk bugs:**
-- **UPSTREAM MOVED, 2026-08-22 — the fix is now GA and a new HWE track landed.**
-  - `linux-hwe-6.17` promoted past -41: **6.17.0-42 has been in noble-updates + security since
-    2026-08-05** (its changelog carries `ublk: reorder tag_set initialization before queue
-    allocation`, the missing prerequisite), and -44 is in noble-proposed. The window in which a
-    box cut baked in a broken -40 is closed.
-  - **`linux-hwe-7.0` is now the noble HWE track: 7.0.0-30.30~24.04.1 went into noble-updates +
-    security on 2026-08-20**, with 7.0.0-31 in proposed. This is the one to react to, because all
-    three ublk teardown fixes are 7.0/7.1-era mainline commits (`845db023a8ae` don't issue
-    uring_cmd from fallback task work; `0842186d2c4e` reset per-IO canceled flag on each fetch;
-    `f7700a4415af` fix use-after-free in `ublk_cancel_cmd()`), all touching only `ublk_drv.c`.
-    **CORRECTED 2026-10-03: it does not carry two of them.** `845db023a8ae` and `f7700a4415af`
-    first appear in v7.1-rc3, have no Cc: stable, are not in 7.0.y (EOL at 7.0.14), and are in no
-    `linux-hwe-7.0` changelog through 7.0.0-39 (proposed). Only `0842186d2c4e` (CVE-2026-53124)
-    reached 7.0.10, so hwe-7.0 has it from 7.0.0-28. `f7700a4415af` also covers the
-    USER_RECOVERY reset path, which matters before recovery is built on hwe-7.0.
-  - `linux-aws-6.17` is still 6.17.0-1020 in noble updates/security, i.e. the build already
-    A/B-proven good on x86.
-- **ADD_DEV NULL-deref on Ubuntu 6.17.0-{~29..40}:** their NUMA backport `529d4d632788` landed
-  without its prerequisite `011af85ccd87`, so `ublk_init_queues()` runs before the tag set exists
-  and derefs a NULL `mq_map`. Unconditional — any ublk server oopses the host on first device add.
-  FIXED in `linux-aws-6.17` 6.17.0-1020 and `linux-hwe-6.17` 6.17.0-41 (both now superseded by
-  the promoted versions above); -35/-38/-40 generic are still broken. Confirmed live on
-  x86 2026-07-24: on `6.17.0-1019-aws` (ublk_drv srcversion 6A00163FD3030280266148D) a plain
-  `ublk-mem --queues=1 --depth=1` gives `BUG: kernel NULL pointer dereference, address: 0` at
-  `ublk_init_queues+0x4e` in an `iou-wrk` worker via `ublk_ctrl_add_dev`, and ADD_DEV never
-  returns; on `6.17.0-1020-aws` (srcversion 8F3FCC0225E19BF890B533B) the same binary is clean.
-  Note `ublk_drv` ships in `linux-modules-extra-*-aws`, not the base AWS kernel image. Ubuntu's 6.18 line
-  currently repeats the same omission — check before trusting a future 6.18 HWE.
-- **Teardown double-completion (`io_req_uring_cleanup` NULL-deref):** one real oops on x86
-  6.17.0-14, and the fixes are in kernel.org stable 7.1.y but in no Ubuntu 6.17/6.18 build.
-  Severity is UNKNOWN, not "reliable": the arm64 "reproduces within ≤120 cycles" claim was a
-  harness bug — `daemon_pid()` picked the "1" out of "USR1" and SIGINT'd pid 1 (systemd), i.e.
-  the churn was rebooting the VM and blaming a traceless kernel panic. Fixed in
-  `scripts/vm-churn.sh` + `scripts/vm-verify.sh`, which now also refuse to signal pid ≤ 1.
-  x86 note: 150 churn cycles + 24 sweep combos on `6.17.0-1020-aws` — which carries NONE of the
-  three upstream ublk teardown fixes — produced 0 incidents, so normal graceful stop does not
-  appear to trigger it on x86 either.
-- **Validated on 6.17.0-41-generic (arm64) with the fixed harness, 2026-07-24:** integrity sweep
-  24/24 combos byte-exact (Q=1/2/4/8 x depth=1/64/128 x buffered/O_DIRECT), 150/150
-  teardown-under-load cycles and 20/20 zero-I/O graceful stops clean — 0 hangs, 0 leaks,
-  refcount→0, no reboot.
-
-Honest O_DIRECT perf is now measured (see Phase 5): ~1.37M IOPS 4K randread / 816k randwrite
-(RAM backend, Q=4) — the old "~100k IOPS" figures were buffered and are superseded.
-
-**Minimum kernel:** 6.8+ (IOCTL encoding required). Fixes verified on arm64, kernel 6.17.
-Per the driver sources, ioctl-encoded control opcodes exist from v6.4 and GET_FEATURES from v6.5;
-on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unverified.
+- [x] Multi-queue default: `DefaultParams.NumQueues=0` resolves to CPU count and
+  ADD_DEV's answer is reconciled (`backend.go:454`, `:1229`, `:433`); fixed mmap
+  stride (`internal/queue/queue.go:128`, original fix `9eb3b17`).
+- [x] Normal and failed-start teardown, bounded control waits, STOP-before-release,
+  memory retention while held, queue supervision, graceful context stop and
+  terminal Stop (#3/#7/#8/#17–#23; `backend.go:697`, `:873`, `:902`, `:966`).
+- [x] FLUSH, volatile-cache default, independent DISCARD/WRITE_ZEROES advertisement
+  and safe large-range results/limits (`internal/queue/adapter.go:55`,
+  `internal/ctrl/device.go:132`, `internal/queue/request.go:134`; #9/#11/#13/#16/#24).
+- [x] Per-I/O FUA interface/dispatch and ZC `RWF_DSYNC`
+  (`request.go:81`, `internal/queue/adapter.go:43`, `internal/queue/engine.go:1062`).
+- [x] Async backend API via Handler/Request, goroutine and Inline dispatch, eventfd
+  completion wakeups (`request.go:22`, `internal/queue/engine.go:689`, `:1121`).
+- [x] Manual zero copy, AUTO_BUF_REG and NEED_REG_BUF fallback; sparse fixed-buffer
+  table; batch PREP/multishot FETCH/partial COMMIT
+  (`internal/queue/engine.go:223`, `:264`, `:463`, `:983`, `:1013`).
+- [x] User copy, NEED_GET_DATA and per-queue tag-range threads; queue OS-thread
+  ownership and best-effort affinity (`internal/queue/engine.go:192`, `:641`,
+  `:802`; `internal/queue/queue.go:178`). Effective placement still needs a test.
+- [x] USER_RECOVERY queue/reissue/fail modes, Detach/Recover and batch/integrity
+  restoration (`backend.go:254`, `recover.go:223`, `:282`, `:312`; #25).
+- [x] Typed control commands, feature/parameter negotiation, shared memory, zoned,
+  integrity, resize, safe stop, no partition scan and extended descriptors
+  (`internal/ctrl/commands.go`, `recover.go`, `backend.go:1268`). Bindings and
+  implementations have the distinct test scopes listed in the inventory.
+- [x] RAM/compressed and sparse-file backend examples on the public API
+  (`examples/ublk-mem/{mem,zip}.go`, `examples/ublk-loop/loop.go`); NBD absent.
+- [x] Shipped systemd service/mount and SIGHUP handling (`examples/systemd/`,
+  `examples/ublk-loop/main.go:131`, `examples/ublk-mem/main.go:202`);
+  `e1f67d7` fixes mount ordering before user.slice. #15 diagnosis remains open.
+- [x] Crash/reset oracle with independent synced/unsynced regions and injected
+  lost/torn/aliased failures (`test/crash/main.go:100`, `:231`, `:446`,
+  `scripts/vm-crash.sh`); host power-loss coverage remains open.
+- [x] Unit/model tests and fuzz foundation: C UAPI fixtures, decoder fuzz, real
+  queue-engine/fake-kernel fuzz (`internal/uapi/kernel_fixture_test.go:319`,
+  `internal/{uapi,ctrl,queue}/fuzz_test.go`); bounded CI fuzz, race/vet, real-kernel
+  suite/matrix and storm/soak harnesses (`.github/workflows/`, `test/suite/`,
+  `test/matrix/`, `scripts/vm-{shutdown-storm,soak}.sh`). More coverage remains open.
+- [x] Remove obsolete logger/shared-global barrier work (#4/#5); mmap buffers,
+  request preallocation and io_uring submission batching already exist
+  (`internal/queue/queue.go:151`, `engine.go:163`, `:541`, `internal/uring/ring.go:359`).
+- [x] Metrics/Observer, percentile histograms and structured errors
+  (`metrics.go`, `metrics_percentile_test.go`, `errors.go`).
 
 ---
 
-## Critical Bugs (found 2026-06-30)
+## Critical Bugs history
+
+Status reconciled against v0.2.0 on 2026-10-09. Earlier diagnoses and results below
+are historical observations; implementation details describe the fixing version,
+which may since have been replaced by the queue/io_uring engine. Current paths,
+test scope and recorded kernel coverage are in [FEATURES.md](docs/FEATURES.md).
+#15 remains an investigation; #26 remains open. #4/#5 are obsolete, not work items.
 
 1. **[FIXED — commit 9eb3b17] Multi-queue completion loss → unkillable I/O hang.**
    Root cause was NOT dropped io_uring completions: `mmapQueues` computed the per-queue
@@ -167,22 +141,16 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
    was never closed; the io_uring fixed-file registration wasn't unregistered before close.
    DEL_DEV blocked forever, masked by the example's 1s watchdog + `os.Exit(0)`.
 
-4. **[OBSOLETE — 2026-10-04] Verbose logging stalls I/O under load.** The v0.2.0 engine makes no
-   per-request log calls at any level (it logs only errors and handler panics), so debug logging
-   no longer sits on the data path. Original entry:
-   `logging.Logger` holds one mutex across a blocking `write()`; `-v` + multi-queue starves
-   the I/O goroutines. But `log()` filters by level BEFORE taking the lock, and the data-plane
-   hot loop (`WaitForCompletion`→`handleCompletion`→…→`FlushSubmissions`) makes no log calls,
-   so at the prod default (INFO) there is zero hot-path logging overhead. Only bites under `-v`.
-   The wrapped stdlib `log.Logger` is already concurrent-safe, so the wrapper mutex is largely
-   redundant. Real fix (async/buffered logging) is Phase 5 polish, not a prod blocker.
+4. **[OBSOLETE — 2026-10-04] Verbose logging stalls I/O under load.** The old
+   runner logged requests through a blocking logger mutex. The v0.2.0 engine has
+   no per-request logging: `internal/queue/engine.go:665` logs fatal errors and
+   `:770` logs handler panics only. `backend.go:494` documents this scope. Delete
+   the old optimization task; error-path logging can still block a caller's logger.
 
-5. **[OBSOLETE — 2026-10-04] Memory fences use one shared global** — gone with the io_uring core
-   rewrite, which orders ring indices with `sync/atomic` loads and stores. Original entry: (`barrierDummy`, `atomic.AddInt64(...,0)`)
-   hammered by every queue — correct (a `LOCK`/`LDADDAL` RMW is a full hardware fence regardless
-   of the address it touches), just a contention point. The multi-queue data path is now proven
-   correct WITH this barrier, so changing it is pure perf with real memory-ordering risk on arm64.
-   Leave unless profiling shows it matters. (Open question for review — see roadmap.)
+5. **[OBSOLETE — 2026-10-04] Memory fences use one shared global.** The old
+   `barrierDummy` RMW is gone. `internal/uring/ring.go:359` publishes ring indices
+   with atomics; `internal/uring/ring_index_test.go:73` tests wrap/publication.
+   Preserve the historical diagnosis, delete the shared-barrier optimization task.
 
 6. **[FIXED — commit 5f23336] Requested queue count not reconciled with kernel.**
    The kernel clamps `nr_hw_queues` at ADD_DEV (notably to the online CPU count). We created a
@@ -286,8 +254,11 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     no error anywhere. A backend that makes every write durable before returning
     should set it false, which also stops the kernel sending flushes it does not
     need — `ublk-mem` does exactly that (RAM has no cache below it) and
-    `ublk-loop` sets it from its `-sync` flag. Per-IO FUA remains unadvertised
-    until `UBLK_IO_F_FUA` is honored.
+    `ublk-loop` sets it from its `-sync` flag. Per-I/O FUA is now implemented: `backend.go:1334` gates advertisement,
+    `internal/queue/adapter.go:43` calls `FUABackend.WriteAtFUA`, and zero-copy
+    writes use `RWF_DSYNC` (`internal/queue/engine.go:1062`). Handler users must
+    honor `FlagFUA`; plain backends retain block-layer flush emulation.
+    `features/fua` tests dispatch; crash durability is still a separate gate.
 
 14. **[FIXED — 2026-07-26] `vm-simple-e2e.sh` killed unrelated processes, including its own caller.**
     `cleanup_force()` ran `ps aux | grep -E "(ublk-mem|timeout)"` and SIGKILLed
@@ -300,9 +271,18 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     ublk-mem timeout dd` on the I/O-hang path narrowed the same way.
     `vm-fuzz.sh`'s unanchored `pkill` patterns were tightened too.
 
-15. **[NOT A CODE BUG — DEPLOYMENT REQUIREMENT, found 2026-08-22] An unsupervised daemon
-    wedges the host's reboot about one time in five.** Found by the new
-    `make vm-shutdown-storm`. Running `ublk-loop` as a bare background process with an
+15. **[OPEN INVESTIGATION — ordering and signal mitigations shipped] Shutdown under load
+    can lose writeback or wedge a reboot.** Historical unsupervised runs wedged
+    3/14 reboots. The source does not settle whether a remaining library/kernel
+    teardown defect contributes; “Blocked by coredump” is not proof of SIGBUS or
+    an actual dump. Mount/service ordering is required; the root cause of the
+    unsupervised wedge still needs captured stacks and a current reproducer.
+    `examples/systemd/` ships the service/mount (`e1f67d7` adds `Before=user.slice`),
+    and both examples now handle SIGHUP (`examples/ublk-loop/main.go:131`,
+    `examples/ublk-mem/main.go:202`). The results below predate or qualify those
+    mitigations; do not treat them as a current v0.2.0 failure rate.
+
+    Reported 2026-08-22 by `make vm-shutdown-storm`. Running `ublk-loop` as a bare background process with an
     ext4 filesystem mounted on its device and fio writing into it, then issuing a normal
     `systemctl reboot`:
 
@@ -311,46 +291,48 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     | Bare background process (ssh session scope) | 14 | **3** | **10, every cycle** |
     | systemd unit, mount ordered `After=`/`Requires=` it | 9 | **0** | **0, every cycle** |
 
-    **Mechanism.** A bare process lives in the login session's scope, which systemd tears
-    down at the *start* of shutdown — so the daemon dies while the filesystem above it
+    **Historical ordering diagnosis.** A bare process lives in the login session's
+    scope, which systemd tears down at the *start* of shutdown — so the daemon dies while the filesystem above it
     still owes writeback. The unmount then fails, ext4 aborts its journal, and roughly one
     time in five the machine never finishes rebooting at all: `systemd-shutdown` reaches
     `reboot.target`, then its final "Syncing filesystems and block devices" times out and
     it waits forever on tasks that cannot be reaped. Every occurrence had the identical
     signature — `INFO: task ublk-loop:<tid> blocked for more than 122 seconds. Blocked by
     coredump.` plus `iou-wrk-<tid>`, the fio workers, and two `(sd-sync)` helpers. The host
-    needs a forced power cycle. That is strictly worse than the Phase 3 goal of "a wedged
+    needs a forced power cycle. That is strictly worse than the old resilience goal of "a wedged
     daemon must not require a host reboot": here it *prevents* one.
 
-    **What fixes it.** Ordering, not code. Making the daemon a systemd service and giving
-    the mount unit `Requires=`/`After=` that service inverts the stop order, so the
+    **Observed mitigation.** Ordering corrected writeback in these runs. Making
+    the daemon a systemd service and giving the mount unit `Requires=`/`After=` that service inverts the stop order, so the
     filesystem unmounts *through* a still-live daemon. The I/O-error result is
     deterministic (10 vs 0 on every single cycle) and settles the mechanism; the wedge
     result is suggestive rather than conclusive on its own (9 clean cycles against a 21%
     per-cycle rate is p≈0.12), but it is the same mechanism and it points the same way.
 
-    **Still unexplained, and worth chasing:** what makes the daemon coredump at all.
-    SIGTERM and SIGKILL do not dump core, so some thread took a fatal signal — plausibly
-    SIGBUS on a torn-down mmap during teardown. `core_pattern` pipes to apport, which
-    cannot run once the filesystem is going away, so the dump never completes and the whole
-    thread group is stuck in D forever. Three attempts to capture the daemon's own output
+    **Original hypothesis, not established:** a fatal signal (possibly SIGBUS on a
+    torn-down mmap) caused a core dump piped to apport during shutdown, blocking
+    the thread group. SIGTERM/SIGKILL do not dump core; the hung-task label alone
+    does not establish that any dumping signal occurred. The later diagnosis
+    below offers a different explanation. Three attempts to capture the daemon's own output
     across the wedge all failed and the reasons are recorded in
     `scripts/vm-shutdown-storm.sh`: a plain file gets rolled back by ext4 replay, and a
     `tail -F` mirror is killed at the start of shutdown. The daemon now writes straight to
     the console; the next wedge should be captured.
 
-    **Consequence for shipping:** go-ublk needs to document (and the examples should
-    demonstrate) a systemd unit with the correct ordering. Shipping without it means a host
-    reboot mid-backup can lose acknowledged writeback and, one time in five, hang the host.
+    **Shipping status:** the service and mount examples are present, with
+    `After=`/`Requires=` the daemon and `Before=user.slice`; dependent services
+    must use `RequiresMountsFor=`. This closes the missing-unit task, not the
+    investigation of the unsupervised wedge or failed-unmount handling.
 
     **Re-diagnosis to test (2026-10-03):** "Blocked by coredump" may not mean a core dump.
     `synchronize_group_exit()` sets `PF_POSTCOREDUMP` on every exiting thread, so hung_task
     prints it for any thread stuck in `do_exit`. A plausible chain: logind's session scope sends
-    SIGTERM then SIGHUP; neither example handles SIGHUP, so Go's default kills the process while
-    STOP_DEV is running in an `iou-wrk` worker (`del_gendisk` -> `sync_filesystem`), and the
-    exiting threads wait on that worker, which waits on I/O only the dead daemon could complete.
-    Check by handling SIGHUP in the examples and re-running the unsupervised storm arm, and by
-    capturing `/proc/<tid>/stack` of the stuck threads.
+    SIGTERM then SIGHUP; at that revision neither example handled SIGHUP, so Go's
+    default could kill the process while STOP_DEV is running in an `iou-wrk`
+    worker (`del_gendisk` -> `sync_filesystem`), and the exiting threads wait on that worker, which waits on I/O only the dead daemon could complete.
+    SIGHUP handling is now in both examples. Test the hypothesis by re-running
+    the unsupervised storm on the candidate and capturing `/proc/<tid>/stack`
+    of any stuck threads; do not reimplement the signal handler.
 
     **Ordering gap found and fixed (2026-10-04):** the correctly ordered units were still not
     enough. Rebooting a 7.0.0-38 VM under buffered fio with the shipped units lost writeback in 3
@@ -436,11 +418,11 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     docs promised `Start` could resume a stopped device. The kernel matrix showed START_DEV on a
     stopped device fails with EBUSY (Fedora 6.19/7.2.8, 7.0.14), wedges the control plane
     (6.10-6.12), or oopses — Arch 7.2.8-arch1-2: NULL dereference in `ublk_queue_rq+0x4d` from
-    `ublk_partition_scan_work` reading into a queue whose per-I/O state is gone. `Start` on a
-    stopped device now returns `ErrStopped` without touching the kernel; close it and create a
-    new device. (The Arch oops is a kernel bug worth reporting upstream.)
-
-
+    `ublk_partition_scan_work`. Missing per-I/O state is a hypothesis; the trace proves
+    a NULL write, not its exact lifetime cause. `Start` on a stopped device now
+    returns `ErrStopped` without touching the kernel; close it and create a new
+    device. This fixes the library's unsafe promise; kernel restart behavior on
+    other revisions remains unproven.
 
 24. **[FIXED — 2026-10-04] On kernels before 6.11, a zeroout of 4 GiB or more succeeded but
     zeroed only the length mod 4 GiB.** Found by the kernel matrix: `blkdiscard -z -o 1M -l 5G`
@@ -463,7 +445,6 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
     outstanding. `recovery/{batch-kill-and-recover,batch-detach-handoff,integrity-kill-and-recover}`
     failed before and pass 3/3 after on 7.0.0-38.
 
-
 26. **[OPEN — minor, v0.2.1] Two leftovers from the v0.2.0 kernel matrix.** (a) On RHEL 10 with
     io_uring disabled, every error carries the `kernel.io_uring_disabled` hint except one path:
     `lifecycle/fixed-id` reports a bare "open control device: … operation not permitted". Wrap that
@@ -473,177 +454,31 @@ on v6.0-v6.3 every command go-ublk sends fails with ENODEV. 6.4-6.7 remain unver
 
 ---
 
-## Production Roadmap (BCDR use)
-
-Ordering principle for a backup/DR product: **correctness and recoverability first,
-performance last.** Nothing holding customer data ships before Phase 2 closes.
-
-### Phase 0 — Honesty + teardown — DONE
-- [x] Fix DEL_DEV teardown hang (commit b3846fe)
-- [x] Correct overclaimed "stable / ~100k IOPS / 10x stress" status in TODO.md + CLAUDE.md
-
-### Phase 1 — Data-path correctness — mostly DONE (multi-queue now trustworthy on arm64)
-- [x] Root-cause the multi-queue hang (bug #1): it was the per-queue descriptor mmap
-      offset stride, NOT dropped io_uring completions (commit 9eb3b17)
-- [x] **Core decision gate — RESOLVED: keep pure-Go.** The bug was a shallow one-line
-      offset mistake (wrong stride constant), not a structural flaw in the hand-rolled
-      io_uring core. The SQ/CQ accounting, barriers, and state machine were correct all
-      along. No reason to take on cgo+liburing; pure-Go stays.
-- [x] Fix multi-queue completion loss (#1) and corruption (#2) — one root cause (9eb3b17)
-- [x] Fix queue-count-vs-CPU startup wedge and make failed startup tear down cleanly
-      (commits 5f23336, 55303ca)
-- [x] Verify on arm64: Q=1/2/4/8, O_DIRECT, concurrent read-after-write + burst =
-      0 hangs / 0 mismatches across many runs
-- [x] **Verify on x86_64** (prod arch) — done 2026-07-24 on `6.17.0-1020-aws`: sweep 24/24,
-      churn 150/150, zero-I/O stops 20/20, plus the `-1019` A/B pinning the remaining
-      failure on the kernel. See the x86_64 CONFIRMED block at the top.
-- [ ] Multi-queue is now the reliable default (≤ CPU count); single-queue no longer required
-
-### Phase 2 — Data-integrity discipline — BCDR-critical
-- [ ] End-to-end checksums / verify-on-read at the application layer (never trust the block path)
-- [x] Correct + tested FLUSH / fsync durability semantics — both flavors of `ublk-loop`
-      (volatile cache -> FLUSH -> `fsync`, and `-sync` -> `O_DSYNC` write-through) hold
-      their promise across a hard reset. Per-IO **FUA** is still not implemented; see
-      Phase 3.
-- [x] **Crash / power-fail consistency harness** — `test/crash` + `scripts/vm-crash.sh`,
-      run by `make vm-crash` and `make vm-powerfail`. Results on arm64 `6.17.0-41`:
-      | Scenario | Runs | Lost | Torn | Aliased |
-      |---|---|---|---|---|
-      | SIGKILL daemon mid-write (buffered + `-sync`) | 8 + 6 cycles, 28 checks | 0 | 0 | 0 |
-      | sysrq hard reset mid-write | 4 + 3 = 7 | 0 | 0 | 0 |
-      (second figure in each row added 2026-08-22 on the same kernel)
-      Every cycle also asserted clean recovery: the writer's in-flight I/O errors out
-      instead of wedging, no leaked device after reap, the device comes back on the same
-      image, a graceful stop still works afterwards, no oops, and an unchanged `boot_id`
-      (the hard-reset runs show it changing, which is how we know the reset was real).
-
-      How it avoids being a test that cannot fail:
-      - Blocks are **self-describing** (magic + block index + generation + a stream derived
-        from both), so the expected content survives the death of the process holding it.
-        A block at the wrong offset is *aliased*, a block whose body disagrees with its
-        header is *torn*, both without remembering anything.
-      - Region A is rewritten generation by generation, each pass followed by `fdatasync`,
-        and only then is a **durability witness** advanced (fsync + rename + dir fsync, so
-        the oracle's own state is crash-safe). Any A block older than the witness is a
-        *lost* acknowledged write. The driver waits for 3 flushed generations before
-        crashing, because at a witness of 1 the requirement is "gen >= 0" and nothing can
-        violate it — `-min-flushed` enforces that rather than trusting the timing.
-      - Region B is never synced, so a crash always lands with unflushed writes in flight;
-        it is striped one writer per block so "torn" is a verdict and not a race.
-      - `vm-crash.sh selftest` (which `kill` runs first) injects a lost, an aliased and a
-        torn block into a plain file and asserts each is caught, and the power-fail verify
-        re-checks the *surviving* image against an over-claiming witness and asserts that
-        fails. So both the detector and the live assertion are shown to be able to fail.
-
-      What it does **not** prove: the reset is a guest-level `sysrq-b`, so it kills the
-      guest page cache but not the macOS host's cache of the VM's virtual disk. It
-      establishes the chain ublk -> ublk-loop -> `fsync` -> ext4 -> virtio; a real
-      host power cut is still untested.
-
-### Phase 3 — Resilience & recovery
-- [x] **Host-reboot-under-load (the systemd shutdown storm) — TESTED 2026-08-22**, and it
-      found a real failure: run unsupervised, the daemon wedges the host's reboot roughly
-      one time in five, and loses the unmount's writeback every time. Run as a correctly
-      ordered systemd unit, both go to zero. Full numbers, mechanism and the one remaining
-      unexplained piece (why the daemon coredumps) are in Critical Bugs #15.
-      `make vm-shutdown-storm` (`STORM_ARM=arm-unit` for the supervised control).
-- [ ] **Ship a systemd unit + document the ordering** — the direct consequence of #15. The
-      mount must declare `Requires=`/`After=` the daemon's service so shutdown unmounts
-      before it stops the daemon. Belongs with the examples, since it is the difference
-      between "loses data and hangs the host on reboot" and "clean".
-- [ ] Root-cause the teardown coredump behind #15 (fatal signal in the daemon during
-      shutdown; the console-capture path is now in place to catch it)
-- [ ] `UBLK_F_USER_RECOVERY` — recover a device across a daemon restart (not implemented)
-- [ ] Daemon supervision + host fencing: a wedged daemon must not require a host reboot;
-      auto-detect and clean up stuck devices (D-state currently needs a reboot). #15 shows
-      the stronger form of this is real: a wedged daemon can prevent a reboot outright.
-- [x] Graceful degradation on daemon crash (no permanent D-state on a customer host) —
-      asserted every `vm-crash` cycle: after the daemon is SIGKILLed mid-write, the writer
-      blocked in `pwrite` on the dead device is reaped by the kernel within 20s, and no task
-      remains in D-state across 5s of samples. Note the assertion has to be *persistent*:
-      a single sample flags unrelated `kworker/.../events_unbound` threads, which dip into D
-      constantly and are idle again seconds later.
-- [ ] Per-IO **FUA** (`UBLK_ATTR_FUA`) — the kernel currently emulates it as write + flush
-
-### Phase 4 — Testing infrastructure (close the gap that shipped "stable")
-- [ ] Fault-injection suite: multi-queue, O_DIRECT, concurrent, long-running, under GC/memory pressure
-- [ ] CI that runs the real failure modes (not buffered happy-path dd/fio), on x86_64 + arm64
-- [ ] Fuzzing for UAPI marshal/unmarshal; invariant assertions around `unsafe`
-- [ ] Graceful handling of kernel-version differences
-
-### Phase 5 — Performance (only after correctness is proven)
-- [x] Re-benchmark honestly (O_DIRECT + multi-queue). fio `--direct=1`, RAM backend, on the
-      arm64 M4 Lima VM (4 vCPU) — this is the ublk-path ceiling, NOT end-to-end (a real
-      file/network backend will be backend-bound):
-      | Workload (4K, numjobs=4, QD=32) | Q=1 | Q=4 |
-      |---|---|---|
-      | randread  | 801k IOPS | **1.37M IOPS** (93µs avg) |
-      | randwrite | 680k IOPS | **816k IOPS** (155µs avg) |
-      Multi-queue scales ~1.7x read / ~1.2x write over single-queue here; more CPUs + real
-      backends should widen that. Point: the ublk path is not the bottleneck. The old
-      "~100k IOPS" figures were buffered and/or different hardware — superseded.
-- [ ] Fix verbose-logging mutex stall (#4) and shared-global barrier contention (#5)
-- [ ] Registered buffers / zero-copy; io_uring SQPOLL; hot-path profiling
-- [ ] Async backend interface; NBD backend (a file backend now exists as `examples/ublk-loop`)
-- [ ] NEED_GET_DATA path (older kernels); Discard/TRIM verification; Flush/FUA batching
-
 ---
 
-## Testing Commands
+## Validation commands
 
-```bash
-# Unit tests (local — Linux only; from macOS use make vm-test-unit)
-make test-unit
+On this Mac, offline cross-compile gates:
 
-# VM tests (requires VM setup)
-make vm-reset          # Reset VM state
-make vm-test-unit      # Cross-compile the unit tests and run them on the VM
-make vm-simple-e2e     # Basic I/O test
-make vm-e2e            # Full test suite
-make vm-verify         # Shadow-oracle integrity sweep (queues x depth x direct)
-make vm-loop-e2e       # File-backend + compressed-backend behavior
-make vm-crash          # Crash consistency: SIGKILL the daemon mid-write, recover, verify
-make vm-powerfail      # Power-fail consistency: sysrq hard reset mid-write, then verify
-make vm-shutdown-storm # Systemd shutdown storm: reboot NORMALLY under load, hunt for an
-                       # oops / a wedged reboot. Runs its own selftest first.
-                       #   STORM_CYCLES=n  how many storm reboots (default 3)
-                       #   VM_SERIAL_LOG=  host file the guest console is captured to;
-                       #                   without it detection is journal-only
-make vm-benchmark      # Performance benchmark
-make vm-stress         # 10x alternating e2e + benchmark
+```sh
+taskpolicy -b nice -n 15 env GOOS=linux GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build ./...
+taskpolicy -b nice -n 15 env GOOS=linux GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./...
 ```
 
----
+Linux runtime tests are coordinator-owned. The existing entry points include
+`make test-unit`, `make test-race`, `make test-uapi-fuzz`, `make suite`,
+`make vm-verify`, `make vm-loop-e2e`, `make vm-crash`, `make vm-powerfail`,
+`make vm-shutdown-storm` and `make vm-soak`; setup is in
+[VM_TESTING.md](docs/VM_TESTING.md) and [test/matrix/README.md](test/matrix/README.md).
+Building a harness is distinct from passing it on a named candidate/kernel.
 
-## Completed Work (Summary)
+## Historical observations
 
-### Phase 0-2: Foundation (Complete)
-- Code cleanup: Removed dead code, fixed bugs, improved constants
-- API polish: Structured errors with `errors.Is()`/`errors.As()`, staged device lifecycle
-- Observability: Metrics interface with latency histograms (P50/P99/P999)
-- Testing infrastructure: Unit tests, VM testing, race detector support
-
-### Phase 3: Performance (Mostly Complete)
-- Multi-queue with sharded memory backend (64KB shards)
-- Buffer pool for large allocations (700x faster than make)
-- Batched io_uring submissions (5-10x improvement for parallel workloads)
-- Pre-allocated structs on hot path
-
-**Performance results (2025-11-26) — SUPERSEDED (buffered; see Phase 5 for honest O_DIRECT):**
-| Workload | go-ublk | Loop (RAM) | % of Loop |
-|----------|---------|------------|-----------|
-| 4K Read (1 job, QD=64) | 85.5k IOPS | 220k IOPS | 39% |
-| 4K Read (4 jobs, QD=64) | 98.9k IOPS | 116k IOPS | 85% |
-| 4K Write (4 jobs, QD=64) | 90.1k IOPS | 98.6k IOPS | 91% |
-
----
-
-## Historical Context
-
-Major bugs fixed during development:
-1. **START_DEV hang** - Submit FETCH_REQs before START_DEV
-2. **IOCTL encoding** - Modern kernels require IOCTL-encoded commands
-3. **SQE128 layout** - cmd area starts at byte 48, 80 bytes total
-4. **Logging deadlock** - Thread-locked goroutines can't block on I/O
-5. **EINTR handling** - Retry io_uring_enter on signal interruption
-6. **Memory barriers** - Sfence before SQ tail update for SQE visibility
+Earlier TODO revisions recorded arm64 copy integrity sweeps, x86_64 AWS
+teardown-under-load cycles, file-backend SIGKILL/guest-reset consistency and RAM
+O_DIRECT benchmarks. Those were specific kernel/workload observations; they do
+not establish current advanced-mode coverage, host power-cut durability or a
+competitive performance ranking. Current reproducible coverage comes from the
+saved per-test matrix mapped in FEATURES.md. The old buffered benchmark table,
+buffer-pool speedups and shared-barrier/Sfence advice are superseded by the
+v0.2.0 mmap/atomic engine and are removed from the active backlog.
