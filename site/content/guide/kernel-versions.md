@@ -5,9 +5,9 @@ description: "What each Linux release added to ublk, from 6.0 to 7.3, derived fr
 weight: 130
 ---
 
-ublk entered mainline in Linux 6.0 and has added to its UAPI in most releases since. Everything on this page is derived by diffing `include/uapi/linux/ublk_cmd.h` across every release from v6.0 to v7.3-rc5, so "since" means "first release whose header defines it". Two cautions apply. A symbol in the header is not always a working feature: `UBLK_F_SUPPORT_ZERO_COPY` was defined in 6.0 and did nothing useful until 6.15. And a release with no header change can still change driver behavior; the few such changes this guide relies on are listed separately below.
+ublk entered mainline in 6.0. Header diffs through v7.3-rc5 establish first definitions, not necessarily working features: SUPPORT_ZERO_COPY existed in 6.0 but worked only from 6.15. Driver behavior can also change without UAPI additions; relevant cases appear below.
 
-Distribution kernels backport freely, in both directions. Ubuntu's 6.17 kernels picked up later mainline ublk changes, and with them a crash that no mainline release had (see [known kernel bugs](/guide/kernel-bugs/)). When it matters, probe the running kernel rather than trusting its version string: `UBLK_U_CMD_GET_FEATURES` from 6.5 on, the flags `ADD_DEV` hands back, and `-EOPNOTSUPP` or `-EINVAL` from commands the kernel does not know.
+Distributions backport changes: Ubuntu 6.17 acquired later features and an [ADD_DEV crash](/guide/kernel-bugs/). Probe GET_FEATURES (6.5+), negotiated ADD_DEV flags, and unknown-command errors (`-EOPNOTSUPP`/`-EINVAL`) instead of relying on version strings.
 
 ## Minimum kernel for each feature
 
@@ -28,7 +28,7 @@ Distribution kernels backport freely, in both directions. Ubuntu's 6.17 kernels 
 | Shared-memory zero copy (`SHMEM_ZC`, `REG_BUF` / `UNREG_BUF`) | 7.1 |
 | Variable descriptor size (`IO_DESC_SIZE`) | 7.3 |
 
-go-ublk always sends ioctl-encoded commands, so it cannot work below 6.4, its minimum. Newer features are negotiated per device. The [compatibility matrix](/reference/matrix/) shows which kernels the conformance suite has passed on.
+go-ublk requires 6.4 for ioctl-encoded commands and negotiates newer features per device. See [tested kernels](/reference/matrix/).
 
 ## Release by release
 
@@ -57,9 +57,9 @@ go-ublk always sends ioctl-encoded commands, so it cannot work below 6.4, its mi
 
 ## Legacy and ioctl-encoded opcodes
 
-Linux 6.0 to 6.3 identified commands by bare numbers in the SQE's `cmd_op` (`UBLK_CMD_ADD_DEV` is 4, `UBLK_IO_FETCH_REQ` is 0x20). Linux 6.4 introduced ioctl-style encodings built with `_IOR`/`_IOWR('u', nr, struct ...)`, so that a command carries its type, direction and argument size like any ioctl, and the header now says not to use the bare numbers in new code. Every command added after 6.4 exists only in encoded form.
+Linux 6.0-6.3 used raw `cmd_op` numbers: ADD_DEV 4, FETCH_REQ 0x20. Linux 6.4 introduced `_IOR`/`_IOWR('u', nr, struct ...)`, encoding type, direction, and size. The header discourages new legacy users; later commands have only encoded forms.
 
-The driver dispatches on the `nr` field and accepts both forms, as long as the type byte is `'u'` or 0. Whether the bare numbers work at all is a build option: with `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES` disabled, anything without the `'u'` type fails with `-EOPNOTSUPP`. The option defaults to on; Ubuntu kernels and Amazon Linux 2023's `kernel6.18` are built with it off. (`UBLK_U_CMD_GET_FEATURES` and the batch I/O commands are matched on their full encoded value, never on `nr` alone.) A server that supports kernels older than 6.4 has to send legacy numbers there and encoded commands everywhere else; one that requires 6.4 can always send encoded commands, which is what go-ublk and the kernel selftests server do.
+Dispatch normally uses `nr`, accepting type byte 'u' or 0. Disabling `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES` rejects legacy commands with `-EOPNOTSUPP`; it defaults on, but Ubuntu and Amazon Linux 2023 `kernel6.18` disable it. GET_FEATURES and batch commands match full encoded values. Pre-6.4 support needs legacy commands; go-ublk and the kernel selftest server require 6.4 and use encoded forms.
 
 | Command | Legacy nr (since) | Encoded value (since) |
 |---|---|---|
@@ -90,21 +90,21 @@ The driver dispatches on the `nr` field and accepts both forms, as long as the t
 | I/O `COMMIT_IO_CMDS` | none | `0xc0107526` (7.0) |
 | I/O `FETCH_IO_CMDS` | none | `0xc0107527` (7.0) |
 
-The `0x20` in control-command values is the size of `struct ublksrv_ctrl_cmd` (32 bytes); the `0x10` in I/O command values is the 16-byte `struct ublksrv_io_cmd` or `struct ublk_batch_io`. `DEL_DEV_ASYNC` is encoded `_IOR` even though it changes state; copy the value, do not derive it.
+Encoded 0x20 denotes the 32-byte control struct; 0x10 denotes the 16-byte I/O or batch struct. DEL_DEV_ASYNC uses `_IOR` despite mutating state; copy the encoding.
 
 ## Zero copy before 6.15
 
-`UBLK_F_SUPPORT_ZERO_COPY` has been bit 0 since 6.0. Through 6.15 the header described it as a scheme that would remap the driver's request pages into the server's address space, requiring 4 KiB blocks; that was never implemented, and through 6.14 the driver cleared the flag from the negotiated set. In 6.15 the bit took on its current meaning, io_uring fixed-buffer zero copy through `REGISTER_IO_BUF`. A server that sets it must check the flags `ADD_DEV` returns, and treat it as meaningful only from 6.15. See [data copy modes](/guide/data-copy/).
+`UBLK_F_SUPPORT_ZERO_COPY` has occupied bit 0 since 6.0. Through 6.15, its header comment described an unimplemented page-remapping scheme requiring 4 KiB blocks; drivers through 6.14 cleared it. Working 6.15 zero copy uses REGISTER_IO_BUF and io_uring fixed buffers. Check negotiated flags; see [copy modes](/guide/data-copy/).
 
 ## Behavior changes without a header change
 
-These change what a server observes but appear in no header diff. Only changes this guide could confirm in driver source or changelogs are listed.
+Driver-source/changelog findings without header changes:
 
-- **Flags the kernel turns on by itself.** The driver always sets `UBLK_F_CMD_IOCTL_ENCODE` (6.4+) and `UBLK_F_URING_CMD_COMP_IN_TASK` (6.5+; 6.1–6.4 only for a modular build), plus `UBLK_F_PER_IO_DAEMON` (6.16+), `UBLK_F_BUF_REG_OFF_DAEMON` (6.17+) and `UBLK_F_SAFE_STOP_DEV` (7.0+) in the flags `ADD_DEV` returns, whatever the server asked for, and clears every bit it does not know. It also clears bits it cannot honor: `SUPPORT_ZERO_COPY` through 6.14, `UNPRIVILEGED_DEV` for a `CAP_SYS_ADMIN` caller, the recovery flags on unprivileged devices, `NEED_GET_DATA` with user copy (6.5+), zero copy (6.15+), automatic registration (6.16+) or batch I/O (7.0+), and `PER_IO_DAEMON` with batch I/O. Treat the returned flags as the truth.
-- **Server PID validation.** In 6.17, `START_DEV` and `END_USER_RECOVERY` fail with `-EINVAL` unless `data[0]` equals the thread-group ID of the process that opened `/dev/ublkcN` ("ublk: validate ublk server pid", 6.17, stable 6.16.1). Older kernels accepted any positive PID.
-- **`ublks_max`.** Since 6.15 the module parameter caps only unprivileged devices; from 6.3 to 6.14 it capped every device. See [unprivileged devices](/guide/unprivileged/).
-- **`max_sectors` validation.** `SET_PARAMS` with `max_sectors` below one page's worth of sectors used to pass validation and then trip a `WARN_ON_ONCE` in the block layer at `START_DEV`. `1860c2f85922` ("ublk: reject max_sectors smaller than PAGE_SECTORS in parameter validation") rejects it with `-EINVAL` up front; it reached stable as 7.0.11 and Ubuntu's `linux-hwe-7.0` at 7.0.0-28.
-- **Ubuntu 6.17.** The `linux-hwe-6.17` 6.17.0-24 changelog backports "ublk: implement NUMA-aware memory allocation" and "ublk: scan partition in async way", which is where the `ADD_DEV` crash and a partition-scan use-after-free described in [known kernel bugs](/guide/kernel-bugs/) came from.
+- Kernel-set bits: CMD_IOCTL_ENCODE (6.4+), URING_CMD_COMP_IN_TASK (6.5+, or modular 6.1-6.4), PER_IO_DAEMON (6.16+), BUF_REG_OFF_DAEMON (6.17+), SAFE_STOP_DEV (7.0+). Unknown bits clear, as do SUPPORT_ZERO_COPY before 6.15, UNPRIVILEGED_DEV for CAP_SYS_ADMIN callers, and unprivileged recovery flags. NEED_GET_DATA clears with user copy (6.5+), zero copy (6.15+), auto registration (6.16+), or batch (7.0+); batch also clears PER_IO_DAEMON. Honor returned flags.
+- START_DEV/END_USER_RECOVERY require `data[0]` equal to the char-device opener's thread-group ID (`-EINVAL` otherwise), since "ublk: validate ublk server pid" (6.17, stable 6.16.1). Earlier kernels accepted any positive PID.
+- `ublks_max` caps unprivileged devices since 6.15; in 6.3-6.14 it capped all devices. See [unprivileged limits](/guide/unprivileged/).
+- `1860c2f85922` ("ublk: reject max_sectors smaller than PAGE_SECTORS in parameter validation") changes sub-page max_sectors from SET_PARAMS success followed by START_DEV WARN_ON_ONCE to upfront EINVAL. It reached stable 7.0.11 and Ubuntu linux-hwe-7.0 7.0.0-28.
+- Ubuntu linux-hwe-6.17 6.17.0-24 backported "ublk: implement NUMA-aware memory allocation" and "ublk: scan partition in async way", introducing the [ADD_DEV crash and partition-scan use-after-free](/guide/kernel-bugs/).
 
 ## Common distribution kernels
 
@@ -117,4 +117,4 @@ These change what a server observes but appear in no header diff. Only changes t
 | Debian 13 | 6.12 (7.2 in trixie-backports) | yes, up to `DEL_DEV_ASYNC` |
 | WSL2 (Microsoft kernel 6.6) | 6.6 | `ublk_drv` not built |
 
-The [compatibility matrix](/reference/matrix/) records what go-ublk's test suite actually did on each kernel it was run against.
+The [matrix](/reference/matrix/) records actual suite results by kernel.
