@@ -55,7 +55,8 @@ func main() {
 		queueDepth  = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
 		cpuprofile  = flag.String("cpuprofile", "", "Write CPU profile to file")
 		memprofile  = flag.String("memprofile", "", "Write memory profile to file")
-		delSpec     = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all' to reap every registered device")
+		delSpec     = flag.String("del", "",
+			"Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all' to reap every registered device")
 	)
 	flag.Parse()
 

@@ -120,7 +120,10 @@ func TestEngineFlushIgnoresSectorRange(t *testing.T) {
 
 func TestEngineRequestBoundsBeforeBackend(t *testing.T) {
 	forEachDispatch(t, func(t *testing.T, dispatch dispatchCase) {
-		for _, mode := range []string{"copy-inline", "copy-async", "user-copy", "batch-copy", "batch-user-copy", "shared-memory", "zero-copy-manual", "zero-copy-auto", "batch-zero-copy"} {
+		for _, mode := range []string{
+			"copy-inline", "copy-async", "user-copy", "batch-copy", "batch-user-copy", "shared-memory",
+			"zero-copy-manual", "zero-copy-auto", "batch-zero-copy",
+		} {
 			for _, tc := range []struct {
 				name    string
 				start   uint64

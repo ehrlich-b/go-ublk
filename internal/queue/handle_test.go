@@ -91,7 +91,10 @@ func TestRequestHandleRejectsStaleCompletionAndBuffersAfterReuse(t *testing.T) {
 				if err := old.Complete(nil); err != nil {
 					t.Fatal(err)
 				}
-				if err := old.WithBuffers(func(_, _, _ []byte) error { t.Error("completed buffer exposed"); return nil }); !errors.Is(err, ErrRequestCompleted) {
+				if err := old.WithBuffers(func(_, _, _ []byte) error {
+					t.Error("completed buffer exposed")
+					return nil
+				}); !errors.Is(err, ErrRequestCompleted) {
 					t.Fatal(err)
 				}
 				e.drainCompletions()
@@ -142,7 +145,9 @@ func TestRequestHandleRejectsStaleCompletionAndBuffersAfterReuse(t *testing.T) {
 					t.Fatal("stale completion changed new request/result")
 				}
 				if err := current.WithBuffers(func(data, meta, extra []byte) error {
-					if !bytes.Equal(data, bytes.Repeat([]byte{0xcd}, 512)) || !bytes.Equal(meta, bytes.Repeat([]byte{0xd7}, len(meta))) || !bytes.Equal(extra, bytes.Repeat([]byte{0xa5}, 8)) {
+					if !bytes.Equal(data, bytes.Repeat([]byte{0xcd}, 512)) ||
+						!bytes.Equal(meta, bytes.Repeat([]byte{0xd7}, len(meta))) ||
+						!bytes.Equal(extra, bytes.Repeat([]byte{0xa5}, 8)) {
 						t.Fatal("stale handle changed poisoned buffers")
 					}
 					for i := range data {
@@ -162,10 +167,12 @@ func TestRequestHandleRejectsStaleCompletionAndBuffersAfterReuse(t *testing.T) {
 				_, _ = k.Submit()
 				reapScheduled(e, k)
 				commits, violations := k.snapshot()
-				if e.err != nil || len(commits) != 2 || len(violations) != 0 || e.handlers.Load() != 0 || commits[1].id != 2 || commits[1].result != 512 {
+				if e.err != nil || len(commits) != 2 || len(violations) != 0 || e.handlers.Load() != 0 ||
+					commits[1].id != 2 || commits[1].result != 512 {
 					t.Fatalf("commit ledger: err=%v commits=%v violations=%v", e.err, commits, violations)
 				}
-				if !tc.shared && (!bytes.Equal(commits[0].data, bytes.Repeat([]byte{0x31}, 512)) || !bytes.Equal(commits[1].data, bytes.Repeat([]byte{0x52}, 512))) {
+				if !tc.shared && (!bytes.Equal(commits[0].data, bytes.Repeat([]byte{0x31}, 512)) ||
+					!bytes.Equal(commits[1].data, bytes.Repeat([]byte{0x52}, 512))) {
 					t.Fatal("committed stale data")
 				}
 			})
