@@ -105,11 +105,12 @@ type Request struct {
 	// (UBLK_F_IO_DESC_SIZE, kernel 7.3+); nil otherwise. Read-only.
 	DescriptorExtra []byte
 
-	e      *engine
-	state  atomic.Uint32
-	result int32
-	lba    uint64 // zone append result, in sectors
-	next   *Request
+	e          *engine
+	state      atomic.Uint32
+	result     int32
+	lba        uint64 // zone append result, in sectors
+	next       *Request
+	generation uint64 // batch ledger generation; never inferred from a reused pointer
 
 	zcManual      bool // zero copy: we registered the request's buffer and must unregister it
 	zcUnsupported bool // zero copy: the op has no file equivalent

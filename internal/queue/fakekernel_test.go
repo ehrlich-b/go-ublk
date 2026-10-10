@@ -349,6 +349,15 @@ func (k *fakeKernel) post(ud uint64, res int32) {
 	}
 }
 
+// scheduleCompletions inserts exact CQEs in caller-chosen order. Unlike inject,
+// it deliberately permits malformed fields and duplicates. Owner-thread tests
+// reap these events one step at a time, without timing-dependent sleeps.
+func (k *fakeKernel) scheduleCompletions(events ...uring.CQE) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.cq = append(k.cq, events...)
+}
+
 // pollWake completes the armed eventfd read once the eventfd is readable.
 func (k *fakeKernel) pollWake() {
 	if !k.wakeArmed {

@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/ehrlich-b/go-ublk/internal/completion"
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
@@ -155,6 +156,7 @@ type engine struct {
 	commitBufs    [batchCommitBufs][]byte
 	commitSent    [batchCommitBufs][]*Request // nil slot: buffer free
 	pendingCommit []*Request
+	batchLedger   *completion.Batch
 
 	// testBeforeSleep, if set, runs between draining completions and publishing
 	// sleeping: the window a lost-wakeup bug lives in. Tests only.
@@ -333,6 +335,7 @@ func (e *engine) setupBatch() error {
 	flags := e.batchFlags()
 	eb := int(uapi.BatchElemBytes(flags))
 	n := e.cfg.tagHi - e.cfg.tagLo
+	e.batchLedger = completion.NewBatch(e.cfg.tagLo, e.cfg.tagHi, batchCommitBufs)
 	if e.prepBuf, err = uring.AllocOffHeap(n * eb); err != nil {
 		return err
 	}
@@ -374,11 +377,21 @@ func setMultishot(sqe *uring.SQE) {
 
 func (e *engine) handleFetch(res int32, flags uint32) {
 	bid, hasBuf := uint16(flags>>uring.IORING_CQE_BUFFER_SHIFT), flags&uring.IORING_CQE_F_BUFFER != 0
+	tags, err := completion.FetchTags(e.tagBufs, batchTagBufs, batchTagBufSize, bid, res, hasBuf)
+	if err != nil {
+		e.fail(fmt.Errorf("queue %d: %w", e.cfg.queueID, err))
+		return
+	}
+	tokens, err := e.batchLedger.Deliver(tags)
+	if err != nil {
+		e.fail(fmt.Errorf("queue %d: %w", e.cfg.queueID, err))
+		return
+	}
 	if hasBuf {
 		buf := e.tagBufs[int(bid)*batchTagBufSize : (int(bid)+1)*batchTagBufSize]
-		if res > 0 {
-			for k := 0; k+1 < int(res); k += 2 {
-				tag := int(buf[k]) | int(buf[k+1])<<8
+		if len(tokens) > 0 {
+			for _, token := range tokens {
+				tag := int(token.Tag)
 				i := tag - e.cfg.tagLo
 				if i < 0 || i >= len(e.tags) || e.tags[i] != tagFetching {
 					st := -1
@@ -392,6 +405,7 @@ func (e *engine) handleFetch(res int32, flags uint32) {
 					e.tags[i] = tagOrphaned
 					continue
 				}
+				e.reqs[i].generation = token.Generation
 				e.dispatch(i)
 			}
 		}
@@ -438,14 +452,25 @@ func (e *engine) flushBatchCommits() {
 	eb := int(uapi.BatchElemBytes(flags))
 	n := min(len(e.pendingCommit), len(e.commitBufs[slot])/eb)
 	sent := append([]*Request(nil), e.pendingCommit[:n]...)
+	tokens := make([]completion.Token, n)
 	for k, r := range sent {
+		tokens[k] = completion.Token{Tag: r.Tag, Generation: r.generation}
 		lba := uint64(0)
 		if r.Op == OpZoneAppend && r.result >= 0 {
 			lba = r.lba
 		}
 		e.putElem(e.commitBufs[slot][k*eb:], flags, r.Tag, r.result, lba)
 	}
-	if err := e.prepBatchCmd(uapi.UBLK_U_IO_COMMIT_IO_CMDS, flags, n, uint8(eb), e.commitBufs[slot], kindBatch|uint64(slot)); err != nil {
+	id, err := e.batchLedger.NextID(slot)
+	if err != nil {
+		e.fail(err)
+		return
+	}
+	if err := e.prepBatchCmd(uapi.UBLK_U_IO_COMMIT_IO_CMDS, flags, n, uint8(eb), e.commitBufs[slot], kindBatch|id); err != nil {
+		e.fail(err)
+		return
+	}
+	if err := e.batchLedger.Submit(id, tokens); err != nil {
 		e.fail(err)
 		return
 	}
@@ -463,24 +488,28 @@ func (e *engine) flushBatchCommits() {
 // committed handles a COMMIT_IO_CMDS completion: res is the bytes of the
 // element buffer consumed; elements after the first failure were not
 // committed and go back on the pending list.
-func (e *engine) committed(slot int, res int32) {
-	sent := e.commitSent[slot]
-	e.commitSent[slot] = nil
-	eb := int32(uapi.BatchElemBytes(e.batchFlags()))
-	done := 0
-	if res > 0 {
-		done = int(res / eb)
-	}
-	if done < len(sent) {
-		for _, r := range sent[done:] {
-			e.tags[int(r.Tag)-e.cfg.tagLo] = tagHandling // not consumed: still ours
+func (e *engine) committed(id uint64, res int32) {
+	retry, err := e.batchLedger.Complete(id, res, int(uapi.BatchElemBytes(e.batchFlags())))
+	if err != nil {
+		// Never retransmit a completion whose consumed prefix is unknown.
+		if e.batchLedger.Forget(id) {
+			e.commitSent[int(id&0xff)] = nil
 		}
-		if res < 0 && done == 0 && res != -int32(syscall.EBUSY) {
-			e.fail(fmt.Errorf("queue %d: COMMIT_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
-		}
-		// Not consumed: still owned by us; send them again.
-		e.pendingCommit = append(append([]*Request(nil), sent[done:]...), e.pendingCommit...)
+		e.fail(fmt.Errorf("queue %d: %w", e.cfg.queueID, err))
+		return
 	}
+	e.commitSent[int(id&0xff)] = nil
+	if res < 0 && res != -int32(syscall.EBUSY) {
+		e.fail(fmt.Errorf("queue %d: COMMIT_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
+		return
+	}
+	unsent := make([]*Request, len(retry))
+	for k, token := range retry {
+		i := int(token.Tag) - e.cfg.tagLo
+		e.tags[i] = tagHandling // not consumed: still ours, in this generation
+		unsent[k] = &e.reqs[i]
+	}
+	e.pendingCommit = append(unsent, e.pendingCommit...)
 }
 
 // teardown runs on the engine thread. Closing the ring cancels any command
@@ -598,14 +627,26 @@ func (e *engine) finished() bool {
 func (e *engine) handleCQE(ud uint64, res int32, flags uint32) {
 	switch ud & kindMask {
 	case kindPrep:
+		if !e.cfg.batch || ud != kindPrep {
+			e.fail(fmt.Errorf("queue %d: invalid PREP completion identity %#x", e.cfg.queueID, ud))
+			return
+		}
 		if res < 0 {
 			e.fail(fmt.Errorf("queue %d: PREP_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
 			e.live = 0
 		}
 	case kindFetch:
+		if !e.cfg.batch || ud != kindFetch {
+			e.fail(fmt.Errorf("queue %d: invalid FETCH completion identity %#x", e.cfg.queueID, ud))
+			return
+		}
 		e.handleFetch(res, flags)
 	case kindBatch:
-		e.committed(int(ud&0xff), res)
+		if !e.cfg.batch {
+			e.fail(fmt.Errorf("queue %d: batch completion on a non-batch engine", e.cfg.queueID))
+			return
+		}
+		e.committed(ud&^kindMask, res)
 	case kindWake:
 		e.wakeArmed = false
 		if !e.stopping.Load() || e.handlers.Load() != 0 {
@@ -931,6 +972,10 @@ func (e *engine) commit(r *Request) {
 				e.fail(err)
 			}
 			r.zcManual = false
+		}
+		if err := e.batchLedger.Queue(completion.Token{Tag: r.Tag, Generation: r.generation}); err != nil {
+			e.fail(err)
+			return
 		}
 		r.state.Store(reqIdle)
 		r.Data, r.Integrity = nil, nil
