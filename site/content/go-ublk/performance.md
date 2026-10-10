@@ -22,7 +22,7 @@ This A/B experiment used the same [Linux 6.12 KVM guest](/evidence/2026-10-10/go
 
 The [per-round TSV](/evidence/2026-10-10/go-dispatch-ab-results.tsv) also includes a pooled-goroutine dispatch experiment. Reusing goroutines didn't improve these workloads. Together, the pooled and inline results point to the cross-thread handoff as the dispatch cost that matters here. These are VM measurements; cross-CPU wakeups cost more here than on bare metal.
 
-The [comparative baseline](/reference/benchmarks/) is a separate experiment and reports means. Its go-ublk rows use default dispatch; the inline medians above don't replace those means.
+The [comparative overhead ladder](/reference/benchmarks/) is a separate experiment with disjoint fio and server CPU sets. It reports means for both default and inline dispatch, using null and RAM targets. The medians above remain results from this A/B experiment.
 
 ## Choosing a dispatch mode
 
@@ -70,4 +70,4 @@ The defaults and feature requirements below come from the [published DeviceParam
 
 Use direct I/O and the queue depth your application needs. Record throughput, latency, and the CPU budget for both the client and server. Compare the RAM target with your backend on the same kernel and machine.
 
-The [benchmark manifest](/evidence/2026-10-10/bench-baseline-manifest.json) records the comparative workloads and schedule. The [dispatch metadata](/evidence/2026-10-10/go-dispatch-ab-metadata.txt) records the separate experiment's runtime, server flags, and executable hash. Raw fio JSON and profiling logs aren't part of those hosted extracts.
+The [ladder manifest](/evidence/2026-10-10/ladder-manifest.json) records the comparative workloads, CPU placement, and schedule. The [dispatch metadata](/evidence/2026-10-10/go-dispatch-ab-metadata.txt) records the separate experiment's runtime, server flags, and executable hash. Raw fio JSON and profiling logs aren't part of those hosted extracts.

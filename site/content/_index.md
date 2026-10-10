@@ -30,7 +30,7 @@ heroLinks:
 </a>
 <a class="card" href="/reference/benchmarks/">
 <p class="card-title">Comparative benchmarks</p>
-<p>RAM-backed kernel devices and userspace servers on a shared CPU budget. Throughput, latency, and the cost of a userspace round trip, with evidence and qualification limits.</p>
+<p>An overhead ladder from the kernel floor through userspace null and RAM targets. Completion latency, throughput, and CPU cost, with evidence and qualification limits.</p>
 </a>
 </div>
 

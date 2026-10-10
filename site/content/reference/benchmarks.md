@@ -1,95 +1,101 @@
 ---
 title: "Comparative benchmarks"
 linkTitle: "Benchmarks"
-description: "RAM-backed block devices on a shared CPU budget, with measurement evidence and qualification limits."
+description: "The ublk overhead ladder: kernel floors, userspace transport, and RAM targets, with latency and CPU costs."
 weight: 30
 wide: true
 ---
 
-These measurements compare retained-RAM block devices on [Linux 6.12.111](/evidence/2026-10-10/bench-baseline-report.md) in a KVM guest pinned to [4 dedicated physical cores](/evidence/2026-10-10/lib-ublk-validation.md) of a [Ryzen 9 6900HX](/evidence/2026-10-10/bench-baseline-report.md). The server and fio share a [4-CPU budget](/evidence/2026-10-10/bench-baseline-manifest.json). Results are means from [3 interleaved rounds](/evidence/2026-10-10/bench-baseline-manifest.json); throughput dispersion is the sample standard deviation.
+The overhead ladder separates the kernel floor, userspace transport, and RAM data work. This completed run used [Linux 6.12.111 in a KVM guest on 4 dedicated physical cores](/evidence/2026-10-10/ladder-report.md) of a [Ryzen 9 6900HX](/evidence/2026-10-10/ladder-report.md). Fio ran on [vCPUs 0-3, and the server on 4-7](/evidence/2026-10-10/ladder-manifest.json), with disjoint CPU sets. There are [3 interleaved rounds per target and workload, with 264/264 valid observations](/evidence/2026-10-10/ladder-report.md).
 
-**No winner claims.** The [4 KiB random-read A/A noise floor is 6%](/evidence/2026-10-10/bench-baseline-report.md), and the quiet-window and matched-peer gates are incomplete. libublk-rs's unmodified ramdisk example fixes [1 queue at depth 128](/evidence/2026-10-10/bench-baseline-report.md), so it's unmatched. ublksrv uses a loop target over tmpfs with an extra backend I/O path; kernel-baseline workers can run outside the userspace CPU set. These are VM observations, where cross-CPU wakeups cost more than on bare metal.
+## Measured transport cost
 
-## Implementations and geometry
+- ublksrv, libublk-rs, and inline go-ublk add about [13 µs of completion latency at qd1](/evidence/2026-10-10/ladder-report.md) over the kernel null_blk floor. At depth, random reads cost about [1,100 extra CPU-ns/IO, or 40%](/evidence/2026-10-10/ladder-report.md) over that floor.
+- go-ublk with `DeviceParams.Inline` ties the C and Rust reference servers on transport cost in this run: [13.89 µs qd1 p50 and 4,027.94 CPU-ns/IO for random reads](/evidence/2026-10-10/ladder-report.md). Its default goroutine mode adds about [35 µs over the kernel floor](/evidence/2026-10-10/ladder-report.md).
+- lib-ublk's serving path is currently the slowest at depth, with about [20 µs qd1 p50 and a 300k IOPS ceiling](/evidence/2026-10-10/ladder-report.md). Work on the serving path is ongoing.
+- At depth, the C, Rust, and inline Go null targets reach the kernel rate: about [751k-757k IOPS for random reads, against null_blk's 698k](/evidence/2026-10-10/ladder-report.md). Fio limits throughput there; CPU-ns/IO separates their transport costs.
 
-All targets retain writes in RAM. null_blk is memory-backed here; a write-dropping null target isn't part of these tables. The requested server geometry was [2 queues at depth 64](/evidence/2026-10-10/bench-baseline-manifest.json). Source revisions and binary hashes are in the [report](/evidence/2026-10-10/bench-baseline-report.md).
+**No winner claims.** The [report's qualification gates](/evidence/2026-10-10/ladder-report.md) still lack quiet-window attestation and complete peer controls. These are VM measurements; cross-CPU wakeups cost more here than on bare metal. Null targets discard writes. lib-ublk's null example also zero-fills reads, and ublksrv's RAM target includes loop/tmpfs backend I/O. Kernel workers can run outside the userspace CPU sets. Rust's RAM geometry is unmatched.
 
-| Implementation | Target | Accepted queues/depth | Revision |
-|---|---|---|---|
-| brd | In-kernel RAM disk | Kernel-managed | [Kernel build and module hash](/evidence/2026-10-10/bench-baseline-report.md) |
-| null_blk | In-kernel, memory-backed | [2/64](/evidence/2026-10-10/bench-baseline-report.md) | [Kernel build and module hash](/evidence/2026-10-10/bench-baseline-report.md) |
-| go-ublk | RAM example, default dispatch | [2/64](/evidence/2026-10-10/bench-baseline-report.md) | [1c800535eef6](/evidence/2026-10-10/bench-baseline-report.md) |
-| lib-ublk | C RAM consumer, copy mode | [2/64](/evidence/2026-10-10/bench-baseline-report.md) | [e0743b3eb034](/evidence/2026-10-10/bench-baseline-report.md) |
-| ublksrv | Loop over tmpfs | [2/64](/evidence/2026-10-10/bench-baseline-report.md) | [abbfea2b5918](https://github.com/ublk-org/ublksrv/commit/abbfea2b59184b26e7212ce3d4c47702450510df) |
-| libublk-rs (unmatched) | Unmodified ramdisk example | [1/128](/evidence/2026-10-10/bench-baseline-report.md) | [479f3097e128](https://github.com/ublk-org/libublk-rs/commit/479f3097e128d595877185781987d218fe78c047) |
+## Reading the ladder
 
-## Queue depth one and round-trip cost
+L0 is null_blk without stored data. L1 adds kernel RAM storage through brd or memory-backed null_blk. L2 measures the userspace null targets, and L3 adds retaining-RAM targets.
 
-[4 KiB random reads, one job at queue depth 1](/evidence/2026-10-10/bench-baseline-manifest.json). Effective time per I/O is `1,000,000 / IOPS`, in microseconds. It includes submission and completion; fio's completion-latency p50 and p99 are separate columns. The latencies reported here are means of the run-level quantiles, rather than percentiles pooled across rounds.
+The requested device geometry was [2 queues at depth 64](/evidence/2026-10-10/ladder-manifest.json). All userspace targets accepted it except libublk-rs's RAM example, which fixes [1 queue at depth 128](/evidence/2026-10-10/ladder-report.md). Its null example accepted the requested geometry. brd has kernel-managed geometry.
 
-| Implementation | IOPS mean ± sd | Effective µs/I/O | Completion p50 µs | Completion p99 µs |
-|---|---:|---:|---:|---:|
-| brd | [390,597.38 ± 3,118.39](/evidence/2026-10-10/bench-baseline-report.md) | [2.56](/evidence/2026-10-10/bench-baseline-report.md) | [0.11](/evidence/2026-10-10/bench-baseline-report.md) | [0.13](/evidence/2026-10-10/bench-baseline-report.md) |
-| null_blk (memory-backed) | [276,263.46 ± 3,374.41](/evidence/2026-10-10/bench-baseline-report.md) | [3.62](/evidence/2026-10-10/bench-baseline-report.md) | [0.11](/evidence/2026-10-10/bench-baseline-report.md) | [0.12](/evidence/2026-10-10/bench-baseline-report.md) |
-| go-ublk | [22,985.96 ± 97.44](/evidence/2026-10-10/bench-baseline-report.md) | [43.50](/evidence/2026-10-10/bench-baseline-report.md) | [36.10](/evidence/2026-10-10/bench-baseline-report.md) | [56.75](/evidence/2026-10-10/bench-baseline-report.md) |
-| lib-ublk | [38,219.41 ± 277.64](/evidence/2026-10-10/bench-baseline-report.md) | [26.16](/evidence/2026-10-10/bench-baseline-report.md) | [20.44](/evidence/2026-10-10/bench-baseline-report.md) | [29.48](/evidence/2026-10-10/bench-baseline-report.md) |
-| ublksrv (loop over tmpfs) | [38,293.42 ± 408.02](/evidence/2026-10-10/bench-baseline-report.md) | [26.11](/evidence/2026-10-10/bench-baseline-report.md) | [20.35](/evidence/2026-10-10/bench-baseline-report.md) | [30.76](/evidence/2026-10-10/bench-baseline-report.md) |
-| libublk-rs (unmatched) | [49,752.79 ± 774.90](/evidence/2026-10-10/bench-baseline-report.md) | [20.10](/evidence/2026-10-10/bench-baseline-report.md) | [14.53](/evidence/2026-10-10/bench-baseline-report.md) | [23.00](/evidence/2026-10-10/bench-baseline-report.md) |
+**Every qd1 p50 column comes from the separate [4 KiB random-read run with one job at depth 1](/evidence/2026-10-10/ladder-manifest.json)**, including the write and mixed tables. Kernel devices complete inline through io_uring; their reported [roughly 0.1 µs](/evidence/2026-10-10/ladder-report.md) measures completion latency alone and excludes submission. The tables show **inline** for those rows. The userspace p50 values also measure completion latency; they aren't full round-trip times.
 
-The in-kernel RAM disks cost about [2.6-3.6 µs per I/O](/evidence/2026-10-10/bench-baseline-report.md) at queue depth one. The lowest measured userspace round-trip cost on this VM is about [20 µs](/evidence/2026-10-10/bench-baseline-report.md), from libublk-rs's unmatched ramdisk example. This measures the full userspace path on this VM; it doesn't isolate language or FFI cost.
+IOPS and CPU-ns/IO come from each named workload at [2 jobs × queue depth 32](/evidence/2026-10-10/ladder-manifest.json). Values are means of the primary runs; latency values are means of run-level quantiles. CPU-ns/IO includes fio and server user/system CPU plus attributed residual kernel CPU per completed I/O. It excludes kernel workers outside the benchmark cgroups, unattributed interrupts, and other guest or host work. The [report](/evidence/2026-10-10/ladder-report.md) gives the accounting method and sample standard deviations.
 
-## Random I/O
+## 4 KiB random reads
 
-[4 KiB requests, 2 jobs at queue depth 32 each](/evidence/2026-10-10/bench-baseline-manifest.json). The mixed workload is [70% reads and 30% writes](/evidence/2026-10-10/bench-baseline-manifest.json). Throughput is the arithmetic mean, and latency columns are means of each run's I/O-weighted completion quantiles, as described in the [report](/evidence/2026-10-10/bench-baseline-report.md).
-
-| Workload | Implementation | IOPS mean ± sd | Completion p50 µs | Completion p99 µs |
+| Rung | Target | qd1 p50 µs | 2×qd32 IOPS | CPU-ns/IO |
 |---|---|---:|---:|---:|
-| Read | brd | [766,865.82 ± 4,968.26](/evidence/2026-10-10/bench-baseline-report.md) | [80.04](/evidence/2026-10-10/bench-baseline-report.md) | [100.52](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | null_blk (memory-backed) | [544,246.95 ± 20,552.98](/evidence/2026-10-10/bench-baseline-report.md) | [112.47](/evidence/2026-10-10/bench-baseline-report.md) | [142.51](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | go-ublk | [559,235.16 ± 63,628.85](/evidence/2026-10-10/bench-baseline-report.md) | [94.38](/evidence/2026-10-10/bench-baseline-report.md) | [391.17](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | lib-ublk | [288,525.05 ± 3,654.98](/evidence/2026-10-10/bench-baseline-report.md) | [181.93](/evidence/2026-10-10/bench-baseline-report.md) | [436.22](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | ublksrv (loop over tmpfs) | [371,241.43 ± 10,898.70](/evidence/2026-10-10/bench-baseline-report.md) | [156.67](/evidence/2026-10-10/bench-baseline-report.md) | [246.78](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | libublk-rs (unmatched) | [649,358.42 ± 51,942.16](/evidence/2026-10-10/bench-baseline-report.md) | [95.74](/evidence/2026-10-10/bench-baseline-report.md) | [138.41](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | brd | [709,066.43 ± 5,878.78](/evidence/2026-10-10/bench-baseline-report.md) | [86.19](/evidence/2026-10-10/bench-baseline-report.md) | [105.30](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | null_blk (memory-backed) | [510,865.23 ± 2,451.67](/evidence/2026-10-10/bench-baseline-report.md) | [120.66](/evidence/2026-10-10/bench-baseline-report.md) | [143.70](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | go-ublk | [564,917.56 ± 59,862.36](/evidence/2026-10-10/bench-baseline-report.md) | [96.43](/evidence/2026-10-10/bench-baseline-report.md) | [239.62](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | lib-ublk | [254,681.93 ± 1,852.10](/evidence/2026-10-10/bench-baseline-report.md) | [230.40](/evidence/2026-10-10/bench-baseline-report.md) | [615.77](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | ublksrv (loop over tmpfs) | [371,706.58 ± 6,841.73](/evidence/2026-10-10/bench-baseline-report.md) | [174.42](/evidence/2026-10-10/bench-baseline-report.md) | [246.10](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | libublk-rs (unmatched) | [672,654.42 ± 18,111.73](/evidence/2026-10-10/bench-baseline-report.md) | [88.92](/evidence/2026-10-10/bench-baseline-report.md) | [129.71](/evidence/2026-10-10/bench-baseline-report.md) |
-| Mixed | brd | [744,896.21 ± 4,605.36](/evidence/2026-10-10/bench-baseline-report.md) | [82.77](/evidence/2026-10-10/bench-baseline-report.md) | [100.52](/evidence/2026-10-10/bench-baseline-report.md) |
-| Mixed | null_blk (memory-backed) | [528,157.22 ± 1,453.66](/evidence/2026-10-10/bench-baseline-report.md) | [116.57](/evidence/2026-10-10/bench-baseline-report.md) | [136.19](/evidence/2026-10-10/bench-baseline-report.md) |
-| Mixed | go-ublk | [562,469.21 ± 66,902.00](/evidence/2026-10-10/bench-baseline-report.md) | [94.04](/evidence/2026-10-10/bench-baseline-report.md) | [253.95](/evidence/2026-10-10/bench-baseline-report.md) |
-| Mixed | lib-ublk | [272,672.96 ± 10,247.33](/evidence/2026-10-10/bench-baseline-report.md) | [199.68](/evidence/2026-10-10/bench-baseline-report.md) | [531.11](/evidence/2026-10-10/bench-baseline-report.md) |
-| Mixed | ublksrv (loop over tmpfs) | [361,391.55 ± 1,901.42](/evidence/2026-10-10/bench-baseline-report.md) | [165.55](/evidence/2026-10-10/bench-baseline-report.md) | [269.65](/evidence/2026-10-10/bench-baseline-report.md) |
-| Mixed | libublk-rs (unmatched) | [661,882.10 ± 14,165.26](/evidence/2026-10-10/bench-baseline-report.md) | [94.38](/evidence/2026-10-10/bench-baseline-report.md) | [124.76](/evidence/2026-10-10/bench-baseline-report.md) |
+| L0 | [null_blk (`memory_backed=0`)](/evidence/2026-10-10/ladder-report.md) | inline | [697,574.16](/evidence/2026-10-10/ladder-report.md) | [2,872.83](/evidence/2026-10-10/ladder-report.md) |
+| L1 | brd | inline | [748,901.96](/evidence/2026-10-10/ladder-report.md) | [2,673.59](/evidence/2026-10-10/ladder-report.md) |
+| L1 | null_blk (memory-backed) | inline | [518,206.85](/evidence/2026-10-10/ladder-report.md) | [3,869.35](/evidence/2026-10-10/ladder-report.md) |
+| L2 | ublksrv (null) | [13.16](/evidence/2026-10-10/ladder-report.md) | [756,632.54](/evidence/2026-10-10/ladder-report.md) | [3,981.74](/evidence/2026-10-10/ladder-report.md) |
+| L2 | libublk-rs (null) | [13.89](/evidence/2026-10-10/ladder-report.md) | [751,428.28](/evidence/2026-10-10/ladder-report.md) | [4,006.86](/evidence/2026-10-10/ladder-report.md) |
+| L2 | go-ublk (null, inline) | [13.89](/evidence/2026-10-10/ladder-report.md) | [750,904.23](/evidence/2026-10-10/ladder-report.md) | [4,027.94](/evidence/2026-10-10/ladder-report.md) |
+| L2 | go-ublk (null, default goroutine) | [35.41](/evidence/2026-10-10/ladder-report.md) | [627,270.72](/evidence/2026-10-10/ladder-report.md) | [5,701.59](/evidence/2026-10-10/ladder-report.md) |
+| L2 | lib-ublk (null, zero-filled reads) | [19.75](/evidence/2026-10-10/ladder-report.md) | [301,149.68](/evidence/2026-10-10/ladder-report.md) | [7,045.35](/evidence/2026-10-10/ladder-report.md) |
+| L3 | ublksrv (loop over tmpfs) | [20.44](/evidence/2026-10-10/ladder-report.md) | [367,384.13](/evidence/2026-10-10/ladder-report.md) | [5,680.39](/evidence/2026-10-10/ladder-report.md) |
+| L3 | libublk-rs (RAM, unmatched) | [14.61](/evidence/2026-10-10/ladder-report.md) | [656,377.06](/evidence/2026-10-10/ladder-report.md) | [4,309.44](/evidence/2026-10-10/ladder-report.md) |
+| L3 | go-ublk (RAM, inline) | [14.53](/evidence/2026-10-10/ladder-report.md) | [601,819.01](/evidence/2026-10-10/ladder-report.md) | [4,532.49](/evidence/2026-10-10/ladder-report.md) |
+| L3 | go-ublk (RAM, default goroutine) | [36.78](/evidence/2026-10-10/ladder-report.md) | [568,548.05](/evidence/2026-10-10/ladder-report.md) | [6,920.21](/evidence/2026-10-10/ladder-report.md) |
+| L3 | lib-ublk (RAM) | [20.35](/evidence/2026-10-10/ladder-report.md) | [283,428.33](/evidence/2026-10-10/ladder-report.md) | [7,200.78](/evidence/2026-10-10/ladder-report.md) |
 
-## Sequential I/O
+## 4 KiB random writes
 
-[128 KiB requests, one job at queue depth 8](/evidence/2026-10-10/bench-baseline-manifest.json). Throughput is in MiB/s.
-
-| Workload | Implementation | MiB/s mean ± sd | Completion p50 µs | Completion p99 µs |
+| Rung | Target | qd1 p50 µs | 2×qd32 IOPS | CPU-ns/IO |
 |---|---|---:|---:|---:|
-| Read | brd | [9,474.19 ± 166.03](/evidence/2026-10-10/bench-baseline-report.md) | [90.28](/evidence/2026-10-10/bench-baseline-report.md) | [122.37](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | null_blk (memory-backed) | [6,418.74 ± 17.47](/evidence/2026-10-10/bench-baseline-report.md) | [147.11](/evidence/2026-10-10/bench-baseline-report.md) | [191.49](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | go-ublk | [11,589.88 ± 493.15](/evidence/2026-10-10/bench-baseline-report.md) | [72.53](/evidence/2026-10-10/bench-baseline-report.md) | [177.15](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | lib-ublk | [8,860.57 ± 294.66](/evidence/2026-10-10/bench-baseline-report.md) | [96.77](/evidence/2026-10-10/bench-baseline-report.md) | [186.03](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | ublksrv (loop over tmpfs) | [6,080.95 ± 136.59](/evidence/2026-10-10/bench-baseline-report.md) | [162.82](/evidence/2026-10-10/bench-baseline-report.md) | [262.83](/evidence/2026-10-10/bench-baseline-report.md) |
-| Read | libublk-rs (unmatched) | [10,327.52 ± 267.79](/evidence/2026-10-10/bench-baseline-report.md) | [85.16](/evidence/2026-10-10/bench-baseline-report.md) | [149.16](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | brd | [7,080.15 ± 103.82](/evidence/2026-10-10/bench-baseline-report.md) | [122.03](/evidence/2026-10-10/bench-baseline-report.md) | [165.55](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | null_blk (memory-backed) | [5,811.51 ± 17.08](/evidence/2026-10-10/bench-baseline-report.md) | [163.50](/evidence/2026-10-10/bench-baseline-report.md) | [213.33](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | go-ublk | [8,047.54 ± 373.92](/evidence/2026-10-10/bench-baseline-report.md) | [109.06](/evidence/2026-10-10/bench-baseline-report.md) | [246.78](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | lib-ublk | [6,745.41 ± 192.39](/evidence/2026-10-10/bench-baseline-report.md) | [140.29](/evidence/2026-10-10/bench-baseline-report.md) | [184.66](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | ublksrv (loop over tmpfs) | [4,780.24 ± 528.82](/evidence/2026-10-10/bench-baseline-report.md) | [199.00](/evidence/2026-10-10/bench-baseline-report.md) | [339.29](/evidence/2026-10-10/bench-baseline-report.md) |
-| Write | libublk-rs (unmatched) | [7,095.53 ± 308.39](/evidence/2026-10-10/bench-baseline-report.md) | [133.97](/evidence/2026-10-10/bench-baseline-report.md) | [205.82](/evidence/2026-10-10/bench-baseline-report.md) |
+| L0 | [null_blk (`memory_backed=0`)](/evidence/2026-10-10/ladder-report.md) | inline | [665,755.53](/evidence/2026-10-10/ladder-report.md) | [3,008.38](/evidence/2026-10-10/ladder-report.md) |
+| L1 | brd | inline | [689,646.76](/evidence/2026-10-10/ladder-report.md) | [2,903.98](/evidence/2026-10-10/ladder-report.md) |
+| L1 | null_blk (memory-backed) | inline | [506,170.70](/evidence/2026-10-10/ladder-report.md) | [3,960.83](/evidence/2026-10-10/ladder-report.md) |
+| L2 | ublksrv (null) | [13.16](/evidence/2026-10-10/ladder-report.md) | [712,006.11](/evidence/2026-10-10/ladder-report.md) | [4,223.56](/evidence/2026-10-10/ladder-report.md) |
+| L2 | libublk-rs (null) | [13.89](/evidence/2026-10-10/ladder-report.md) | [706,629.18](/evidence/2026-10-10/ladder-report.md) | [4,257.47](/evidence/2026-10-10/ladder-report.md) |
+| L2 | go-ublk (null, inline) | [13.89](/evidence/2026-10-10/ladder-report.md) | [706,909.94](/evidence/2026-10-10/ladder-report.md) | [4,279.23](/evidence/2026-10-10/ladder-report.md) |
+| L2 | go-ublk (null, default goroutine) | [35.41](/evidence/2026-10-10/ladder-report.md) | [606,231.64](/evidence/2026-10-10/ladder-report.md) | [5,959.48](/evidence/2026-10-10/ladder-report.md) |
+| L2 | lib-ublk (null, zero-filled reads) | [19.75](/evidence/2026-10-10/ladder-report.md) | [275,901.24](/evidence/2026-10-10/ladder-report.md) | [7,828.04](/evidence/2026-10-10/ladder-report.md) |
+| L3 | ublksrv (loop over tmpfs) | [20.44](/evidence/2026-10-10/ladder-report.md) | [367,190.94](/evidence/2026-10-10/ladder-report.md) | [5,792.74](/evidence/2026-10-10/ladder-report.md) |
+| L3 | libublk-rs (RAM, unmatched) | [14.61](/evidence/2026-10-10/ladder-report.md) | [670,473.17](/evidence/2026-10-10/ladder-report.md) | [4,362.64](/evidence/2026-10-10/ladder-report.md) |
+| L3 | go-ublk (RAM, inline) | [14.53](/evidence/2026-10-10/ladder-report.md) | [591,022.87](/evidence/2026-10-10/ladder-report.md) | [4,640.91](/evidence/2026-10-10/ladder-report.md) |
+| L3 | go-ublk (RAM, default goroutine) | [36.78](/evidence/2026-10-10/ladder-report.md) | [558,978.76](/evidence/2026-10-10/ladder-report.md) | [7,142.78](/evidence/2026-10-10/ladder-report.md) |
+| L3 | lib-ublk (RAM) | [20.35](/evidence/2026-10-10/ladder-report.md) | [251,613.09](/evidence/2026-10-10/ladder-report.md) | [8,092.99](/evidence/2026-10-10/ladder-report.md) |
+
+## 4 KiB mixed random I/O
+
+[70% reads and 30% writes](/evidence/2026-10-10/ladder-manifest.json).
+
+| Rung | Target | qd1 p50 µs | 2×qd32 IOPS | CPU-ns/IO |
+|---|---|---:|---:|---:|
+| L0 | [null_blk (`memory_backed=0`)](/evidence/2026-10-10/ladder-report.md) | inline | [673,483.59](/evidence/2026-10-10/ladder-report.md) | [2,976.25](/evidence/2026-10-10/ladder-report.md) |
+| L1 | brd | inline | [722,591.23](/evidence/2026-10-10/ladder-report.md) | [2,770.78](/evidence/2026-10-10/ladder-report.md) |
+| L1 | null_blk (memory-backed) | inline | [514,477.61](/evidence/2026-10-10/ladder-report.md) | [3,895.04](/evidence/2026-10-10/ladder-report.md) |
+| L2 | ublksrv (null) | [13.16](/evidence/2026-10-10/ladder-report.md) | [731,771.42](/evidence/2026-10-10/ladder-report.md) | [4,111.79](/evidence/2026-10-10/ladder-report.md) |
+| L2 | libublk-rs (null) | [13.89](/evidence/2026-10-10/ladder-report.md) | [725,685.49](/evidence/2026-10-10/ladder-report.md) | [4,146.05](/evidence/2026-10-10/ladder-report.md) |
+| L2 | go-ublk (null, inline) | [13.89](/evidence/2026-10-10/ladder-report.md) | [730,038.46](/evidence/2026-10-10/ladder-report.md) | [4,145.17](/evidence/2026-10-10/ladder-report.md) |
+| L2 | go-ublk (null, default goroutine) | [35.41](/evidence/2026-10-10/ladder-report.md) | [605,853.07](/evidence/2026-10-10/ladder-report.md) | [5,864.79](/evidence/2026-10-10/ladder-report.md) |
+| L2 | lib-ublk (null, zero-filled reads) | [19.75](/evidence/2026-10-10/ladder-report.md) | [278,881.15](/evidence/2026-10-10/ladder-report.md) | [7,531.09](/evidence/2026-10-10/ladder-report.md) |
+| L3 | ublksrv (loop over tmpfs) | [20.44](/evidence/2026-10-10/ladder-report.md) | [362,288.20](/evidence/2026-10-10/ladder-report.md) | [5,790.70](/evidence/2026-10-10/ladder-report.md) |
+| L3 | libublk-rs (RAM, unmatched) | [14.61](/evidence/2026-10-10/ladder-report.md) | [629,258.92](/evidence/2026-10-10/ladder-report.md) | [4,489.11](/evidence/2026-10-10/ladder-report.md) |
+| L3 | go-ublk (RAM, inline) | [14.53](/evidence/2026-10-10/ladder-report.md) | [598,136.86](/evidence/2026-10-10/ladder-report.md) | [4,609.34](/evidence/2026-10-10/ladder-report.md) |
+| L3 | go-ublk (RAM, default goroutine) | [36.78](/evidence/2026-10-10/ladder-report.md) | [560,703.84](/evidence/2026-10-10/ladder-report.md) | [7,041.87](/evidence/2026-10-10/ladder-report.md) |
+| L3 | lib-ublk (RAM) | [20.35](/evidence/2026-10-10/ladder-report.md) | [262,404.24](/evidence/2026-10-10/ladder-report.md) | [7,728.19](/evidence/2026-10-10/ladder-report.md) |
+
+## Earlier shared-CPU baseline
+
+The earlier [retaining-RAM baseline](/evidence/2026-10-10/bench-baseline-report.md) used the same VM with fio and the server sharing a [4-CPU budget](/evidence/2026-10-10/bench-baseline-manifest.json). Its random and sequential workload tables remain available in the report. That CPU placement differs from the disjoint ladder run, so the two sets of means aren't interchangeable.
 
 ## Go dispatch experiment
 
-A separate [interleaved A/B run](/go-ublk/performance/#dispatch-measurements) on the same VM compares go-ublk's default goroutine-per-request dispatch with `DeviceParams.Inline`. At queue depth one, RAM throughput changed from [20.3k to 43.5k IOPS](/evidence/2026-10-10/go-dispatch-ab-results.tsv). Those results are medians from a separate experiment; the go-ublk rows above retain the measured baseline means.
+A separate [interleaved A/B run](/go-ublk/performance/#dispatch-measurements) on the same VM compares go-ublk's default goroutine-per-request dispatch with `DeviceParams.Inline`. At queue depth one, RAM throughput changed from [20.3k to 43.5k IOPS](/evidence/2026-10-10/go-dispatch-ab-results.tsv). Those are medians from a separate experiment; the ladder tables report their own measured means.
 
 ## Evidence files
 
-- [Benchmark report](/evidence/2026-10-10/bench-baseline-report.md): all workload means, dispersion, CPU measurements, A/A controls, source revisions, and binary hashes.
-- [Benchmark manifest](/evidence/2026-10-10/bench-baseline-manifest.json): workload geometry, seed, runtime, warmup, and interleaved schedule.
+- [Overhead ladder report](/evidence/2026-10-10/ladder-report.md): all workload means, dispersion, CPU accounting, rung deltas, qualification gates, source revisions, and binary hashes.
+- [Overhead ladder manifest](/evidence/2026-10-10/ladder-manifest.json): disjoint CPU placement, workload geometry, seed, runtime, warmup, and interleaved schedule.
+- [Shared-CPU baseline report](/evidence/2026-10-10/bench-baseline-report.md) and [manifest](/evidence/2026-10-10/bench-baseline-manifest.json): the earlier retaining-RAM experiment.
 - [Go dispatch results](/evidence/2026-10-10/go-dispatch-ab-results.tsv) and [metadata](/evidence/2026-10-10/go-dispatch-ab-metadata.txt): per-round latency, syscall, and context-switch measurements.
 
-The hosted report and metadata are sanitized extracts. Raw fio JSON and guest lifecycle logs aren't included in these downloads.
+The hosted reports and metadata are sanitized extracts. Raw fio JSON and guest lifecycle logs aren't included in these downloads.

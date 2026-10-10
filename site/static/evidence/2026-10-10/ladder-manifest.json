@@ -1,0 +1,662 @@
+{
+  "config": {
+    "aa_control": "go-ublk",
+    "cpu_count": 8,
+    "cpu_isolation": "disjoint",
+    "cpus": "0,1,2,3,4,5,6,7",
+    "depth": 64,
+    "fio_cpu_count": 4,
+    "fio_cpus": "0,1,2,3",
+    "implementations": [
+      "null-blk-nomem",
+      "null-blk",
+      "brd",
+      "go-ublk-null",
+      "go-ublk",
+      "go-ublk-null-inline",
+      "go-ublk-inline",
+      "lib-ublk-null",
+      "lib-ublk",
+      "ublksrv-null",
+      "ublksrv-loop",
+      "libublk-rs-null",
+      "libublk-rs"
+    ],
+    "profile": false,
+    "queues": [
+      2
+    ],
+    "quiet_window_confirmed": false,
+    "quiet_window_note": "",
+    "rounds": 3,
+    "runtime_seconds": 15,
+    "seed": 20261010,
+    "server_cpu_count": 4,
+    "server_cpus": "4,5,6,7",
+    "size_bytes": 536870912,
+    "targets": {
+      "brd": {
+        "family": "kernel",
+        "rung": "L1",
+        "semantics": "retaining-ram"
+      },
+      "go-ublk": {
+        "family": "go-ublk",
+        "mode": "goroutine",
+        "rung": "L3",
+        "semantics": "retaining-ram"
+      },
+      "go-ublk-inline": {
+        "family": "go-ublk",
+        "mode": "inline",
+        "rung": "L3",
+        "semantics": "retaining-ram"
+      },
+      "go-ublk-null": {
+        "family": "go-ublk",
+        "mode": "goroutine",
+        "rung": "L2",
+        "semantics": "null"
+      },
+      "go-ublk-null-inline": {
+        "family": "go-ublk",
+        "mode": "inline",
+        "rung": "L2",
+        "semantics": "null"
+      },
+      "lib-ublk": {
+        "family": "lib-ublk",
+        "rung": "L3",
+        "semantics": "retaining-ram"
+      },
+      "lib-ublk-null": {
+        "family": "lib-ublk",
+        "rung": "L2",
+        "semantics": "null"
+      },
+      "libublk-rs": {
+        "family": "libublk-rs",
+        "rung": "L3",
+        "semantics": "retaining-ram"
+      },
+      "libublk-rs-null": {
+        "family": "libublk-rs",
+        "rung": "L2",
+        "semantics": "null"
+      },
+      "null-blk": {
+        "family": "kernel",
+        "rung": "L1",
+        "semantics": "retaining-ram"
+      },
+      "null-blk-nomem": {
+        "family": "kernel",
+        "rung": "L0",
+        "semantics": "null"
+      },
+      "ublksrv-loop": {
+        "family": "ublksrv",
+        "rung": "L3",
+        "semantics": "retaining-ram"
+      },
+      "ublksrv-null": {
+        "family": "ublksrv",
+        "rung": "L2",
+        "semantics": "null"
+      }
+    },
+    "warmup_seconds": 3,
+    "workloads": [
+      {
+        "bs": "4k",
+        "iodepth": 32,
+        "name": "4k-randread",
+        "numjobs": 2,
+        "rw": "randread"
+      },
+      {
+        "bs": "4k",
+        "iodepth": 32,
+        "name": "4k-randwrite",
+        "numjobs": 2,
+        "rw": "randwrite"
+      },
+      {
+        "bs": "4k",
+        "iodepth": 32,
+        "name": "4k-randrw-70r30w",
+        "numjobs": 2,
+        "rw": "randrw",
+        "rwmixread": 70
+      },
+      {
+        "bs": "4k",
+        "iodepth": 1,
+        "name": "4k-randread-qd1",
+        "numjobs": 1,
+        "rw": "randread"
+      },
+      {
+        "bs": "128k",
+        "iodepth": 8,
+        "name": "128k-read",
+        "numjobs": 1,
+        "rw": "read"
+      },
+      {
+        "bs": "128k",
+        "iodepth": 8,
+        "name": "128k-write",
+        "numjobs": 1,
+        "rw": "write"
+      }
+    ]
+  },
+  "profile_schedule": [],
+  "profile_status": "not requested",
+  "schedule": [
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "calibration",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 0,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 1
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "calibration",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 0,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 2
+    },
+    {
+      "family": "kernel",
+      "implementation": "null-blk-nomem",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L0",
+      "semantics": "null",
+      "sequence": 3
+    },
+    {
+      "family": "kernel",
+      "implementation": "null-blk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L1",
+      "semantics": "retaining-ram",
+      "sequence": 4
+    },
+    {
+      "family": "kernel",
+      "implementation": "brd",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L1",
+      "semantics": "retaining-ram",
+      "sequence": 5
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-null",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 6
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 7
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-null-inline",
+      "mode": "inline",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 8
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-inline",
+      "mode": "inline",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 9
+    },
+    {
+      "family": "lib-ublk",
+      "implementation": "lib-ublk-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 10
+    },
+    {
+      "family": "lib-ublk",
+      "implementation": "lib-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 11
+    },
+    {
+      "family": "ublksrv",
+      "implementation": "ublksrv-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 12
+    },
+    {
+      "family": "ublksrv",
+      "implementation": "ublksrv-loop",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 13
+    },
+    {
+      "family": "libublk-rs",
+      "implementation": "libublk-rs-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 14
+    },
+    {
+      "family": "libublk-rs",
+      "implementation": "libublk-rs",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 15
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 1,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 16
+    },
+    {
+      "family": "kernel",
+      "implementation": "null-blk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L1",
+      "semantics": "retaining-ram",
+      "sequence": 17
+    },
+    {
+      "family": "kernel",
+      "implementation": "brd",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L1",
+      "semantics": "retaining-ram",
+      "sequence": 18
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-null",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 19
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 20
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-null-inline",
+      "mode": "inline",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 21
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-inline",
+      "mode": "inline",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 22
+    },
+    {
+      "family": "lib-ublk",
+      "implementation": "lib-ublk-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 23
+    },
+    {
+      "family": "lib-ublk",
+      "implementation": "lib-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 24
+    },
+    {
+      "family": "ublksrv",
+      "implementation": "ublksrv-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 25
+    },
+    {
+      "family": "ublksrv",
+      "implementation": "ublksrv-loop",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 26
+    },
+    {
+      "family": "libublk-rs",
+      "implementation": "libublk-rs-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 27
+    },
+    {
+      "family": "libublk-rs",
+      "implementation": "libublk-rs",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 28
+    },
+    {
+      "family": "kernel",
+      "implementation": "null-blk-nomem",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L0",
+      "semantics": "null",
+      "sequence": 29
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 2,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 30
+    },
+    {
+      "family": "kernel",
+      "implementation": "brd",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L1",
+      "semantics": "retaining-ram",
+      "sequence": 31
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-null",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 32
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 33
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-null-inline",
+      "mode": "inline",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 34
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk-inline",
+      "mode": "inline",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 35
+    },
+    {
+      "family": "lib-ublk",
+      "implementation": "lib-ublk-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 36
+    },
+    {
+      "family": "lib-ublk",
+      "implementation": "lib-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 37
+    },
+    {
+      "family": "ublksrv",
+      "implementation": "ublksrv-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 38
+    },
+    {
+      "family": "ublksrv",
+      "implementation": "ublksrv-loop",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 39
+    },
+    {
+      "family": "libublk-rs",
+      "implementation": "libublk-rs-null",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L2",
+      "semantics": "null",
+      "sequence": 40
+    },
+    {
+      "family": "libublk-rs",
+      "implementation": "libublk-rs",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 41
+    },
+    {
+      "family": "kernel",
+      "implementation": "null-blk-nomem",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L0",
+      "semantics": "null",
+      "sequence": 42
+    },
+    {
+      "family": "kernel",
+      "implementation": "null-blk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L1",
+      "semantics": "retaining-ram",
+      "sequence": 43
+    },
+    {
+      "family": "go-ublk",
+      "implementation": "go-ublk",
+      "mode": "goroutine",
+      "phase": "measured",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 3,
+      "rung": "L3",
+      "semantics": "retaining-ram",
+      "sequence": 44
+    }
+  ],
+  "schema": 2,
+  "status": "complete"
+}
