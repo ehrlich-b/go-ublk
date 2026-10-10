@@ -120,10 +120,83 @@ tests use the [fake kernel](../internal/queue/fakekernel_test.go#L23).
 | SQPOLL / IOPOLL | U | [ring.go:53](../internal/uring/ring.go#L53), [rejection:142](../internal/uring/ring.go#L142); unsupported setup flags, no public enable option. | No supported-mode test or matrix pass; not implemented. |
 | NBD backend | U | No implementation or example in this tree; [Backend:7](../interfaces.go#L7) permits a caller to build one. | No NBD tests or matrix pass; not implemented. |
 
+## Geometry and request bounds follow-up
+
+The bounds hardening after the inventory baseline uses one pure
+[layout gate](../internal/validation/layout.go#L40) for SQ/CQ/SQE mappings,
+provided-buffer rings, descriptor arrays and owned queue buffers. It checks
+positive representable mmap sizes, offset/span arithmetic, word alignment,
+power-of-two ring counts, matching mapped counts/masks and SQE64/128 and
+CQE16/32 strides. [Ring setup](../internal/uring/ring.go#L192) checks geometry
+before mmap, reads mask/count words through checked byte slices, validates them
+again, then forms pointers and caches the validated masks. Descriptor mappings
+check queue ownership, 24..256-byte strides in multiples of eight, fixed
+maximum-depth queue offsets and page rounding before mapping.
+
+[DispatchRequest](../internal/validation/request.go#L86) guards the common
+[engine dispatch](../internal/queue/engine.go#L692) before buffer preparation,
+backend callbacks or file/registration SQEs. Copy, user copy, NEED_GET_DATA,
+shared-memory dispatch, batch copy/user copy, manual/auto zero copy and batch
+zero copy all reach this guard. It checks signed sector-to-byte conversion,
+logical-block alignment, capacity end and payload limits; zero copy also
+checks the backing-file base plus capacity. Integrity spans have a checked
+multiplication before slicing. Device creation/recovery snapshot the configured
+capacity; successful Resize updates the queues' atomic capacity limits.
+
+DISCARD and WRITE_ZEROES ranges may exceed the payload-buffer size but must
+fit the device. REPORT_ZONES treats the count as zones, checks its starting
+offset and caps its 64-byte-entry report buffer; it does not interpret the
+zone count as a sector range. Unknown-op policy and read-only enforcement are
+separate from these arithmetic checks.
+
+The [portable boundary tests](../internal/validation/layout_test.go),
+[request/backend guard tests](../internal/validation/request_test.go) and new
+`FuzzRingLayout`/`FuzzRequestRange` run natively on Darwin. The ring fuzzer also
+reaches descriptor layout validation; both use fixed-size synthetic inputs and
+independent arithmetic oracles, without allocating input-sized mappings.
+Removing the span-end check made the committed `SQ/head/past-end` test fail;
+the check was restored. New
+[Linux engine/mapping/resize tests](../internal/queue/bounds_test.go) and the
+existing real-ring fixtures compile, but Linux runtime validation is pending.
+The existing `make test-uapi-fuzz` also needs Linux for its ctrl/engine targets;
+the new targets are separate commands, not yet part of that make target.
+
+The local validation run used Go 1.26.2 on Darwin arm64: portable validation,
+UAPI and logging tests passed; Linux amd64 build/vet and test compilation passed.
+Each new fuzz target ran once with a 60-second budget and two workers:
+`FuzzRingLayout` executed **2,465,377** cases and `FuzzRequestRange` executed
+**2,430,286**, both passing. The existing make target passed its three UAPI
+fuzzers, then failed to compile the ctrl target on Darwin's missing io_uring
+syscall constants; its ctrl and engine campaigns still require Linux.
+
+The coordinator should run these commands on the disposable Debian VM, at this
+candidate revision; these are pending runtime gates, not recorded passes:
+
+```sh
+GOFLAGS='-p=2' make test-unit
+make test-uapi-fuzz FUZZ_PARALLEL=2
+go test -p 2 -gcflags=all=-d=checkptr=2 ./internal/queue ./internal/uring
+GOFLAGS='-p=2' make suite
+sudo ./bin/ublk-suite
+sudo env GO_UBLK_DISPOSABLE_TEST=1 GOFLAGS='-p=2' make test-large-io-kernel
+```
+
+`make test-unit` covers the new Linux bounds tests plus existing queue fake-kernel
+models, io_uring ABI/index/real-ring tests, control models and public device/backend
+tests. The suite covers real-kernel I/O modes and lifecycle; the focused large-I/O
+test exercises public startup paths. Advanced-mode skips retain their reasons.
+
+These checks cover mapping geometry and request arithmetic, not batch CQE
+identity/buffer IDs/partial-commit accounting, shared-region address decoding,
+registration/loan lifetime, stale completions, recovery reply arithmetic or
+resize transition ordering. Those remain open under the gaps below; no advanced
+mode is promoted by portable tests or cross-compilation alone.
+
 ## Coverage limits and documentation corrections
 
-The fuzz foundation already exists: [FuzzFixedUAPI/FuzzParamsUAPI/FuzzUAPIEncodings](../internal/uapi/fuzz_test.go#L12),
-[FuzzCtrlDecoders](../internal/ctrl/fuzz_test.go#L15), [FuzzEngine](../internal/queue/fuzz_test.go#L21).
+The fuzz foundation includes [FuzzFixedUAPI/FuzzParamsUAPI/FuzzUAPIEncodings](../internal/uapi/fuzz_test.go#L12),
+[FuzzCtrlDecoders](../internal/ctrl/fuzz_test.go#L15), [FuzzEngine](../internal/queue/fuzz_test.go#L21),
+and the portable bounds targets described above.
 FuzzEngine exercises copy, NEED_GET_DATA and batch with depths 1..8, at most
 64 scripted requests, valid tags, five operations and 24-byte descriptors.
 It does not reach user copy, ZC, shared regions, recovery, zoned or integrity.

@@ -42,7 +42,10 @@ absent. No current comparative performance claim is established by this backlog.
    Add batch buffer exhaustion, partial SQ submissions, invalid/duplicate/late CQEs,
    syscall/allocation failures, long tag reuse and device-supervisor fault tests.
    Expand existing fuzz targets with deterministic schedule replay and resource
-   oracles; their current scope is documented in FEATURES.md.
+   oracles; their current scope is documented in FEATURES.md. Ring/descriptor
+   geometry and request arithmetic now have portable validators and native fuzz
+   targets; include those targets in bounded CI and complete the larger assurance
+   campaigns. They do not close ownership, hostile-CQE or lifecycle gaps.
 7. [ ] **Fresh candidate and CI coverage.** Coordinator runs Linux tests on real VMs:
    x86_64 and arm64, feature-boundary kernels, selected full-distro shutdown/udev
    runs, race/checkptr and GC/memory-pressure stress. Persist exact revision, kernel,
@@ -108,6 +111,13 @@ permanently wedged backend remain part of the shutdown/recovery gates.
   (`internal/queue/queue.go:151`, `engine.go:163`, `:541`, `internal/uring/ring.go:359`).
 - [x] Metrics/Observer, percentile histograms and structured errors
   (`metrics.go`, `metrics_percentile_test.go`, `errors.go`).
+- [x] Checked mapping geometry and descriptor-derived request arithmetic
+  (`internal/validation/`), wired before mapped pointers and before dispatch in
+  copy/user-copy/shared/batch/manual/auto zero-copy paths. Includes descriptor
+  stride/queue validation, signed offsets, capacity/alignment/payload checks,
+  zero-copy file-base and integrity-span arithmetic, boundary tests and native
+  `FuzzRingLayout`/`FuzzRequestRange`. Portable tests pass; Linux runtime gates,
+  resize transition ordering and the larger fuzz campaigns remain pending.
 
 ---
 
@@ -461,8 +471,18 @@ test scope and recorded kernel coverage are in [FEATURES.md](docs/FEATURES.md).
 On this Mac, offline cross-compile gates:
 
 ```sh
-taskpolicy -b nice -n 15 env GOOS=linux GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build ./...
-taskpolicy -b nice -n 15 env GOOS=linux GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./...
+mkdir -p .scratch/tmp
+export TMPDIR="$PWD/.scratch/tmp" GOTMPDIR="$PWD/.scratch/tmp"
+taskpolicy -b nice -n 15 env GOOS=linux GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build -p 2 ./...
+taskpolicy -b nice -n 15 env GOOS=linux GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet -p 2 ./...
+```
+
+Portable bounds checks also run natively on Darwin:
+
+```sh
+taskpolicy -b nice -n 15 go test -p 2 ./internal/validation
+taskpolicy -b nice -n 15 env GOMAXPROCS=2 go test -p 2 -parallel 2 -run XXX -fuzz '^FuzzRingLayout$' -fuzztime 60s ./internal/validation
+taskpolicy -b nice -n 15 env GOMAXPROCS=2 go test -p 2 -parallel 2 -run XXX -fuzz '^FuzzRequestRange$' -fuzztime 60s ./internal/validation
 ```
 
 Linux runtime tests are coordinator-owned. The existing entry points include
