@@ -5,37 +5,37 @@ description: "All UBLK_F_* feature flags: what each one changes, which release a
 weight: 60
 ---
 
-A ublk device's behavior is fixed at creation by a 64-bit set of `UBLK_F_*` flags in `struct ublksrv_ctrl_dev_info.flags`. Some flags select a protocol (how data moves, how I/O commands are issued), some enable optional control commands, and a few are pure capability bits that the kernel sets on its own. The 7.3-rc5 header defines 21 of them, bits 0 through 20.
+At creation, `struct ublksrv_ctrl_dev_info.flags` selects protocols and optional commands through a 64-bit `UBLK_F_*` mask. Some bits merely report kernel capabilities. Linux 7.3-rc5 defines 21 flags, bits 0-20.
 
-This chapter explains how flags are negotiated, summarizes every flag in one table, and then describes each group. The chapters on [data copy modes](/guide/data-copy/), [batch I/O](/guide/batch-io/), [user recovery](/guide/recovery/), [unprivileged devices](/guide/unprivileged/), [zoned devices](/guide/zoned/) and [integrity metadata](/guide/integrity/) go deeper on the larger features.
+For protocol details, see [data copy](/guide/data-copy/), [batch I/O](/guide/batch-io/), [recovery](/guide/recovery/), [unprivileged devices](/guide/unprivileged/), [zoned devices](/guide/zoned/), and [integrity](/guide/integrity/).
 
 ## How negotiation works
 
-There are two mechanisms, and a careful server uses both.
+Probe capabilities with `GET_FEATURES`, then check the device's negotiated `ADD_DEV` flags.
 
 ### The ADD_DEV round trip
 
-{{< uapi "UBLK_U_CMD_ADD_DEV" >}} takes a `struct ublksrv_ctrl_dev_info` by pointer. The server fills in `flags` with what it wants; the kernel validates the request, edits `flags`, and copies the whole structure back before the command completes. The returned `flags` are the device's features for its entire life. Nothing changes them later.
+{{< uapi "UBLK_U_CMD_ADD_DEV" >}} validates the requested `flags` in `struct ublksrv_ctrl_dev_info`, edits them, and copies the structure back. The returned flags govern the device's lifetime.
 
-Unknown bits do not fail the command. The kernel masks the request with its compiled-in `UBLK_F_ALL`, so a flag the running kernel has never heard of is silently cleared. **Always compare the returned flags with the ones you asked for** and treat a missing bit as "not supported here".
+Unknown bits are silently masked with `UBLK_F_ALL`. Compare requested and returned flags; a missing bit means the device lacks that feature.
 
-In the 7.3-rc5 driver, `ublk_ctrl_add_dev()` applies these rules in order (6.17 has the same list minus the integrity, descriptor-size and batch items):
+`ublk_ctrl_add_dev()` applies these rules in 7.3-rc5 (6.17 lacks the integrity, descriptor-size, and batch steps):
 
-1. **Privilege.** A caller with `CAP_SYS_ADMIN` always gets a privileged device: `UBLK_F_UNPRIVILEGED_DEV` is cleared. A caller without it must set `UBLK_F_UNPRIVILEGED_DEV`, or the command fails with `-EPERM`.
-2. **Recovery combinations.** The recovery bits must be one of: none, `USER_RECOVERY`, `USER_RECOVERY | USER_RECOVERY_REISSUE`, or `USER_RECOVERY | USER_RECOVERY_FAIL_IO`. Anything else (for example `REISSUE` without `USER_RECOVERY`, or both modifiers) is `-EINVAL`.
-3. **Quiesce.** `UBLK_F_QUIESCE` without `UBLK_F_USER_RECOVERY` is `-EINVAL`.
-4. **Unprivileged restrictions.** For an unprivileged device the kernel silently drops `USER_RECOVERY` and `USER_RECOVERY_REISSUE`, and rejects `USER_COPY`, `SUPPORT_ZERO_COPY` or `AUTO_BUF_REG` with `-EINVAL`, because each of those would let an untrusted server leave kernel memory uninitialized in a READ.
-5. **Integrity.** `UBLK_F_INTEGRITY` without `UBLK_F_USER_COPY` is `-EINVAL`.
-6. **Descriptor size.** With `UBLK_F_IO_DESC_SIZE`, `io_desc_size` must be at least 24, a multiple of 8, and at most 256, or `-EINVAL`. Without it, the kernel sets `io_desc_size` to 24.
-7. **Masking.** `flags &= UBLK_F_ALL`. `UBLK_F_INTEGRITY` is only in `UBLK_F_ALL` when the kernel is built with `CONFIG_BLK_DEV_INTEGRITY`.
-8. **Forced capability bits.** The kernel ORs in `CMD_IOCTL_ENCODE` (6.4+), `URING_CMD_COMP_IN_TASK` (6.5+), `PER_IO_DAEMON` (6.16+) and `BUF_REG_OFF_DAEMON` (6.17+), and since 7.0 also `SAFE_STOP_DEV`. These report what the driver does; they do not select anything.
-9. **Batch cleanup.** With `UBLK_F_BATCH_IO`, `PER_IO_DAEMON` and `NEED_GET_DATA` are cleared again: batch mode has no per-I/O daemons and no get-data step.
-10. **Copy-mode cleanup.** `NEED_GET_DATA` is cleared if `USER_COPY`, `SUPPORT_ZERO_COPY` or `AUTO_BUF_REG` is set, since none of those modes copies WRITE data at all.
-11. **Zoned.** `UBLK_F_ZONED` requires a kernel built with `CONFIG_BLK_DEV_ZONED` and either `USER_COPY` or `SUPPORT_ZERO_COPY`; otherwise `-EINVAL`.
+1. With `CAP_SYS_ADMIN`, clear `UNPRIVILEGED_DEV`. Without it, require that flag or return `-EPERM`.
+2. Accept no recovery flags, `USER_RECOVERY`, or that flag with either `REISSUE` or `FAIL_IO`. Other combinations return `-EINVAL`.
+3. Reject `QUIESCE` without `USER_RECOVERY` (`-EINVAL`).
+4. For unprivileged devices, clear `USER_RECOVERY`/`USER_RECOVERY_REISSUE`; reject `USER_COPY`, `SUPPORT_ZERO_COPY`, or `AUTO_BUF_REG` (`-EINVAL`). These modes could expose uninitialized READ memory.
+5. Reject `INTEGRITY` without `USER_COPY` (`-EINVAL`).
+6. With `IO_DESC_SIZE`, require 24-256 bytes in multiples of 8 or return `-EINVAL`; otherwise set 24.
+7. Apply `flags &= UBLK_F_ALL`. `INTEGRITY` requires `CONFIG_BLK_DEV_INTEGRITY` in this mask.
+8. Force capability bits: `CMD_IOCTL_ENCODE` (6.4+), `URING_CMD_COMP_IN_TASK` (6.5+), `PER_IO_DAEMON` (6.16+), `BUF_REG_OFF_DAEMON` (6.17+), and `SAFE_STOP_DEV` (7.0+).
+9. For `BATCH_IO`, clear `PER_IO_DAEMON` and `NEED_GET_DATA`: batch has neither per-tag daemons nor get-data.
+10. For `USER_COPY`, `SUPPORT_ZERO_COPY`, or `AUTO_BUF_REG`, clear `NEED_GET_DATA`: these modes skip WRITE copying at delivery.
+11. For `ZONED`, require `CONFIG_BLK_DEV_ZONED` and either `USER_COPY` or `SUPPORT_ZERO_COPY`, or return `-EINVAL`.
 
 ### GET_FEATURES
 
-{{< since "6.5" >}} {{< uapi "UBLK_U_CMD_GET_FEATURES" >}} returns the kernel's whole `UBLK_F_ALL` mask: every flag this kernel knows, independent of any device. Point `addr` at an 8-byte buffer and set `len` to exactly `UBLK_FEATURES_LEN` (8); any other length is `-EINVAL`. The driver handles it before looking up a device or checking permissions, so `dev_id` is ignored and anyone who can open `/dev/ublk-control` may ask.
+{{< since "6.5" >}} {{< uapi "UBLK_U_CMD_GET_FEATURES" >}} returns `UBLK_F_ALL` independently of any device. Set `addr` to an 8-byte buffer and `len` to `UBLK_FEATURES_LEN` (8); other lengths return `-EINVAL`. The driver ignores `dev_id` and handles this before permission checks, so anyone able to open `/dev/ublk-control` can probe.
 
 ```c
 __u64 features = 0;
@@ -50,9 +50,9 @@ if (res < 0)
 	features = 0;   /* pre-6.5 kernel: fall back to probing with ADD_DEV */
 ```
 
-On kernels older than 6.5 the opcode is not recognized. Because the old driver looks the device up by `dev_id` before dispatching, the error is typically `-ENODEV` rather than `-EOPNOTSUPP`; treat any failure as "no GET_FEATURES". (With a `dev_id` that names an existing device, 6.3 and 6.4 return `-ENOTSUPP`, 524; 6.0 to 6.2 return `-EPERM` to a caller without `CAP_SYS_ADMIN`.)
+Before 6.5, the unknown opcode usually returns `-ENODEV`: the driver looks up `dev_id` before dispatch. With an existing ID, 6.3/6.4 return `-ENOTSUPP` (524); 6.0-6.2 return `-EPERM` without `CAP_SYS_ADMIN`. Treat failure as missing `GET_FEATURES` and inspect `ADD_DEV` instead.
 
-The two mechanisms answer different questions. `GET_FEATURES` says what the driver supports in general, which is what you want before deciding how to configure a device. The `ADD_DEV` result says what this particular device got after validation, privilege checks and kernel configuration, which is what you must actually honor.
+`GET_FEATURES` describes driver capabilities; `ADD_DEV` confirms what survived validation, privilege checks, and configuration for this device.
 
 ## All flags at a glance
 
@@ -84,53 +84,53 @@ The two mechanisms answer different questions. `GET_FEATURES` says what the driv
 
 ## Data copy flags
 
-These decide how request data moves between the block request and the server. Exactly one mode applies to a device: the default copy, `NEED_GET_DATA`, `USER_COPY`, or zero copy (`SUPPORT_ZERO_COPY` and/or `AUTO_BUF_REG`). `SHMEM_ZC` is a fast path layered on top. The [data copy chapter](/guide/data-copy/) covers each mode in full; this is the short version.
+Choose default copy, `NEED_GET_DATA`, `USER_COPY`, or zero copy (`SUPPORT_ZERO_COPY` and/or `AUTO_BUF_REG`); `SHMEM_ZC` adds a fast path. See [data copy modes](/guide/data-copy/).
 
-- {{< uapi "UBLK_F_SUPPORT_ZERO_COPY" >}} (bit 0). The bit was reserved in 6.0 but did nothing useful until 6.15 added `UBLK_U_IO_REGISTER_IO_BUF` and `UBLK_U_IO_UNREGISTER_IO_BUF`. The server installs a request's pages into an io_uring sparse buffer table and points `*_FIXED` operations at them; the server's own code never touches the data. With this flag, `FETCH_REQ` and `COMMIT_AND_FETCH_REQ` must pass `addr = 0`; a non-zero address is `-EINVAL`.
-- {{< uapi "UBLK_F_NEED_GET_DATA" >}} (bit 2). A WRITE first arrives with `UBLK_IO_RES_NEED_GET_DATA` (1) and no data; the server answers with `UBLK_U_IO_NEED_GET_DATA` carrying a buffer address, and only then does the kernel copy. One extra round trip per WRITE. It exists for servers that cannot pre-allocate per-tag buffers; new servers should not use it.
-- {{< uapi "UBLK_F_USER_COPY" >}} (bit 7). The kernel never copies. The server reads WRITE data with `pread()` and supplies READ data with `pwrite()` on `/dev/ublkcN`, at an offset that encodes queue, tag and byte offset. Fetch and commit pass `addr = 0`.
-- {{< uapi "UBLK_F_AUTO_BUF_REG" >}} (bit 11). Like zero copy, but the kernel registers the request buffer into the server's io_uring before delivering the request and unregisters it at commit, removing two commands per I/O. The buffer index travels in the `FETCH_REQ` / `COMMIT_AND_FETCH_REQ` SQE's `addr` field as a `struct ublk_auto_buf_reg`.
-- {{< uapi "UBLK_F_BUF_REG_OFF_DAEMON" >}} (bit 14). Lets any task, not only the tag's daemon, issue `REGISTER_IO_BUF` and `UNREGISTER_IO_BUF`; `UNREGISTER_IO_BUF` then ignores `q_id` and `tag`. Forced on since it was introduced in 6.17, so it only tells you the kernel behaves this way.
-- {{< uapi "UBLK_F_SHMEM_ZC" >}} (bit 19). The server registers shared memory (memfd, hugetlbfs) with `UBLK_U_CMD_REG_BUF`. When an O_DIRECT request's pages are inside a registered buffer, the descriptor carries `UBLK_IO_F_SHMEM_ZC` and `addr` encodes buffer index and offset instead of a server address. Requests that do not match fall back to the normal path silently. Unlike the other zero-copy modes, the kernel accepts it on unprivileged devices.
+- {{< uapi "UBLK_F_SUPPORT_ZERO_COPY" >}} installs request pages in an io_uring sparse buffer table for `*_FIXED` operations. The server cannot touch the bytes. FETCH/COMMIT require `addr = 0`; otherwise `-EINVAL`. Reserved in 6.0, it became functional with REGISTER/UNREGISTER_IO_BUF in 6.15.
+- {{< uapi "UBLK_F_NEED_GET_DATA" >}} delivers a WRITE as `UBLK_IO_RES_NEED_GET_DATA` (1); answer with `UBLK_U_IO_NEED_GET_DATA` and a buffer address to receive data. It adds one round trip. Retained for servers without pre-allocated buffers; avoid in new servers.
+- {{< uapi "UBLK_F_USER_COPY" >}} uses `pread()` for WRITE data and `pwrite()` for READ data on `/dev/ublkcN`, with queue/tag/byte offset encoded in the position. FETCH/COMMIT use `addr = 0` and perform no copy.
+- {{< uapi "UBLK_F_AUTO_BUF_REG" >}} registers before delivery and unregisters at commit, saving two commands. Fetch/commit SQE `addr` carries `struct ublk_auto_buf_reg` with the buffer index.
+- {{< uapi "UBLK_F_BUF_REG_OFF_DAEMON" >}} permits registration from any task; unregistration ignores `q_id`/`tag`. Forced on since 6.17.
+- {{< uapi "UBLK_F_SHMEM_ZC" >}} registers memfd/hugetlbfs memory through `UBLK_U_CMD_REG_BUF`. Matching O_DIRECT requests carry `UBLK_IO_F_SHMEM_ZC` and an index/offset in `addr`; others silently use the normal path. Unprivileged devices may use it.
 
 ## Recovery flags
 
-These decide what happens when the server process exits while the device is live. The [recovery chapter](/guide/recovery/) has the state machine and the full sequence.
+On server exit, the [recovery flags](/guide/recovery/) determine device and request survival:
 
-- {{< uapi "UBLK_F_USER_RECOVERY" >}} (bit 3). Without it, a server exit stops the device: `/dev/ublkbN` disappears and every pending request fails. With it, the device stays, moves to `UBLK_S_DEV_QUIESCED`, queues new I/O, and fails the requests the server had already received. A new server takes over with `START_USER_RECOVERY` and `END_USER_RECOVERY`.
-- {{< uapi "UBLK_F_USER_RECOVERY_REISSUE" >}} (bit 4). Same, but requests the dead server had received are requeued and later reissued to the new server. That can execute a write twice, so use it only for backends where a repeated write is harmless.
-- {{< uapi "UBLK_F_USER_RECOVERY_FAIL_IO" >}} (bit 9, 6.13). The device stays but enters `UBLK_S_DEV_FAIL_IO`: all I/O, old and new, fails immediately until a new server recovers it. Applications see errors instead of hanging.
-- {{< uapi "UBLK_F_QUIESCE" >}} (bit 12, 6.16). Enables `UBLK_U_CMD_QUIESCE_DEV`, which quiesces a live device on request so a new server can take over without the old one crashing. `data[0]` is a timeout in milliseconds, 0 meaning forever; the command returns `-EBUSY` if no tag on some queue goes idle in time. The kernel only accepts this flag together with `USER_RECOVERY`.
+- {{< uapi "UBLK_F_USER_RECOVERY" >}} keeps the device in `UBLK_S_DEV_QUIESCED`, queues new I/O, and fails delivered requests. A replacement uses START/END_USER_RECOVERY. Without recovery, the device disappears and pending requests fail.
+- {{< uapi "UBLK_F_USER_RECOVERY_REISSUE" >}} also requeues delivered requests. Writes may execute twice; the backend must tolerate replay.
+- {{< uapi "UBLK_F_USER_RECOVERY_FAIL_IO" >}} (6.13) keeps the device in `UBLK_S_DEV_FAIL_IO` but fails old and new I/O until recovery.
+- {{< uapi "UBLK_F_QUIESCE" >}} (6.16) enables planned handover through `UBLK_U_CMD_QUIESCE_DEV`. `data[0]` is a timeout in milliseconds; 0 waits forever. If any queue has no idle tag before timeout, return `-EBUSY`. Requires `USER_RECOVERY`.
 
-Recovery flags are not available for unprivileged devices: the kernel clears `USER_RECOVERY` and `REISSUE` rather than failing `ADD_DEV`, so check the returned flags.
+Unprivileged devices lose `USER_RECOVERY`/`REISSUE` silently at `ADD_DEV`; inspect the reply.
 
 ## Protocol and threading flags
 
-- {{< uapi "UBLK_F_URING_CMD_COMP_IN_TASK" >}} (bit 1). In the original driver this chose between two ways of completing an I/O command in the daemon's context (`task_work_add` versus `io_uring_cmd_complete_in_task`), mainly for benchmarking. Current drivers always use the io_uring path and force the bit on, so requesting it changes nothing (the `task_work_add` path was removed in 6.5; 6.1 to 6.4 already forced the bit for modular builds).
-- {{< uapi "UBLK_F_CMD_IOCTL_ENCODE" >}} (bit 6, 6.4). Marks a kernel that understands the ioctl-encoded `UBLK_U_CMD_*` and `UBLK_U_IO_*` opcodes, for example `UBLK_U_CMD_ADD_DEV = _IOWR('u', 0x04, struct ublksrv_ctrl_cmd) = 0xc0207504`. The driver forces the bit on; whether the old raw opcodes (`UBLK_CMD_ADD_DEV = 0x04`) are still accepted depends on `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES`. Commands added after 6.4, such as `GET_FEATURES`, exist only in encoded form. Use the encoded opcodes. The bit has been forced on since 6.4.
-- {{< uapi "UBLK_F_PER_IO_DAEMON" >}} (bit 13, 6.16). The task that issues `FETCH_REQ` for a (queue, tag) pair becomes that I/O's daemon, and only it may issue later commands for the pair. Before 6.16 the daemon was per queue, so one thread had to own every tag of a queue. With per-I/O daemons a server can spread one queue's tags across several threads. Forced on, except on batch-mode devices, which have no daemons at all.
-- {{< uapi "UBLK_F_BATCH_IO" >}} (bit 15, 7.0). Replaces the per-tag `FETCH_REQ` / `COMMIT_AND_FETCH_REQ` / `NEED_GET_DATA` commands with per-queue batch commands: `PREP_IO_CMDS`, `COMMIT_IO_CMDS` and a multishot `FETCH_IO_CMDS`. There are no per-I/O daemons in batch mode; any task may handle any tag. See [Batch I/O](/guide/batch-io/).
+- {{< uapi "UBLK_F_URING_CMD_COMP_IN_TASK" >}} originally selected `io_uring_cmd_complete_in_task` over `task_work_add` for daemon-context completion, mainly for benchmarking. The latter path disappeared in 6.5; the bit is now forced. Modular builds already forced it in 6.1-6.4.
+- {{< uapi "UBLK_F_CMD_IOCTL_ENCODE" >}} reports ioctl-encoded `UBLK_U_CMD_*`/`UBLK_U_IO_*` support, e.g. `_IOWR('u', 0x04, struct ublksrv_ctrl_cmd) = 0xc0207504` for ADD_DEV. Forced since 6.4. Legacy ADD_DEV is 0x04; legacy acceptance depends on `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES`. Use encoded commands; post-6.4 additions such as GET_FEATURES have no legacy form.
+- {{< uapi "UBLK_F_PER_IO_DAEMON" >}} (6.16) lets threads split a queue's tags. The task issuing a tag's FETCH owns subsequent commands; older kernels require one task per queue. Forced except with batch I/O.
+- {{< uapi "UBLK_F_BATCH_IO" >}} (7.0) replaces per-tag FETCH/COMMIT/NEED_GET_DATA with PREP_IO_CMDS, COMMIT_IO_CMDS, and multishot FETCH_IO_CMDS. Any task may handle any tag; see [batch I/O](/guide/batch-io/).
 
 ## Device feature flags
 
-- {{< uapi "UBLK_F_UNPRIVILEGED_DEV" >}} (bit 5, 6.3). Lets a user without `CAP_SYS_ADMIN` create a device they own. Every control command except `ADD_DEV` must then carry the path of `/dev/ublkcN` so the kernel can check the caller's permission on it. Unprivileged devices cannot use user copy, zero copy or recovery, and the kernel suppresses partition scanning whenever any queue is served by a task without `CAP_SYS_ADMIN`. See [Unprivileged devices](/guide/unprivileged/).
-- {{< uapi "UBLK_F_ZONED" >}} (bit 8, 6.6). Exposes a host-managed zoned device: zone open, close, finish, reset and reset-all, zone append, and `REPORT_ZONES` requests reach the server. Requires `UBLK_PARAM_TYPE_ZONED` parameters, a non-zero `chunk_sectors`, and `USER_COPY` or `SUPPORT_ZERO_COPY`. See [Zoned devices](/guide/zoned/).
-- {{< uapi "UBLK_F_UPDATE_SIZE" >}} (bit 10, 6.16). Advertises `UBLK_U_CMD_UPDATE_SIZE`, which sets a started device's capacity to `data[0]` 512-byte sectors and notifies userspace with a resize uevent. Neither 6.17 nor 7.3-rc5 checks the flag when handling the command, so treat it as a capability bit and request it anyway. On a device that has not been started, 7.3-rc5 returns `-ENODEV`.
-- {{< uapi "UBLK_F_INTEGRITY" >}} (bit 16, 7.0). Requests can carry an integrity (protection information) buffer, flagged with `UBLK_IO_F_INTEGRITY` and copied with `pread`/`pwrite` using `UBLKSRV_IO_INTEGRITY_FLAG` in the offset. Requires `USER_COPY` and `UBLK_PARAM_TYPE_INTEGRITY`. See [Integrity metadata](/guide/integrity/).
-- {{< uapi "UBLK_F_SAFE_STOP_DEV" >}} (bit 17, 7.0). Advertises `UBLK_U_CMD_TRY_STOP_DEV` (`0xc0207517`), a stop that fails with `-EBUSY` if anything has `/dev/ublkbN` open, instead of tearing the disk out from under a mounted filesystem. If nothing has it open, the kernel blocks new opens and stops the device exactly like `STOP_DEV`. A device that is not started returns `-ENODEV`. 7.3-rc5 forces the bit on and does not check it when handling the command.
-- {{< uapi "UBLK_F_NO_AUTO_PART_SCAN" >}} (bit 18, 7.0). Turns off the partition scan that normally follows `START_DEV`. Since 6.19 the scan no longer runs inside `START_DEV`: the kernel suppresses it while adding the disk, to avoid a deadlock if the server fails mid-scan, and then schedules it asynchronously for trusted servers (earlier kernels scanned synchronously inside `add_disk`, so the server saw READs while `START_DEV` was in flight). With this flag the asynchronous scan is skipped and the suppression is lifted, so a later manual rescan (`partprobe`, `BLKRRPART`) still works. Partition scanning stays off permanently when any queue is served by a task without `CAP_SYS_ADMIN` (since 7.0-rc4).
-- {{< uapi "UBLK_F_IO_DESC_SIZE" >}} (bit 20, 7.3). The server chooses the size of each descriptor slot in `ublksrv_ctrl_dev_info.io_desc_size`, the 16-bit field at offset 6 that was `pad0` before 7.3: at least 24 (`sizeof(struct ublksrv_io_desc)`), a multiple of 8, at most 256. Without the flag the kernel reports 24 there. The descriptor for tag *t* is at `t * io_desc_size`, a queue's mmap length is `round_up(queue_depth * io_desc_size, PAGE_SIZE)`, and the per-queue mmap stride becomes `round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, PAGE_SIZE)`. In 7.3 the kernel fills only the 24-byte `struct ublksrv_io_desc` in each slot; the rest is padding, which lets a server avoid false sharing between descriptors served by different threads and leaves room for future fields.
+- {{< uapi "UBLK_F_UNPRIVILEGED_DEV" >}} (6.3) permits creation without `CAP_SYS_ADMIN`. Device control commands after ADD_DEV carry `/dev/ublkcN` for permission checks. It excludes user copy, fixed-buffer zero copy, and recovery; unprivileged queue tasks suppress partition scanning. See [unprivileged devices](/guide/unprivileged/).
+- {{< uapi "UBLK_F_ZONED" >}} (6.6) delivers zone open/close/finish/reset/reset-all, append, and REPORT_ZONES. Requires `UBLK_PARAM_TYPE_ZONED`, non-zero `chunk_sectors`, and USER_COPY or SUPPORT_ZERO_COPY. See [zoned devices](/guide/zoned/).
+- {{< uapi "UBLK_F_UPDATE_SIZE" >}} (6.16) advertises UPDATE_SIZE: resize a started device to `data[0]` 512-byte sectors and emit a uevent. Neither 6.17 nor 7.3-rc5 checks the flag; request it anyway. 7.3-rc5 returns `-ENODEV` before startup.
+- {{< uapi "UBLK_F_INTEGRITY" >}} (7.0) delivers protection information with `UBLK_IO_F_INTEGRITY`. Copy it through `pread`/`pwrite` with `UBLKSRV_IO_INTEGRITY_FLAG` in the offset. Requires USER_COPY and `UBLK_PARAM_TYPE_INTEGRITY`; see [integrity](/guide/integrity/).
+- {{< uapi "UBLK_F_SAFE_STOP_DEV" >}} (7.0) advertises TRY_STOP_DEV (`0xc0207517`): return `-EBUSY` with disk openers or `-ENODEV` before startup; otherwise block opens and perform STOP_DEV. 7.3-rc5 forces the bit without checking it at dispatch.
+- {{< uapi "UBLK_F_NO_AUTO_PART_SCAN" >}} (7.0) skips startup's partition scan while permitting manual `partprobe`/`BLKRRPART`. Before 6.19, scanning ran inside `add_disk` and required serving READs before START_DEV returned. From 6.19, trusted servers scan asynchronously to avoid deadlock on mid-scan failure. Scanning stays permanently disabled if any queue task lacks `CAP_SYS_ADMIN` (since 7.0-rc4).
+- {{< uapi "UBLK_F_IO_DESC_SIZE" >}} (7.3) sets the slot size through the 16-bit `io_desc_size` at offset 6 (formerly `pad0`): 24-256 bytes, multiple of 8; default 24. Tag *t* is at `t * io_desc_size`. Queue mmap length is `round_up(queue_depth * io_desc_size, PAGE_SIZE)`; stride is `round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, PAGE_SIZE)`. Only the 24-byte `ublksrv_io_desc` is filled; padding permits future fields and avoids false sharing across threads.
 
 ## go-ublk
 
-go-ublk calls `GET_FEATURES` before every `ADD_DEV` and compares the request against it. A requested feature the kernel does not list fails `Create` with an error that wraps `syscall.EOPNOTSUPP` and names the missing flags, before anything is created. The flags `ADD_DEV` returns are checked again, so a feature the kernel silently clears is an error too, never a quietly weaker device. On kernels without `GET_FEATURES` (before 6.5) the check happens only after `ADD_DEV`.
+go-ublk checks requested features against `GET_FEATURES` before `ADD_DEV`. Missing flags fail `Create` with a named error wrapping `syscall.EOPNOTSUPP`. It also checks the returned flags, except that privileged callers may have `UNPRIVILEGED_DEV` cleared. Before 6.5, only this post-creation check is available.
 
-Each `DeviceParams` option maps to its flag: `Recovery` to the `USER_RECOVERY` family, `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (`PER_IO_DAEMON`), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan` and `IODescSize`. Three flags are requested whenever the kernel has them, because they cost nothing: `UPDATE_SIZE` (for `Device.Resize`), `QUIESCE` on recoverable devices (for `Device.Detach`), and `AUTO_BUF_REG` with zero copy. go-ublk always sends ioctl-encoded opcodes and does not request `CMD_IOCTL_ENCODE` or `URING_CMD_COMP_IN_TASK`, which the kernel forces on.
+`DeviceParams` maps options to flags: `Recovery` selects the USER_RECOVERY family; other options are `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (PER_IO_DAEMON), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan`, and `IODescSize`. When supported, go-ublk also requests UPDATE_SIZE for `Device.Resize`, QUIESCE for recoverable devices' `Device.Detach`, and AUTO_BUF_REG for zero copy. These add no protocol cost. It always uses ioctl-encoded commands without requesting the forced CMD_IOCTL_ENCODE or URING_CMD_COMP_IN_TASK bits.
 
 `ublk.Probe()` reports what the running kernel supports, and `Device.Features()` what a device was granted.
 
 ## Reference table
 
-Every feature flag with its value, introducing release and go-ublk status. Expand a row for details.
+Values, introducing releases, and go-ublk support; expand rows for details.
 
 {{< uapi-table kind="feature" >}}
