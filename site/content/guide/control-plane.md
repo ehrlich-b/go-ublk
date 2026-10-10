@@ -5,11 +5,11 @@ description: "Every ublk control command on /dev/ublk-control: encoding, payload
 weight: 20
 ---
 
-Everything about a device's existence, as opposed to its I/O, goes through `/dev/ublk-control`: creating the device, describing it, starting and stopping it, deleting it, and on newer kernels resizing, quiescing and recovering it. This chapter covers how a control command is built and then each command in turn.
+`/dev/ublk-control` handles device creation, inspection, startup, shutdown, and deletion, plus resizing, quiescing, and recovery on newer kernels.
 
 ## Issuing a control command
 
-Control commands are io_uring passthrough commands. Open `/dev/ublk-control` read-write, create an io_uring with **`IORING_SETUP_SQE128`** (the driver rejects control commands from a ring without 128-byte SQEs), and for each command fill one SQE:
+Open `/dev/ublk-control` read-write and create an io_uring with `IORING_SETUP_SQE128`: the driver requires 128-byte SQEs for control commands. Fill each passthrough SQE as follows:
 
 | SQE field | Value |
 |---|---|
@@ -19,9 +19,9 @@ Control commands are io_uring passthrough commands. Open `/dev/ublk-control` rea
 | `cmd[]` | a `struct ublksrv_ctrl_cmd`, at byte 48 of the SQE |
 | `user_data` | anything; it comes back in the CQE |
 
-The CQE's `res` is 0 on success or a negative errno. `UBLK_U_CMD_REG_BUF` is the only command that returns a positive value (a buffer index).
+CQE `res` is 0 on success or a negative errno, except `UBLK_U_CMD_REG_BUF` can return a positive buffer index.
 
-Several commands block in the kernel until something else happens: `START_DEV` until every tag has been fetched, `DEL_DEV` until the device's last reference is gone, `END_USER_RECOVERY` until the new server has fetched every tag, `QUIESCE_DEV` until its timeout. The driver never runs them inline from the submitting `io_uring_enter` (it returns `-EAGAIN` for non-blocking issue, so io_uring punts them to a worker thread), so the submitter is not stuck, but the CQE will not arrive until the condition is met. Wait with a timeout and expect `EINTR`-style interruptions. Do not issue a blocking control command from a thread whose progress it waits on: `START_DEV` sent from the only thread that was going to submit the fetches never completes.
+`START_DEV` and `END_USER_RECOVERY` wait for every tag's fetch; `DEL_DEV` waits for the last device reference; `QUIESCE_DEV` waits up to its timeout. The driver returns `-EAGAIN` on non-blocking issue, moving these commands to io_uring workers. Submission returns, but the CQE waits for the condition. Use timeouts and handle `EINTR`-style interruptions. Never wait on the thread needed to satisfy the condition: `START_DEV` cannot finish before that thread submits the fetches.
 
 ### struct ublksrv_ctrl_cmd
 
@@ -36,17 +36,17 @@ Several commands block in the kernel until something else happens: `START_DEV` u
 | 26 | `__u16 pad` | |
 | 28 | `__u32 reserved` | |
 
-The struct is 32 bytes. Any buffer you pass by `addr` must stay valid and unmoved until the CQE arrives, which matters in garbage-collected languages: pin it, and if you give up waiting, leak it rather than free it, because the kernel may still write to it.
+The struct is 32 bytes. Keep `addr` buffers valid and unmoved until the CQE, including in garbage-collected languages. Pin them; if abandoning a wait, leak rather than free memory the kernel may still access.
 
 ### Legacy and ioctl-encoded opcodes
 
-Linux 6.0 through 6.3 identified commands by small integers (`UBLK_CMD_ADD_DEV` is 0x04). Linux 6.4 introduced ioctl-style encodings built with `_IOR`/`_IOWR('u', nr, struct ublksrv_ctrl_cmd)`, named `UBLK_U_CMD_*`, and every command added since exists only in that form. The driver accepts both encodings unless the kernel was built without `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES`, in which case legacy numbers fail with `EOPNOTSUPP`. New servers should use the encoded form; supporting kernels older than 6.4 means also speaking the legacy numbers.
+Linux 6.0-6.3 used small command integers (`UBLK_CMD_ADD_DEV = 0x04`). Linux 6.4 introduced `UBLK_U_CMD_*`, encoded with `_IOR`/`_IOWR('u', nr, struct ublksrv_ctrl_cmd)`; later commands exist only in this form. Both work unless `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES` is disabled, when legacy commands return `EOPNOTSUPP`. Use encoded commands; pre-6.4 support requires legacy numbers too.
 
-The kernel always reports `UBLK_F_CMD_IOCTL_ENCODE` in the negotiated flags of devices it creates, so a server that sees the bit knows the encoded form is understood (since 6.4).
+Since 6.4, negotiated `UBLK_F_CMD_IOCTL_ENCODE` confirms encoded-command support.
 
 ## Commands
 
-The table lists every command in the 7.3-rc5 header. "Blocks" means the CQE waits on another event.
+Commands in the 7.3-rc5 header; "Blocks" identifies what delays the CQE.
 
 | Command | `cmd_op` | Since | Argument | Blocks |
 |---|---|---|---|---|
@@ -69,11 +69,11 @@ The table lists every command in the 7.3-rc5 header. "Blocks" means the CQE wait
 | `UBLK_U_CMD_REG_BUF` | `0xc0207518` | 7.1 | `addr` → `ublk_shmem_buf_reg` | |
 | `UBLK_U_CMD_UNREG_BUF` | `0xc0207519` | 7.1 | `data[0]` = buffer index | |
 
-The legacy opcodes of the 6.0 and 6.1 commands are their low byte (`ADD_DEV` 0x04, `DEL_DEV` 0x05, `START_DEV` 0x06, `STOP_DEV` 0x07, `SET_PARAMS` 0x08, `GET_PARAMS` 0x09, `GET_QUEUE_AFFINITY` 0x01, `GET_DEV_INFO` 0x02, recovery 0x10 and 0x11, `GET_DEV_INFO2` 0x12).
+Legacy commands use the low byte: 0x01/0x02 for affinity/info, 0x04-0x09 for ADD/DEL/START/STOP/SET/GET_PARAMS, 0x10/0x11 for recovery, and 0x12 for `GET_DEV_INFO2`.
 
 ### ADD_DEV
 
-Creates a device and its char device `/dev/ublkcN`. `addr` points at a 64-byte `struct ublksrv_ctrl_dev_info` that the server fills in and the kernel overwrites with the negotiated result:
+Creates `/dev/ublkcN`. Pass a 64-byte `struct ublksrv_ctrl_dev_info` through `addr`; the kernel overwrites it with negotiated values:
 
 | Offset | Field | In | Out |
 |---|---|---|---|
@@ -88,35 +88,35 @@ Creates a device and its char device `/dev/ublkcN`. `addr` points at a 64-byte `
 | 32 | `__u64 ublksrv_flags` | server's own use; the kernel stores and returns it | |
 | 40 | `__u32 owner_uid`, `owner_gid` | ignored | the creating user's IDs |
 
-Read every field back. The kernel can give you fewer queues than you asked for (one per CPU at most), a smaller buffer size, and a different feature set: it clears flags it does not know, clears `UBLK_F_NEED_GET_DATA` when a user-copy or zero-copy mode is set, and forces on flags that describe its own behavior (in 6.17: `UBLK_F_CMD_IOCTL_ENCODE`, `UBLK_F_URING_CMD_COMP_IN_TASK`, `UBLK_F_PER_IO_DAEMON` and `UBLK_F_BUF_REG_OFF_DAEMON`; 7.3-rc5 adds `UBLK_F_SAFE_STOP_DEV` and withholds `UBLK_F_PER_IO_DAEMON` from batch-I/O devices). [Feature flags](/guide/features/) lists the negotiation rules in order. The flags it returns are the contract for the device's lifetime. A server that sizes its queue threads or buffers from what it requested instead of what came back will map descriptor arrays that do not exist or overrun buffers.
+Read back every field before allocating queues or buffers. The kernel clamps queues to CPU count, rounds down buffer size, clears unknown flags, and clears `NEED_GET_DATA` in user-copy/zero-copy modes. In 6.17 it forces `CMD_IOCTL_ENCODE`, `URING_CMD_COMP_IN_TASK`, `PER_IO_DAEMON`, and `BUF_REG_OFF_DAEMON`; 7.3-rc5 also sets `SAFE_STOP_DEV` and clears `PER_IO_DAEMON` for batch devices. These returned flags govern the device's lifetime. Using requested sizes instead can map nonexistent descriptor arrays or overrun buffers. See [negotiation order](/guide/features/).
 
 `ADD_DEV` fails with:
 
-- `EINVAL` for a depth or queue count of 0 or above 4096, a header `queue_id` other than -1, a header `dev_id` that differs from `info.dev_id`, an ID above the maximum, an invalid combination of [recovery flags](/guide/recovery/), `UBLK_F_QUIESCE` without `UBLK_F_USER_RECOVERY`, `UBLK_F_ZONED` without a user-copy or zero-copy mode, `UBLK_F_INTEGRITY` without `UBLK_F_USER_COPY`, an out-of-range `io_desc_size` with `UBLK_F_IO_DESC_SIZE`, or (for unprivileged devices) a copy mode that unprivileged servers may not use.
-- `EPERM` without `CAP_SYS_ADMIN`, unless `UBLK_F_UNPRIVILEGED_DEV` is set. With the capability, that flag is silently cleared and the device is an ordinary privileged one.
-- `EEXIST` if the requested ID is taken (an auto-assigned ID is the lowest free one), `EACCES` when the unprivileged-device limit is reached, `ENOMEM`.
+- `EINVAL`: depth/queues outside 1-4096, header `queue_id` other than -1, mismatched header/info `dev_id`, ID above the maximum, invalid [recovery flags](/guide/recovery/), `QUIESCE` without `USER_RECOVERY`, `ZONED` without user/zero copy, `INTEGRITY` without `USER_COPY`, invalid `io_desc_size` with `IO_DESC_SIZE`, or a forbidden unprivileged copy mode.
+- `EPERM`: no `CAP_SYS_ADMIN` and no `UNPRIVILEGED_DEV`. Privileged callers have that flag cleared and receive ordinary devices.
+- `EEXIST`: requested ID occupied (automatic assignment picks the lowest free ID). `EACCES`: unprivileged-device limit reached. Also `ENOMEM`.
 
 ### SET_PARAMS and GET_PARAMS
 
-`SET_PARAMS` describes the block device that `START_DEV` will create: capacity, block sizes, maximum request size, attributes such as read-only and volatile cache, discard limits, zoned limits and so on. `addr` points at a `struct ublk_params` whose first two fields are `len` (bytes of the structure the server is passing) and `types` (a bitmask of `UBLK_PARAM_TYPE_*` saying which sub-structures are valid). The `basic` block is mandatory. [Device parameters](/guide/parameters/) covers every field and validation rule.
+`SET_PARAMS` supplies capacity, block sizes, maximum request size, read-only/cache attributes, discard/zoned limits, and other [device parameters](/guide/parameters/). Its `addr` points to `struct ublk_params`, beginning with `len` (bytes supplied) and `types` (`UBLK_PARAM_TYPE_*` bits identifying valid substructures). The `basic` block is mandatory.
 
-Parameters can be set any number of times before the first `START_DEV`, and not after it: once the disk exists the command fails with `EACCES` until the disk is gone again. A failed validation returns `EINVAL` and clears all parameters, so a later `START_DEV` fails too.
+Set parameters repeatedly before the first `START_DEV`. Once the disk exists, `SET_PARAMS` returns `EACCES` until it is removed. Validation failure returns `EINVAL` and clears all parameters, also preventing `START_DEV`.
 
-The kernel copies at most its own `sizeof(struct ublk_params)` and masks `types` to the types it knows, without telling you. A server built against a newer header that sets, say, `UBLK_PARAM_TYPE_SEGMENT` on a 6.14 kernel gets a device without segment limits and a successful return. Read the result back with `GET_PARAMS` (set `len` in the buffer first; the kernel copies `min(len, sizeof)` bytes and always fills the read-only `devt` block) if a parameter matters.
+The kernel silently limits copying to its `sizeof(struct ublk_params)` and masks unknown `types`. For example, 6.14 accepts `UBLK_PARAM_TYPE_SEGMENT` without enforcing segment limits. Verify required parameters with `GET_PARAMS`: initialize `len`; the kernel copies `min(len, sizeof)` bytes and fills the read-only `devt` block.
 
 ### START_DEV
 
-Exposes `/dev/ublkbN`. `data[0]` must be the PID (thread-group ID) of the process that opened `/dev/ublkcN`; anything else, or a missing basic parameter block, is `EINVAL`.
+Exposes `/dev/ublkbN`. `data[0]` must be the PID (thread-group ID) that opened `/dev/ublkcN`; a mismatch or missing basic parameters returns `EINVAL`.
 
-The order matters. `START_DEV` first waits, interruptibly, until **every tag of every queue has a `FETCH_REQ` outstanding**, then allocates the disk with the limits from `SET_PARAMS`, applies the attributes, and calls `add_disk`, which emits udev events. Before 6.19 (and in stable 6.18 before 6.18.4) `add_disk` also scans the partition table synchronously, so the server receives reads of the first sectors while `START_DEV` is still in flight. From 6.19 the driver suppresses that scan during `add_disk` and queues it on a work item instead, so `START_DEV` no longer waits for it; no scan happens at all for unprivileged servers or with `UBLK_F_NO_AUTO_PART_SCAN`. Either way the queue threads must be submitting their fetches before or while `START_DEV` is pending, and must be serving reads from that moment. A device already live returns `EEXIST`.
+`START_DEV` waits interruptibly for every tag of every queue to have an outstanding `FETCH_REQ`. It then allocates the disk, applies parameters/attributes, and calls `add_disk`, emitting udev events. Before 6.19 (stable 6.18 before 6.18.4), partition scanning runs synchronously here: serve reads of the first sectors while startup is pending. From 6.19, a work item scans asynchronously. In either case, queue threads must fetch and serve before startup completes. Starting a live device returns `EEXIST`.
 
-Partition scanning is suppressed for devices whose queues are served by unprivileged tasks, and from Linux 7.0 can be turned off with `UBLK_F_NO_AUTO_PART_SCAN`.
+Partition scanning is suppressed for queues served by unprivileged tasks, or with `UBLK_F_NO_AUTO_PART_SCAN` (7.0+).
 
 ### STOP_DEV
 
-Removes `/dev/ublkbN` and returns the device to `UBLK_S_DEV_DEAD`. Internally this is `del_gendisk`, which flushes and drains: a mounted filesystem is synced through the device, and every in-flight request has to complete before the command returns. **The server must keep its queues running while `STOP_DEV` is in progress**; the drain is served by the same threads. After the disk is gone the driver completes every pending fetch with `UBLK_IO_RES_ABORT` (`-ENODEV`), which is the signal for the queue threads to exit. The command itself returns 0.
+Removes `/dev/ublkbN` and returns to `UBLK_S_DEV_DEAD`. `del_gendisk` flushes mounted-filesystem data and drains in-flight I/O, so **keep serving queues until STOP_DEV returns**. The driver then completes pending fetches with `UBLK_IO_RES_ABORT` (`-ENODEV`), telling queue threads to exit. The command returns 0.
 
-The safe shutdown order for a server is therefore:
+Shutdown order:
 
 ```text
 STOP_DEV            (queues still serving; returns after the drain)
@@ -127,41 +127,41 @@ DEL_DEV
 
 ### TRY_STOP_DEV
 
-{{< since "7.0" >}} Stops the device only if nothing has `/dev/ublkbN` open. It fails with `EBUSY` while the disk has openers and `ENODEV` if the device has no disk; otherwise it blocks new opens and performs a normal `STOP_DEV`. Belongs to `UBLK_F_SAFE_STOP_DEV`, which 7.3-rc5 reports on every device. Useful for "detach if idle" without pulling a disk out from under a mounted filesystem.
+{{< since "7.0" >}} Stops only with no `/dev/ublkbN` openers; otherwise returns `EBUSY`. No disk returns `ENODEV`. On success it blocks new opens and runs `STOP_DEV`, allowing "detach if idle" without disrupting a mounted filesystem. `UBLK_F_SAFE_STOP_DEV` advertises it; 7.3-rc5 reports the flag on every device.
 
 ### DEL_DEV and DEL_DEV_ASYNC
 
-`DEL_DEV` removes `/dev/ublkcN` and frees the device ID. If the device is still live it is stopped first. The command then **waits until the device's last reference is dropped**, so that the ID can be reused as soon as it returns. Every open file description of `/dev/ublkcN` holds such a reference, including ones a server forgot it had (a duplicated fd, a descriptor array still mapped, an io_uring with the fd registered). Sending `DEL_DEV` from a process that still holds one is a self-deadlock; the wait is interruptible, so the command returns `EINTR` if the process is signalled.
+`DEL_DEV` stops a live device, removes `/dev/ublkcN`, and waits for its last reference before freeing the ID for reuse. References include char-device fds, duplicates, descriptor mappings, and io_uring fixed-file registrations. Keeping any of these while waiting deadlocks the caller. The wait is interruptible: a signal returns `EINTR`.
 
-`DEL_DEV_ASYNC` (Linux 6.9) does the same removal without waiting. The ID becomes reusable whenever the last reference goes away.
+`DEL_DEV_ASYNC` (6.9) removes without waiting; the ID becomes reusable after the last reference drops.
 
-A device whose server died without deleting it stays registered in state `DEAD` (or, with recovery enabled, `QUIESCED` or `FAIL_IO`) and keeps the module pinned. Any process with `CAP_SYS_ADMIN` can delete it by ID.
+A dead server leaves the device registered as `DEAD`, or `QUIESCED`/`FAIL_IO` with recovery, pinning the module. Any `CAP_SYS_ADMIN` process can delete it by ID.
 
 ### GET_DEV_INFO and GET_DEV_INFO2
 
-Copy the device's current `ublksrv_ctrl_dev_info` to `addr` (`len` at least 64). Fails with `ENODEV` for an ID that does not exist, which is also how a server enumerates devices: there is no list command, so tools probe IDs.
+Copy `ublksrv_ctrl_dev_info` to `addr`, with `len >= 64`. Missing IDs return `ENODEV`; there is no list command, so enumeration probes device IDs.
 
-`GET_DEV_INFO2` (Linux 6.3) is the same command with the char-device path prepended to the buffer, for the [unprivileged](/guide/unprivileged/) permission check. The kernel requires the path for `GET_DEV_INFO2` even on privileged devices, because the caller may not know which kind it is asking about.
+`GET_DEV_INFO2` (6.3) prepends the char-device path for the [unprivileged permission check](/guide/unprivileged/). It requires the path even for privileged devices: callers may not yet know the device type.
 
 ### GET_QUEUE_AFFINITY
 
-Returns the set of CPUs that blk-mq maps to queue `data[0]`, as a CPU bitmask in the buffer at `addr`. `len` must be a multiple of `sizeof(unsigned long)` and large enough for every possible CPU ID. A server uses it to pin each queue thread to the CPUs whose I/O lands on that queue, so a request is served on the CPU that issued it.
+Returns blk-mq's CPU mask for queue `data[0]` through `addr`. `len` must cover every possible CPU ID and be a multiple of `sizeof(unsigned long)`. Servers can pin queue threads to the CPUs routing I/O to that queue.
 
 ### GET_FEATURES
 
-{{< since "6.5" >}} Writes the 64-bit set of `UBLK_F_*` features this kernel supports into an 8-byte buffer (`len` must be exactly `UBLK_FEATURES_LEN`, 8). It does not take a device, so it is the way to probe a kernel before creating one. On kernels before 6.5 it fails, and the fallback is to request the flags you want in `ADD_DEV` and inspect what comes back.
+{{< since "6.5" >}} Writes the kernel's 64-bit `UBLK_F_*` mask to `addr`; `len` must equal `UBLK_FEATURES_LEN` (8). It needs no device. Before 6.5, probe by requesting flags through `ADD_DEV` and inspecting the reply.
 
 ### UPDATE_SIZE
 
-{{< since "6.16" >}} Changes the capacity of a started device to `data[0]` 512-byte sectors and notifies the block layer, which emits a resize uevent. It belongs to `UBLK_F_UPDATE_SIZE`, though the driver does not check the flag. Only send it to a started device: 7.3-rc5 returns `ENODEV` otherwise, and the 6.17 driver does not check at all. The server must be ready to serve the new range before it grows the device and must stop relying on the old range only after it shrinks it.
+{{< since "6.16" >}} Resizes a started device to `data[0]` 512-byte sectors and emits a resize uevent. `UBLK_F_UPDATE_SIZE` advertises it, but the driver does not check the flag. Before startup, 7.3-rc5 returns `ENODEV`; 6.17 lacks that check. Prepare the added range before growing; stop relying on removed space only after shrinking.
 
 ### QUIESCE_DEV, START_USER_RECOVERY, END_USER_RECOVERY
 
-The recovery commands move a device whose server has exited, or is about to be replaced, back to a live server without removing `/dev/ublkbN`. `QUIESCE_DEV` (6.16, needs `UBLK_F_QUIESCE`) takes a timeout in milliseconds in `data[0]` and parks a live device so that a new server can take over; `START_USER_RECOVERY` and `END_USER_RECOVERY` (6.1, need `UBLK_F_USER_RECOVERY`) bracket the takeover. They are covered with the states they produce in [User recovery and quiesce](/guide/recovery/).
+These commands replace a departed or departing server while retaining `/dev/ublkbN`. `QUIESCE_DEV` (6.16, `UBLK_F_QUIESCE`) parks a live device with a timeout in `data[0]` milliseconds; `START_USER_RECOVERY`/`END_USER_RECOVERY` (6.1, `UBLK_F_USER_RECOVERY`) bracket takeover. See [recovery states and sequences](/guide/recovery/).
 
 ### REG_BUF and UNREG_BUF
 
-{{< since "7.1" >}} Register and unregister a shared-memory buffer for `UBLK_F_SHMEM_ZC`. `REG_BUF` takes a `struct ublk_shmem_buf_reg` (address, length, flags) through `addr` and returns the buffer index; `UNREG_BUF` takes the index in `data[0]`. See [Data copy modes](/guide/data-copy/).
+{{< since "7.1" >}} Register/unregister shared memory for `UBLK_F_SHMEM_ZC`. `REG_BUF` reads `struct ublk_shmem_buf_reg` (address, length, flags) through `addr` and returns an index; `UNREG_BUF` takes it in `data[0]`. See [data copy modes](/guide/data-copy/).
 
 ## Device states
 
@@ -176,7 +176,7 @@ The `state` field of `ublksrv_ctrl_dev_info` takes four values:
 
 {{< diagram "device-states" "`DEL_DEV` is accepted from any state. Without a recovery flag, a server exit stops the device; with one, the device waits for a new server." >}}
 
-A stopped device cannot be started again. `STOP_DEV` does not reset the queues: they still count as fully fetched, so new `FETCH_REQ`s fail with `-EBUSY` and a different process cannot even map the descriptors, while a `START_DEV` sent anyway can bring up a disk with no fetch commands armed and crash the kernel on its first request. go-ublk's kernel matrix saw all three outcomes, `-EBUSY`, a wedged control plane (6.10 to 6.12) and a NULL dereference in `ublk_queue_rq` (Arch 7.2.8); see [known kernel bugs](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix). Delete the device and add a new one.
+Delete stopped devices and add new ones. `STOP_DEV` leaves queues counted as fully fetched: new fetches fail with `-EBUSY`, and another process cannot map descriptors. Forcing `START_DEV` can expose a disk with no armed fetches. The matrix observed `-EBUSY`, control-plane hangs (6.10-6.12), and a NULL dereference in `ublk_queue_rq` (Arch 7.2.8). See [kernel findings](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix).
 
 ## Putting it together
 
@@ -221,4 +221,4 @@ join_queue_threads();          /* they exit on -ENODEV; close every fd and mappi
 ctrl_cmd(&ring, ctrl, UBLK_U_CMD_DEL_DEV, &(struct ublksrv_ctrl_cmd){ .dev_id = info.dev_id, .queue_id = -1 });
 ```
 
-`ctrl_cmd` here prepares one `IORING_OP_URING_CMD` SQE with the given `cmd_op` and header, submits it, and waits for its CQE, returning `cqe->res`. The [data plane](/guide/data-plane/) chapter fills in `start_queue_threads`.
+`ctrl_cmd` fills an `IORING_OP_URING_CMD` SQE with `cmd_op` and the header, submits it, and waits for `cqe->res`. The [data plane](/guide/data-plane/) implements `start_queue_threads`.
