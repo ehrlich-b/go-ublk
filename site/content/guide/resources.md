@@ -18,27 +18,27 @@ weight: 150
 | [e2b-dev/ublk-go](https://github.com/e2b-dev/ublk-go) | Go | An Apache-2.0 Go library, pure Go per its README, which states Linux 6.0+ and testing on 6.17. Version 0.1.3 was current at the time of writing. |
 | [go-ublk](https://github.com/ehrlich-b/go-ublk) | Go | This project: an MIT-licensed, pure-Go library. See [go-ublk](/go-ublk/). |
 
-If you are writing a server in a new language, read kublk for the current protocol and libublk-rs or ublksrv for a long-lived, production-shaped design.
+For a new server, read kublk's protocol implementation, then libublk-rs or ublksrv for established server designs.
 
 ## Kernel sources and documentation
 
-- **Kernel documentation:** [docs.kernel.org/block/ublk.html](https://docs.kernel.org/block/ublk.html), from `Documentation/block/ublk.rst`. Short, but authoritative on intent: the control commands, the recovery modes, zero copy, auto buffer registration, batch I/O and shared-memory zero copy.
-- **UAPI header:** [`include/uapi/linux/ublk_cmd.h`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/ublk_cmd.h). The comments above each flag are often the only specification. This guide tracks it as of 7.3-rc5; the [UAPI reference](/reference/uapi/) is generated from it.
-- **Driver:** [`drivers/block/ublk_drv.c`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/block/ublk_drv.c), also browsable with cross-references on [Elixir](https://elixir.bootlin.com/linux/latest/source/drivers/block/ublk_drv.c). When the documentation and the header disagree with the driver, the driver wins.
-- **Selftests:** the kublk directory above also holds the shell tests that exercise each feature, which double as usage examples.
+- [Kernel documentation](https://docs.kernel.org/block/ublk.html) (`Documentation/block/ublk.rst`): control, recovery, zero copy, auto registration, batch, and shared memory.
+- [UAPI header](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/ublk_cmd.h): flag comments often supply the specification. This guide and its generated [reference](/reference/uapi/) track 7.3-rc5.
+- [Driver](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/block/ublk_drv.c), with [Elixir cross-references](https://elixir.bootlin.com/linux/latest/source/drivers/block/ublk_drv.c): actual behavior takes precedence over header/documentation.
+- kublk's directory also contains shell selftests demonstrating features.
 
 ### io_uring
 
-ublk is an io_uring client before it is anything else, so a server author needs to be comfortable with raw rings.
+Server authors need raw-ring semantics:
 
-- [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html) and [io_uring_enter(2)](https://man7.org/linux/man-pages/man2/io_uring_enter.2.html): ring setup flags (`IORING_SETUP_SQE128` is required for control commands), the mmap offsets, and the enter flags including `IORING_ENTER_EXT_ARG` for bounded waits.
-- [liburing](https://github.com/axboe/liburing): the reference library. Even if you do not link it, its source is the clearest statement of the SQ/CQ memory-ordering rules.
-- "Efficient IO with io_uring" by Jens Axboe ([kernel.dk/io_uring.pdf](https://kernel.dk/io_uring.pdf)): the design paper.
-- "Lord of the io_uring" ([unixism.net/loti](https://unixism.net/loti/)): a tutorial built around liburing.
+- [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html) and [io_uring_enter(2)](https://man7.org/linux/man-pages/man2/io_uring_enter.2.html): flags, mmap offsets, SQE128 for control, EXT_ARG for bounded waits.
+- [liburing](https://github.com/axboe/liburing): reference SQ/CQ memory ordering, even without linking it.
+- Jens Axboe's [Efficient IO with io_uring](https://kernel.dk/io_uring.pdf): design paper.
+- [Lord of the io_uring](https://unixism.net/loti/): liburing tutorial.
 
 ## Reading the driver
 
-`ublk_drv.c` is one file of a few thousand lines. These functions are the map; names are from the 6.17 source and mostly stable across releases.
+Entry points in the few-thousand-line ublk_drv.c, named as in 6.17 and mostly stable since:
 
 | Function | What it does |
 |---|---|
@@ -57,4 +57,4 @@ ublk is an io_uring client before it is anything else, so a server author needs 
 | `ublk_ch_release_work_fn` | What happens when the server's `/dev/ublkcN` is released: fail or requeue the requests it held, then stop the device or move it to `QUIESCED` or `FAIL_IO`. See [user recovery](/guide/recovery/). |
 | `ublk_timeout` | Request timeouts: restart the timer for privileged devices, `SIGKILL` the server for unprivileged ones. |
 
-To find when something changed, `git log -L :function_name:drivers/block/ublk_drv.c` on a kernel tree is faster than any changelog. The [kernel version history](/guide/kernel-versions/) lists the UAPI side release by release, and [known kernel bugs](/guide/kernel-bugs/) the fixes that matter in practice.
+Trace changes with `git log -L :function_name:drivers/block/ublk_drv.c` in a kernel tree. See [UAPI history](/guide/kernel-versions/) and [kernel fixes](/guide/kernel-bugs/).
