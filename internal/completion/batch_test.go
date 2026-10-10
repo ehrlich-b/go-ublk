@@ -171,6 +171,7 @@ func (p *schedulePeer) step(event []byte) error {
 	bad := false
 	switch kind {
 	case 0:
+		arg |= int(event[7]) << 8 // full uint16 provided-buffer ID, without masking
 		clear(p.buf)
 		if arg < 16 {
 			copy(p.buf[arg*256:], event[8:12])

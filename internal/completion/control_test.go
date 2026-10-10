@@ -29,7 +29,8 @@ func TestControlCompletionRequiresFinalKernelResult(t *testing.T) {
 		{"unreaped transport failure", false, errors.New("wait failed with kernel command still pending")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := &controlReply{done: make(chan struct{})}
+			// A premature reaped flag cannot substitute for publication of Done.
+			p := &controlReply{done: make(chan struct{}), reaped: true}
 			if resolved, err := ReconcileControl(p); resolved || err != p {
 				t.Fatal("timeout was treated as cancellation")
 			}

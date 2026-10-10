@@ -2,6 +2,8 @@ package queue
 
 import (
 	"bytes"
+	"fmt"
+	"syscall"
 	"testing"
 	"unsafe"
 
@@ -13,17 +15,29 @@ import (
 // kernel event; the production engine's CQE decoder, dispatch and commit paths
 // run unchanged, with no worker, eventfd or scheduling timeout required.
 func scheduledBatchEngine(t *testing.T, depth int, h Handler) (*engine, *fakeKernel) {
+	return scheduledEngine(t, depth, h, true)
+}
+
+func scheduledEngine(t *testing.T, depth int, h Handler, batch bool) (*engine, *fakeKernel) {
 	t.Helper()
 	k := newFakeKernel(t, depth, testBufSize)
 	e := newEngine(engineConfig{
 		capacity: testCapacity, logicalBlockSize: 512, tagHi: depth, charFd: -1,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-		handler: h, inline: true, batch: true,
+		handler: h, inline: true, batch: batch,
 	})
 	e.ring = k
-	if err := e.setupBatch(); err != nil {
-		t.Fatal(err)
+	if batch {
+		if err := e.setupBatch(); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		for i := 0; i < depth; i++ {
+			if err := e.prepIO(uapi.UBLK_IO_FETCH_REQ, i, 0); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	t.Cleanup(e.teardown)
 	if _, err := k.Submit(); err != nil {
@@ -31,6 +45,94 @@ func scheduledBatchEngine(t *testing.T, depth int, h Handler) (*engine, *fakeKer
 	}
 	reapScheduled(e, k)
 	return e, k
+}
+
+// Replay the unchanged five FuzzEngine seed scripts with an explicit owner
+// schedule. Their valid request/tag decoding is preserved; asynchronous
+// completion is serialized here so the same trace replays without sleeps.
+func TestCompletionScheduleExistingScriptsReplay(t *testing.T) {
+	scripts := [][]byte{
+		{0, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+		{1, 2, 0, 0, 0, 0, 0, 0, 255, 255},
+		{3, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9, 9, 9, 9, 9},
+		{8, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		{25, 8, 31, 17, 3, 200, 5, 9, 11, 13},
+	}
+	for seed, script := range scripts {
+		t.Run(fmt.Sprintf("seed%d", seed), func(t *testing.T) {
+			mode, depth := script[0], 1+int(script[1]%8)
+			script := script[2:]
+			h := HandlerFunc(func(r *Request) {
+				b := byte(r.Offset >> 9)
+				if r.Op == OpRead {
+					for i := range r.Data {
+						r.Data[i] = b + 1
+					}
+				}
+				switch b % 5 {
+				case 0, 1:
+					r.Complete(nil)
+				case 2:
+					r.Complete(syscall.Errno(1 + b%40))
+				case 3:
+					r.CompleteN(int(r.Length)/2, nil)
+				default:
+					r.CompleteN(int(r.Length), nil)
+				}
+			})
+			e, k := scheduledEngine(t, depth, h, mode&8 != 0)
+			if mode&8 != 0 && mode&16 != 0 {
+				k.commitLimit = 1 + int(mode>>5)%3
+			}
+			ops := []uint8{uapi.UBLK_IO_OP_READ, uapi.UBLK_IO_OP_WRITE, uapi.UBLK_IO_OP_FLUSH,
+				uapi.UBLK_IO_OP_DISCARD, uapi.UBLK_IO_OP_WRITE_ZEROES}
+			for id, b := range script {
+				op, nr := ops[int(b)%len(ops)], uint32(1+int(b)%16)
+				if op == uapi.UBLK_IO_OP_FLUSH {
+					nr = 0
+				}
+				var data []byte
+				if op == uapi.UBLK_IO_OP_WRITE {
+					data = make([]byte, nr<<9)
+				}
+				k.inject(int(b)%depth, fkReq{op: op, sector: uint64(b), nr: nr, data: data, id: id})
+			}
+			for step := 0; step < 4*len(script)+4; step++ {
+				reapScheduled(e, k)
+				if e.cfg.batch {
+					e.flushBatchCommits()
+				}
+				_, _ = k.Submit()
+			}
+			reapScheduled(e, k)
+			k.stop()
+			reapScheduled(e, k)
+			commits, violations := k.snapshot()
+			if e.err != nil || len(violations) != 0 || len(commits) != len(script) || !e.finished() {
+				t.Fatalf("valid replay failed: error=%v violations=%v commits=%d want=%d finished=%v", e.err, violations, len(commits), len(script), e.finished())
+			}
+			seen := map[int]bool{}
+			for _, c := range commits {
+				if seen[c.id] {
+					t.Fatalf("generation %d committed twice", c.id)
+				}
+				seen[c.id] = true
+				if c.result >= 0 {
+					if c.op == uapi.UBLK_IO_OP_READ {
+						if c.result <= 0 || !bytes.Equal(c.data, bytes.Repeat([]byte{script[c.id] + 1}, int(c.result))) {
+							t.Fatalf("read %d has stale bytes", c.id)
+						}
+					} else if c.op == uapi.UBLK_IO_OP_WRITE {
+						if c.result != int32(1+int(script[c.id])%16)<<9 {
+							t.Fatalf("write %d completed short", c.id)
+						}
+					} else if c.result != 0 {
+						t.Fatalf("payload-free op %d completed with byte count %d", c.op, c.result)
+					}
+				}
+			}
+		})
+	}
 }
 
 func reapScheduled(e *engine, k *fakeKernel) {

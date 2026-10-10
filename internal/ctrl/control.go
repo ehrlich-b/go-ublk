@@ -90,11 +90,13 @@ func (e *InFlightError) Error() string {
 
 func (e *InFlightError) Unwrap() error { return e.Err }
 
-// Done is closed when the kernel completes the abandoned command.
+// Done is closed when the abandoned command's transport returns. Reaped must
+// also be true before treating this as a final kernel outcome.
 func (e *InFlightError) Done() <-chan struct{} { return e.done }
 
-// Result is the abandoned command's outcome once Done is closed (nil on
-// success); before that it returns nil.
+// Result is the abandoned command's transport outcome once Done is closed
+// (nil on success); before that it returns nil. Check Reaped before allowing
+// another mutation: an unreaped transport error leaves the kernel outcome unknown.
 func (e *InFlightError) Result() error {
 	select {
 	case <-e.done:
