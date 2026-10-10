@@ -41,10 +41,14 @@ type RequestRange struct {
 // representability. Range-only operations are bounded by capacity, rather than
 // the payload buffer (large DISCARD/WRITE_ZEROES requests move no payload).
 // REPORT_ZONES uses nr_sectors as a zone count and caps its report buffer, as
-// the engine has always done; it is not a sector range.
+// the engine has always done; it is not a sector range. FLUSH has no range and
+// ignores both sector fields, including the block layer's sentinel start.
 func ValidateRequestRange(p RequestParams) (RequestRange, error) {
 	if err := p.Limits.Validate(); err != nil {
 		return RequestRange{}, err
+	}
+	if p.Op == uapi.UBLK_IO_OP_FLUSH {
+		return RequestRange{}, nil
 	}
 	if p.StartSector > math.MaxInt64/uapi.SectorSize {
 		return RequestRange{}, fmt.Errorf("start sector exceeds signed byte addressing")
@@ -72,7 +76,7 @@ func ValidateRequestRange(p RequestParams) (RequestRange, error) {
 		if n == 0 || n > p.Limits.MaxPayload {
 			return RequestRange{}, fmt.Errorf("payload length %d outside 1..%d", n, p.Limits.MaxPayload)
 		}
-	case uapi.UBLK_IO_OP_FLUSH, uapi.UBLK_IO_OP_ZONE_RESET_ALL:
+	case uapi.UBLK_IO_OP_ZONE_RESET_ALL:
 		if n != 0 {
 			return RequestRange{}, fmt.Errorf("operation must not carry a sector range")
 		}

@@ -736,7 +736,7 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 		r.NrZones = d.NrSectors
 	}
 
-	if r.Flags&FlagSharedMemory != 0 {
+	if r.Op != OpFlush && r.Flags&FlagSharedMemory != 0 {
 		// The request's pages are in a region we registered: no copy either
 		// way, Data is that memory.
 		var ok bool
@@ -756,7 +756,7 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 		}
 	}
 	r.Integrity = nil
-	if r.Flags&FlagIntegrity != 0 && e.cfg.integ != nil {
+	if r.Op != OpFlush && r.Flags&FlagIntegrity != 0 && e.cfg.integ != nil {
 		n, err := validation.MetadataLength(uint64(r.Length), uint64(e.cfg.integInterval), uint64(e.cfg.integMeta), uint64(e.cfg.integSize))
 		if err != nil {
 			r.state.Store(reqAsync)

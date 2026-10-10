@@ -2,11 +2,14 @@ package queue
 
 import (
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
+	"github.com/ehrlich-b/go-ublk/internal/uring"
 )
 
 type boundsBackend struct{ t *testing.T }
@@ -22,6 +25,96 @@ func (b boundsBackend) WriteAt([]byte, int64) (int, error) {
 func (b boundsBackend) Flush() error { b.t.Fatal("invalid flush reached backend"); return nil }
 func (b boundsBackend) Size() int64  { return 8192 }
 func (b boundsBackend) Close() error { return nil }
+
+type flushBackend struct {
+	boundsBackend
+	calls atomic.Int32
+}
+
+func (b *flushBackend) Flush() error {
+	b.calls.Add(1)
+	return nil
+}
+
+func TestEngineFlushIgnoresSectorRange(t *testing.T) {
+	for _, mode := range []string{
+		"copy-inline", "copy-async", "user-copy-inline", "user-copy-async",
+		"batch-copy-inline", "batch-copy-async", "batch-user-copy-inline", "batch-user-copy-async",
+		"shared-memory", "integrity-inline", "integrity-async", "integrity-user-copy",
+		"batch-integrity-copy", "batch-integrity-user-copy",
+		"zero-copy-manual", "zero-copy-auto", "batch-zero-copy-manual", "batch-zero-copy-auto",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			k := newFakeKernel(t, 1, 4096)
+			backend := &flushBackend{boundsBackend: boundsBackend{t}}
+			adapter := BackendHandler(backend, nil)
+			cfg := engineConfig{
+				capacity: backend.Size, logicalBlockSize: 4096, tagHi: 1, charFd: -1,
+				desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
+				bufs: unsafe.Pointer(&k.bufs[0]), bufSize: 4096,
+				inline:   !strings.Contains(mode, "async"),
+				userCopy: strings.Contains(mode, "user-copy"), batch: strings.HasPrefix(mode, "batch"),
+				newRing: func(uint32) (ring, error) { return k, nil },
+				handler: HandlerFunc(func(r *Request) {
+					if r.Op != OpFlush || r.Offset != 0 || r.Length != 0 || r.Data != nil || r.Integrity != nil {
+						t.Errorf("flush carries a range or borrowed buffer: %+v", r)
+					}
+					adapter.HandleRequest(r)
+				}),
+			}
+			var flags RequestFlags
+			if mode == "shared-memory" {
+				// No registered region: a payload-free flush must not look one up.
+				flags |= FlagSharedMemory
+			}
+			var metadata [64]byte // eight 8-byte tuples for a 4096-byte payload
+			if strings.Contains(mode, "integrity") {
+				flags |= FlagIntegrity
+				cfg.integ, cfg.integSize = unsafe.Pointer(&metadata[0]), len(metadata)
+				cfg.integInterval, cfg.integMeta = 512, 8
+			}
+			if strings.Contains(mode, "zero-copy") {
+				k.zcAuto = strings.HasSuffix(mode, "auto")
+				cfg.zeroCopy = &zeroCopyConfig{fd: 77, base: 4096, auto: k.zcAuto}
+				flags |= FlagNeedRegBuf // FLUSH must never register a payload buffer.
+			}
+			e := newEngine(cfg)
+			if err := e.start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			t.Cleanup(func() { e.abandon(); waitDone(t, e) })
+			for id, sectors := range []uint32{0, 8, ^uint32(0)} {
+				k.inject(0, fkReq{op: uapi.UBLK_IO_OP_FLUSH, sector: ^uint64(0), nr: sectors,
+					flags: uint32(flags), id: id})
+			}
+			commits := k.waitCommits(3, 5*time.Second)
+			for _, c := range commits {
+				if c.result != 0 {
+					t.Errorf("flush %d completed with %d, want 0", c.id, c.result)
+				}
+			}
+			k.stop()
+			waitDone(t, e)
+			if e.err != nil {
+				t.Fatalf("engine: %v", e.err)
+			}
+			if cfg.zeroCopy == nil {
+				if calls := backend.calls.Load(); calls != 3 {
+					t.Fatalf("backend Flush calls=%d, want 3", calls)
+				}
+				return
+			}
+			if len(k.fileOps) != 3 || len(k.registered) != 0 || backend.calls.Load() != 0 {
+				t.Fatalf("unexpected zero-copy flush dispatch: ops=%+v registered=%v", k.fileOps, k.registered)
+			}
+			for _, op := range k.fileOps {
+				if op.opcode != uring.IORING_OP_FSYNC || op.rwFlags != uring.IORING_FSYNC_DATASYNC {
+					t.Errorf("zero-copy flush submitted %+v, want datasync", op)
+				}
+			}
+		})
+	}
+}
 
 func TestEngineRequestBoundsBeforeBackend(t *testing.T) {
 	for _, mode := range []string{"copy-inline", "copy-async", "user-copy", "batch-copy", "batch-user-copy", "shared-memory", "zero-copy-manual", "zero-copy-auto", "batch-zero-copy"} {

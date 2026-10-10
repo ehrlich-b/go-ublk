@@ -60,13 +60,29 @@ func requestCases() []requestCase {
 		add("range-exceeds-payload", true, func(p *RequestParams) { p.Op = op; p.StartSector = 0; p.Sectors = (1 << 20) / 512 })
 		add("range-end-outside", false, func(p *RequestParams) { p.Op = op; p.StartSector = 8; p.Sectors = (1 << 20) / 512 })
 	}
+	for _, op := range []uint8{uapi.UBLK_IO_OP_READ, uapi.UBLK_IO_OP_WRITE, uapi.UBLK_IO_OP_DISCARD, uapi.UBLK_IO_OP_WRITE_ZEROES} {
+		add("addressed-op-sentinel", false, func(p *RequestParams) { p.Op = op; p.StartSector = math.MaxUint64 })
+	}
 	add("4GiB-discard", true, func(p *RequestParams) {
 		p.Op = uapi.UBLK_IO_OP_DISCARD
 		p.Limits.Capacity = 8 << 30
 		p.Sectors = 1 << 23
 	})
 	add("flush", true, func(p *RequestParams) { p.Op = uapi.UBLK_IO_OP_FLUSH; p.Sectors = 0 })
-	add("flush-range", false, func(p *RequestParams) { p.Op = uapi.UBLK_IO_OP_FLUSH })
+	add("flush-kernel-sentinel", true, func(p *RequestParams) {
+		p.Op = uapi.UBLK_IO_OP_FLUSH
+		p.StartSector, p.Sectors = math.MaxUint64, 0
+	})
+	add("flush-range-ignored", true, func(p *RequestParams) { p.Op = uapi.UBLK_IO_OP_FLUSH })
+	add("flush-overflowing-fields-ignored", true, func(p *RequestParams) {
+		p.Op = uapi.UBLK_IO_OP_FLUSH
+		p.StartSector, p.Sectors = math.MaxUint64, math.MaxUint64
+	})
+	add("flush-invalid-limits", false, func(p *RequestParams) {
+		p.Op = uapi.UBLK_IO_OP_FLUSH
+		p.StartSector, p.Sectors = math.MaxUint64, 0
+		p.Limits.Capacity = 0
+	})
 	add("zero-capacity", false, func(p *RequestParams) { p.Limits.Capacity = 0 })
 	add("negative-capacity", false, func(p *RequestParams) { p.Limits.Capacity = -1 })
 	add("unaligned-capacity", false, func(p *RequestParams) { p.Limits.Capacity++ })
@@ -126,6 +142,12 @@ func TestRequestRangeBoundsBeforeBackend(t *testing.T) {
 
 func assertRequestRange(t *testing.T, p RequestParams, r RequestRange) {
 	t.Helper()
+	if p.Op == uapi.UBLK_IO_OP_FLUSH {
+		if r != (RequestRange{}) {
+			t.Fatalf("flush carries a range: %+v", r)
+		}
+		return
+	}
 	off := new(big.Int).Mul(new(big.Int).SetUint64(p.StartSector), big.NewInt(512))
 	if !off.IsInt64() || off.Int64() != r.Offset || r.Offset < 0 || r.Offset > p.Limits.Capacity {
 		t.Fatal("accepted invalid signed offset")
