@@ -5,14 +5,14 @@ description: "Every UBLK_IO_OP_* a server can receive, the per-request flags, ho
 weight: 40
 ---
 
-The low eight bits of a descriptor's `op_flags` are the operation; bits 8 to 31 are flags. Which operations a device ever receives is decided by what it advertised in [`SET_PARAMS`](/guide/parameters/): the block layer only sends flushes to a device with a volatile write cache, discards to one with a discard limit, and so on. This chapter lists what can arrive, what each one means, and how to answer it.
+Descriptor `op_flags` bits 0-7 select the operation; 8-31 are flags. [`SET_PARAMS`](/guide/parameters/) determines delivered operations: flush requires a volatile cache, discard a non-zero limit.
 
 ```c
 unsigned op    = desc->op_flags & 0xff;   /* ublksrv_get_op()    */
 unsigned flags = desc->op_flags >> 8;     /* ublksrv_get_flags() returns them shifted down */
 ```
 
-Note the shift: `ublksrv_get_flags()` returns `op_flags >> 8`, while the `UBLK_IO_F_*` constants are defined in their `op_flags` positions (`UBLK_IO_F_FUA` is `1 << 13`). Test `desc->op_flags & UBLK_IO_F_FUA`, or shift the constant.
+`ublksrv_get_flags()` shifts down by 8; `UBLK_IO_F_*` constants do not (`UBLK_IO_F_FUA = 1 << 13`). Test `desc->op_flags & UBLK_IO_F_FUA` or shift the constant too.
 
 ## Operations
 
@@ -32,31 +32,31 @@ Note the shift: `ublksrv_get_flags()` returns `op_flags >> 8`, while the `UBLK_I
 | `UBLK_IO_OP_ZONE_RESET` | 15 | 6.6 | Zoned devices | None |
 | `UBLK_IO_OP_REPORT_ZONES` | 18 | 6.6 | Zoned devices, from the driver itself | Server writes `struct blk_zone` entries; `nr_zones` replaces `nr_sectors` |
 
-`WRITE_SAME` is in the UAPI because it existed in the block layer when ublk was merged; the block layer dropped its write-same operation in 5.18, before ublk merged in 6.0, and the driver maps nothing to it. Operations the driver does not translate, such as secure erase, fail in the kernel and never reach the server.
+The UAPI retains WRITE_SAME, although the block layer removed it in 5.18, before ublk's 6.0 merge. The driver maps nothing to it. Untranslated operations, such as secure erase, fail before reaching the server.
 
 ### READ and WRITE
 
-Byte offset `start_sector << 9`, length `nr_sectors << 9`, both multiples of the logical block size and the length at most `max_sectors << 9`. In the default copy mode the data is in the tag's buffer: placed there by the kernel before delivery for a write, expected there at commit for a read.
+Offset is `start_sector << 9`, length `nr_sectors << 9`: both block-aligned, length at most `max_sectors << 9`. Copy mode delivers WRITE bytes in the tag buffer and expects READ bytes there at commit.
 
-A write's data must be consumed (or copied) before you commit, because the commit hands the buffer back for the tag's next request. A read's buffer must be filled completely: the kernel copies the number of bytes you commit, and with user copy or zero copy, a read committed with fewer bytes than it claims would expose stale kernel memory, which is why those modes require a trusted, privileged server.
+Consume or copy WRITE data before commit releases its buffer for reuse. Fill every claimed READ byte; user-copy/zero-copy servers that report unfilled bytes can expose stale kernel memory, so those modes require trusted privileged servers.
 
 ### FLUSH
 
-A flush asks that every write the device has **completed** before the flush was issued be on stable storage when the flush completes. It does not cover writes still in flight alongside it, and it carries no range. A backend over a file implements it as `fdatasync` (or `fsync`); over a network store, as whatever makes acknowledged writes durable; over RAM, as nothing.
+FLUSH makes previously completed writes durable. It covers no range and excludes concurrent in-flight writes. File backends use fdatasync/fsync, network stores their durability operation, and RAM a no-op.
 
-The block layer only issues flushes to a device that claims a volatile write cache. Claim one if, and only if, a completed write can be lost by a power failure; see [the durability contract](#the-durability-contract) below.
+Flushes arrive only with a volatile cache: advertise one when completed writes can be lost on power failure. See [durability](#the-durability-contract).
 
 ### DISCARD
 
-A hint that the range's contents are no longer needed. The server may deallocate the space (punch a hole, issue TRIM below it, drop the blocks) or ignore it. After a discard, reads of the range may return the old data, zeros, or anything else: Linux does not promise zeroing for discard.
+DISCARD marks unneeded data. Punch holes, issue TRIM, drop blocks, or ignore it; later reads may return old data, zeros, or anything else.
 
-The range can be far larger than `max_io_buf_bytes`, up to `max_discard_sectors`. Do not size a buffer from a discard's length; there is no data. The kernel only sends single-range discards (the parameters require `max_discard_segments` to be 1).
+Ranges can exceed max_io_buf_bytes, up to max_discard_sectors; allocate no data buffer. Only single-range discards arrive (`max_discard_segments = 1`).
 
 ### WRITE_ZEROES
 
-The range must read back as zeros afterwards. That is a guarantee, unlike discard. With `UBLK_IO_F_NOUNMAP` set, the space must also stay allocated (write zeros, or use a zeroing primitive that keeps the blocks provisioned). Without it the server may deallocate as long as reads return zeros, for example by punching a hole in a sparse file.
+WRITE_ZEROES must leave zeros. With `UBLK_IO_F_NOUNMAP`, retain allocation through writes or a zeroing primitive; otherwise hole punching is allowed if reads return zeros.
 
-As with discard, the length is a range and can be gigabytes.
+Like discard, this is a potentially multi-gigabyte range.
 
 ## Flags
 
@@ -73,9 +73,9 @@ As with discard, the length is a range and can be gigabytes.
 | `UBLK_IO_F_INTEGRITY` | 18 | The request carries an [integrity](/guide/integrity/) buffer (7.0+) |
 | `UBLK_IO_F_SHMEM_ZC` | 19 | `addr` encodes a [shared-memory buffer](/guide/data-copy/) index and offset (7.1+) |
 
-The first seven are translations of block-layer `REQ_*` flags and exist since 6.0. The failfast flags are hints: a server with retry logic (a network backend reconnecting, say) can skip it and fail quickly when they are set.
+The first seven flags translate block-layer REQ_* flags present since 6.0. Failfast hints can suppress server retries, such as network reconnection.
 
-`UBLK_IO_F_SWAP` deserves a warning. The kernel documentation gives no guidance on ublk-backed swap and the driver does nothing special for it beyond setting this flag. As with any userspace block device, if the server must allocate memory to complete a swap-out while the system is short of memory, the system can deadlock on itself. Servers that support swap need preallocated memory and a backend that does not allocate on the I/O path.
+ublk swap has no documented special handling beyond `UBLK_IO_F_SWAP`. Allocating while completing swap-out can deadlock memory reclaim. Supporting swap requires preallocated memory and no backend I/O-path allocations.
 
 ## Reporting results
 
@@ -87,9 +87,9 @@ The commit's `result` field:
 | FLUSH, DISCARD, WRITE_ZEROES, zone management | any value ≥ 0 | not applicable | negative errno |
 | REPORT_ZONES | bytes of zone report written (`nr_zones × 64`); never 0 on kernels before 7.3, where it re-dispatches the request | | negative errno |
 
-For range operations, do not echo the length back: `nr_sectors << 9` for a 4 GiB discard does not fit in the signed 32-bit result, and a negative result is an error.
+Return 0 for range operations: a 4 GiB byte count overflows signed 32-bit `result` and becomes an error.
 
-The errno reaches the application as a block status. The useful ones:
+Errnos map through block status to application errors:
 
 | errno | Block status | What the application typically sees |
 |---|---|---|
@@ -104,11 +104,11 @@ The errno reaches the application as a block status. The useful ones:
 | `-EREMOTEIO` | `BLK_STS_TARGET` | a critical target error |
 | `-EINVAL` | `BLK_STS_INVAL` | 6.11 and later; `BLK_STS_IOERR` before |
 
-Every release since 6.0 passes a negative result through `errno_to_blk_status`, and any errno not in its table becomes `BLK_STS_IOERR`.
+Since 6.0, `errno_to_blk_status` maps negative results; unrecognized errnos become BLK_STS_IOERR.
 
 ## The durability contract
 
-Two attributes in `SET_PARAMS` tell the block layer what a completed write means, and they decide which flush and FUA operations the server ever sees:
+SET_PARAMS attributes define completed-write durability and delivery of flush/FUA:
 
 | Device advertises | Flushes | FUA writes | The server promises |
 |---|---|---|---|
@@ -118,6 +118,6 @@ Two attributes in `SET_PARAMS` tell the block layer what a completed write means
 
 `UBLK_ATTR_FUA` without a volatile cache has no effect.
 
-The two possible mistakes are not symmetric. Advertising a cache you do not have costs a no-op flush round trip now and then. Not advertising a cache you do have means the kernel never asks you to flush, filesystems believe their journal commits are on disk when they are only in your page cache or your network buffer, and a power failure loses acknowledged data with no error anywhere. When in doubt, advertise the cache and implement flush.
+An unnecessary cache flag costs no-op flushes. A missing required flag loses acknowledged writes on power failure: filesystems treat cached journal commits as durable. When unsure, advertise the cache and implement flush.
 
-Advertise FUA only if you honor `UBLK_IO_F_FUA` on every write that carries it. A backend that can make a single write durable more cheaply than a full flush (an `O_DSYNC` write to one file, a write with a sync flag over the network) gains from FUA; one that cannot should leave it off and let the block layer emulate it with flushes, which are correct, just slower.
+Honor `UBLK_IO_F_FUA` on every flagged write. Advertise it when making one write durable, e.g. O_DSYNC or a network sync flag, is cheaper than full flush. Otherwise let the block layer emulate it correctly with flushes.
