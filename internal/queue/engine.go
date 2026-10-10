@@ -15,6 +15,7 @@ import (
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
+	"github.com/ehrlich-b/go-ublk/internal/validation"
 )
 
 // ring is the part of uring.IoUring the engine uses, so tests can substitute
@@ -92,18 +93,20 @@ type bufRegistrar interface {
 // engineConfig describes the tags one engine serves: [tagLo, tagHi) of one
 // queue. Without UBLK_F_PER_IO_DAEMON an engine serves its whole queue.
 type engineConfig struct {
-	queueID      uint16
-	tagLo, tagHi int
-	charFd       int
-	desc         unsafe.Pointer // the queue's descriptor array
-	descStride   uintptr
-	bufs         unsafe.Pointer // the queue's data buffers, bufSize bytes per tag
-	bufSize      int
-	userCopy     bool // UBLK_F_USER_COPY: data moves by pread/pwrite on charFd
-	zeroCopy     *zeroCopyConfig
-	batch        bool          // UBLK_F_BATCH_IO
-	zoned        bool          // batch elements carry the zone-append LBA
-	shmem        *SharedMemory // UBLK_F_SHMEM_ZC regions, or nil
+	capacity         func() int64 // atomic accepted capacity, including online resize
+	logicalBlockSize int
+	queueID          uint16
+	tagLo, tagHi     int
+	charFd           int
+	desc             unsafe.Pointer // the queue's descriptor array
+	descStride       uintptr
+	bufs             unsafe.Pointer // the queue's data buffers, bufSize bytes per tag
+	bufSize          int
+	userCopy         bool // UBLK_F_USER_COPY: data moves by pread/pwrite on charFd
+	zeroCopy         *zeroCopyConfig
+	batch            bool          // UBLK_F_BATCH_IO
+	zoned            bool          // batch elements carry the zone-append LBA
+	shmem            *SharedMemory // UBLK_F_SHMEM_ZC regions, or nil
 	// UBLK_F_INTEGRITY: per-tag metadata buffers of integSize bytes, holding
 	// integMeta bytes per integInterval bytes of data.
 	integ         unsafe.Pointer
@@ -697,25 +700,42 @@ func (e *engine) dispatch(i int) {
 		base := unsafe.Add(e.cfg.desc, uintptr(tag)*e.cfg.descStride+24)
 		r.DescriptorExtra = unsafe.Slice((*byte)(base), int(e.cfg.descStride-24))
 	}
-	r.Offset = int64(d.StartSector) << uapi.SectorShift
-	r.Length = int64(d.NrSectors) << uapi.SectorShift
 	r.NrZones = 0
-	r.Data = nil
+	r.Data, r.Integrity = nil, nil
 	r.result, r.lba = 0, 0
 	e.tags[i] = tagHandling
 	e.handlers.Add(1)
 
+	base := int64(0)
+	if e.cfg.zeroCopy != nil {
+		base = e.cfg.zeroCopy.base
+	}
+	err := validation.DispatchRequest(validation.RequestParams{
+		Op: uint8(r.Op), StartSector: d.StartSector, Sectors: uint64(d.NrSectors),
+		Limits: validation.RequestLimits{Capacity: e.cfg.capacity(), FileBase: base,
+			LogicalBlockSize: uint64(e.cfg.logicalBlockSize), MaxPayload: uint64(e.cfg.bufSize)},
+	}, func(bounds validation.RequestRange) {
+		r.Offset, r.Length = bounds.Offset, bounds.Length
+		e.dispatchValidated(i, r, d)
+	})
+	if err != nil {
+		r.Offset, r.Length = 0, 0
+		r.state.Store(reqAsync)
+		r.Complete(fmt.Errorf("invalid request range: %v: %w", err, syscall.EIO))
+	}
+}
+
+// dispatchValidated is reachable only through the central range guard.
+func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
+	tag := i + e.cfg.tagLo
 	if e.cfg.zeroCopy != nil {
 		e.dispatchZeroCopy(i, r)
 		return
 	}
 	if r.Op == OpReportZones {
-		// nr_sectors carries the number of zones asked for; the report is
-		// that many 64-byte struct blk_zone entries, pre-zeroed so a short
-		// report ends with a zero-length zone as the kernel expects.
 		r.NrZones = d.NrSectors
-		r.Length = min(int64(d.NrSectors)*BlkZoneSize, int64(e.cfg.bufSize))
 	}
+
 	if r.Flags&FlagSharedMemory != 0 {
 		// The request's pages are in a region we registered: no copy either
 		// way, Data is that memory.
@@ -730,12 +750,6 @@ func (e *engine) dispatch(i int) {
 			return
 		}
 	} else if r.Op.carriesData() {
-		if r.Length > int64(e.cfg.bufSize) {
-			r.state.Store(reqAsync)
-			r.Complete(fmt.Errorf("%d-byte request exceeds the %d-byte tag buffer: %w",
-				r.Length, e.cfg.bufSize, syscall.EIO))
-			return
-		}
 		r.Data = unsafe.Slice((*byte)(e.buffer(tag)), int(r.Length))
 		if r.Op == OpReportZones {
 			clear(r.Data)
@@ -743,10 +757,10 @@ func (e *engine) dispatch(i int) {
 	}
 	r.Integrity = nil
 	if r.Flags&FlagIntegrity != 0 && e.cfg.integ != nil {
-		n := int(r.Length) / e.cfg.integInterval * e.cfg.integMeta
-		if n > e.cfg.integSize {
+		n, err := validation.MetadataLength(uint64(r.Length), uint64(e.cfg.integInterval), uint64(e.cfg.integMeta), uint64(e.cfg.integSize))
+		if err != nil {
 			r.state.Store(reqAsync)
-			r.Complete(fmt.Errorf("%d-byte integrity buffer exceeds %d: %w", n, e.cfg.integSize, syscall.EIO))
+			r.Complete(fmt.Errorf("invalid integrity span: %v: %w", err, syscall.EIO))
 			return
 		}
 		r.Integrity = unsafe.Slice((*byte)(unsafe.Add(e.cfg.integ, tag*e.cfg.integSize)), n)

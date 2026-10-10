@@ -66,6 +66,7 @@ func FuzzEngine(f *testing.F) {
 			}
 		})
 		e := newEngine(engineConfig{
+			capacity: testCapacity, logicalBlockSize: 512,
 			tagLo: 0, tagHi: depth, charFd: -1,
 			desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 			bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,

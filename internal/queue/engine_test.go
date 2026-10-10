@@ -20,6 +20,10 @@ import (
 
 const testBufSize = 64 << 10
 
+// The fake device advertises a sparse 8 GiB capacity; its small backing slices
+// are touched only by data operations. Range-op tests exercise 4 GiB discard.
+func testCapacity() int64 { return 8 << 30 }
+
 // startEngine runs an engine over all tags of a fake kernel.
 func startEngine(t *testing.T, k *fakeKernel, h Handler, inline bool) *engine {
 	t.Helper()
@@ -30,6 +34,7 @@ func startEngine(t *testing.T, k *fakeKernel, h Handler, inline bool) *engine {
 func startEngineWait(t *testing.T, k *fakeKernel, h Handler, inline bool, wait time.Duration) *engine {
 	t.Helper()
 	e := newEngine(engineConfig{
+		capacity: testCapacity, logicalBlockSize: 512,
 		queueID:      0,
 		tagLo:        0,
 		tagHi:        k.depth,
@@ -392,6 +397,7 @@ func TestEngineNoLostWakeup(t *testing.T) {
 	var pending *Request
 	fired := false
 	e := newEngine(engineConfig{
+		capacity: testCapacity, logicalBlockSize: 512,
 		tagLo: 0, tagHi: 1, charFd: -1,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
@@ -420,6 +426,7 @@ func startZeroCopyEngine(t *testing.T, k *fakeKernel, auto bool) *engine {
 	t.Helper()
 	k.zcAuto = auto
 	e := newEngine(engineConfig{
+		capacity: testCapacity, logicalBlockSize: 512,
 		tagLo: 0, tagHi: k.depth, charFd: 99,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufSize:      testBufSize,
@@ -500,6 +507,7 @@ func TestEngineZeroCopyShortReadFails(t *testing.T) {
 func startBatchEngine(t *testing.T, k *fakeKernel, h Handler, inline bool) *engine {
 	t.Helper()
 	e := newEngine(engineConfig{
+		capacity: testCapacity, logicalBlockSize: 512,
 		tagLo: 0, tagHi: k.depth, charFd: k.ufile,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
@@ -578,6 +586,7 @@ func TestEngineSharedMemory(t *testing.T) {
 		r.Complete(nil)
 	})
 	e := newEngine(engineConfig{
+		capacity: testCapacity, logicalBlockSize: 512,
 		tagLo: 0, tagHi: 2, charFd: -1, desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize, shmem: shm,
 		handler: h, inline: true, waitInterval: 20 * time.Millisecond,

@@ -596,6 +596,9 @@ func Create(params DeviceParams, options *Options) (*Device, error) {
 	if err := validateParams(&params); err != nil {
 		return nil, err
 	}
+	// Freeze the capacity sent to SET_PARAMS; later Backend.Size changes must
+	// not silently widen descriptor validation before an explicit Resize.
+	params.Size = params.size()
 	configureLogging(options)
 
 	controller, err := createController()
@@ -779,18 +782,21 @@ func (d *Device) startQueues() error {
 			zcFile, zcBase = zc.ZeroCopyFile()
 		}
 		q, err := queue.NewQueue(queue.QueueConfig{
-			QueueID:      uint16(i),
-			Depth:        d.depth,
-			MaxIOSize:    d.maxIO,
-			CharFd:       fd,
-			Flags:        d.flags,
-			Handler:      d.handler,
-			Inline:       d.params.Inline,
-			Threads:      threads,
-			CPUs:         cpus,
-			Logger:       d.options.Logger,
-			ZeroCopyFile: zcFile,
-			ZeroCopyBase: zcBase,
+			QueueID:          uint16(i),
+			NumQueues:        d.queues,
+			Capacity:         d.params.size(),
+			LogicalBlockSize: d.blockSize,
+			Depth:            d.depth,
+			MaxIOSize:        d.maxIO,
+			CharFd:           fd,
+			Flags:            d.flags,
+			Handler:          d.handler,
+			Inline:           d.params.Inline,
+			Threads:          threads,
+			CPUs:             cpus,
+			Logger:           d.options.Logger,
+			ZeroCopyFile:     zcFile,
+			ZeroCopyBase:     zcBase,
 
 			DescSize:          d.descSize,
 			IntegrityInterval: d.integrityInterval(),
@@ -811,7 +817,7 @@ func (d *Device) startQueues() error {
 
 // descSizeOf is the descriptor stride the kernel uses for a device.
 func descSizeOf(info *uapi.UblksrvCtrlDevInfo) int {
-	if info.Flags&uapi.UBLK_F_IO_DESC_SIZE != 0 && info.IODescSize >= 24 {
+	if info.Flags&uapi.UBLK_F_IO_DESC_SIZE != 0 {
 		return int(info.IODescSize)
 	}
 	return 24

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ehrlich-b/go-ublk/internal/interfaces"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 	"github.com/ehrlich-b/go-ublk/internal/uring"
+	"github.com/ehrlich-b/go-ublk/internal/validation"
 )
 
 // ErrStillInUse is returned by Queue.Close when an engine has not exited or a
@@ -22,16 +24,19 @@ var ErrStillInUse = errors.New("queue still in use; its memory was leaked rather
 
 // QueueConfig configures one ublk hardware queue.
 type QueueConfig struct {
-	QueueID   uint16
-	Depth     int
-	MaxIOSize int
-	CharFd    int    // /dev/ublkcN; shared by every queue, not owned
-	Flags     uint64 // negotiated UBLK_F_* features
-	DescSize  int    // bytes per I/O descriptor (dev_info.io_desc_size); 0 means 24
-	Handler   Handler
-	Inline    bool
-	Threads   int   // engines (OS threads) per queue; >1 needs UBLK_F_PER_IO_DAEMON
-	CPUs      []int // CPUs to pin the queue's threads to; empty: no affinity
+	NumQueues        int   // accepted device queue count
+	Capacity         int64 // accepted device capacity in bytes
+	LogicalBlockSize int
+	QueueID          uint16
+	Depth            int
+	MaxIOSize        int
+	CharFd           int    // /dev/ublkcN; shared by every queue, not owned
+	Flags            uint64 // negotiated UBLK_F_* features
+	DescSize         int    // bytes per I/O descriptor (dev_info.io_desc_size); 0 means 24
+	Handler          Handler
+	Inline           bool
+	Threads          int   // engines (OS threads) per queue; >1 needs UBLK_F_PER_IO_DAEMON
+	CPUs             []int // CPUs to pin the queue's threads to; empty: no affinity
 	// ZeroCopyFile, if >= 0, serves every request zero-copy against this
 	// file descriptor (device offset 0 = file offset ZeroCopyBase); Handler
 	// is then unused. Needs UBLK_F_SUPPORT_ZERO_COPY in Flags, and uses
@@ -52,13 +57,14 @@ type QueueConfig struct {
 // Queue serves one ublk hardware queue: it maps the queue's descriptor array
 // and data buffers and runs one or more engines over its tags.
 type Queue struct {
-	cfg     QueueConfig
-	desc    []byte
-	bufs    []byte
-	integ   []byte
-	engines []*engine
-	done    chan struct{}
-	closed  bool
+	capacity atomic.Int64
+	cfg      QueueConfig
+	desc     []byte
+	bufs     []byte
+	integ    []byte
+	engines  []*engine
+	done     chan struct{}
+	closed   bool
 }
 
 // ioRing is the production ring: uring.IoUring plus the provided-buffer ring
@@ -92,11 +98,6 @@ func newIoUring(entries uint32) (*uring.IoUring, error) {
 	})
 }
 
-func pageRound(n int) int {
-	p := os.Getpagesize()
-	return (n + p - 1) / p * p
-}
-
 // NewQueue maps the queue's memory and prepares its engines; Start runs them.
 func NewQueue(cfg QueueConfig) (*Queue, error) {
 	if cfg.Depth < 1 || cfg.Depth > uapi.UBLK_MAX_QUEUE_DEPTH {
@@ -109,8 +110,8 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 	if cfg.Handler == nil && !zeroCopy {
 		return nil, errors.New("nil handler")
 	}
-	if cfg.DescSize == 0 {
-		cfg.DescSize = int(unsafe.Sizeof(uapi.UblksrvIODesc{}))
+	if cfg.DescSize == 0 && cfg.Flags&uapi.UBLK_F_IO_DESC_SIZE == 0 {
+		cfg.DescSize = 24
 	}
 	if cfg.Threads < 1 {
 		cfg.Threads = 1
@@ -125,85 +126,136 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 		cfg.newRing = defaultRing
 	}
 
-	// The kernel maps queue q's descriptors at q * round_up(4096 * desc size,
-	// PAGE): a stride fixed by UBLK_MAX_QUEUE_DEPTH, not by this queue's
-	// depth (getting this wrong aliased every queue onto queue 0, Critical
-	// Bug #1). The length must be exactly round_up(depth * desc size, PAGE).
-	stride := pageRound(uapi.UBLK_MAX_QUEUE_DEPTH * cfg.DescSize)
-	desc, err := unix.Mmap(cfg.CharFd, int64(cfg.QueueID)*int64(stride), pageRound(cfg.Depth*cfg.DescSize),
-		unix.PROT_READ, unix.MAP_SHARED|unix.MAP_POPULATE)
+	base := int64(0)
+	if zeroCopy {
+		base = cfg.ZeroCopyBase
+	}
+	limits := validation.RequestLimits{Capacity: cfg.Capacity, FileBase: base,
+		LogicalBlockSize: uint64(cfg.LogicalBlockSize), MaxPayload: uint64(cfg.MaxIOSize)}
+	if err := limits.Validate(); err != nil {
+		return nil, fmt.Errorf("queue request limits: %w", err)
+	}
+	// This gate checks descriptor stride, queue ownership, page rounding and
+	// the fixed maximum-depth mmap offset before any mapping or pointer.
+	dl, err := validation.ValidateDescriptorLayout(validation.DescriptorParams{
+		QueueID: uint64(cfg.QueueID), Queues: uint64(cfg.NumQueues), Depth: uint64(cfg.Depth),
+		DescSize: uint64(cfg.DescSize), PageSize: uint64(os.Getpagesize()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("queue descriptor layout: %w", err)
+	}
+	bufBytes, err := validation.BufferSize(uint64(cfg.Depth), uint64(cfg.MaxIOSize), 1)
+	if err != nil {
+		return nil, fmt.Errorf("queue buffer layout: %w", err)
+	}
+	integSize, integBytes := 0, 0
+	if cfg.IntegrityInterval < 0 || cfg.IntegrityMetadata < 0 || (cfg.IntegrityInterval == 0) != (cfg.IntegrityMetadata == 0) {
+		return nil, errors.New("invalid integrity buffer geometry")
+	}
+	if cfg.IntegrityInterval > 0 {
+		integSize, err = validation.BufferSize(uint64(cfg.MaxIOSize/cfg.IntegrityInterval)+1, uint64(cfg.IntegrityMetadata), 1)
+		if err != nil {
+			return nil, fmt.Errorf("integrity tag layout: %w", err)
+		}
+		integBytes, err = validation.BufferSize(uint64(cfg.Depth), uint64(integSize), 1)
+		if err != nil {
+			return nil, fmt.Errorf("integrity queue layout: %w", err)
+		}
+	}
+	desc, err := unix.Mmap(cfg.CharFd, dl.Offset, dl.Size, unix.PROT_READ, unix.MAP_SHARED|unix.MAP_POPULATE)
 	if err != nil {
 		return nil, fmt.Errorf("queue %d: mmap descriptors: %w", cfg.QueueID, err)
 	}
-	maxInt := int(^uint(0) >> 1)
-	if cfg.MaxIOSize > maxInt/cfg.Depth {
+	var bufs, integ []byte
+	cleanup := func() {
 		_ = unix.Munmap(desc)
-		return nil, fmt.Errorf("queue buffer allocation overflows: depth %d, max I/O %d", cfg.Depth, cfg.MaxIOSize)
+		if bufs != nil {
+			_ = unix.Munmap(bufs)
+		}
+		if integ != nil {
+			_ = unix.Munmap(integ)
+		}
 	}
-	// Zero copy needs no data buffers: the bytes never reach the server.
-	var bufs []byte
-	var bufPtr unsafe.Pointer
 	var zc *zeroCopyConfig
 	if zeroCopy {
 		zc = &zeroCopyConfig{fd: cfg.ZeroCopyFile, base: cfg.ZeroCopyBase,
 			auto: cfg.Flags&uapi.UBLK_F_AUTO_BUF_REG != 0}
 	} else {
-		bufs, err = unix.Mmap(-1, 0, cfg.Depth*cfg.MaxIOSize, unix.PROT_READ|unix.PROT_WRITE,
-			unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+		bufs, err = unix.Mmap(-1, 0, bufBytes, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
 		if err != nil {
-			_ = unix.Munmap(desc)
-			return nil, fmt.Errorf("queue %d: allocate %d-byte data buffers: %w", cfg.QueueID, cfg.Depth*cfg.MaxIOSize, err)
+			cleanup()
+			return nil, fmt.Errorf("queue %d: allocate data buffers: %w", cfg.QueueID, err)
 		}
-		bufPtr = unsafe.Pointer(&bufs[0])
 	}
-
-	var integ []byte
-	var integPtr unsafe.Pointer
-	integSize := 0
-	if cfg.IntegrityInterval > 0 && cfg.IntegrityMetadata > 0 {
-		integSize = (cfg.MaxIOSize/cfg.IntegrityInterval + 1) * cfg.IntegrityMetadata
-		integ, err = unix.Mmap(-1, 0, cfg.Depth*integSize, unix.PROT_READ|unix.PROT_WRITE,
-			unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+	if integBytes > 0 {
+		integ, err = unix.Mmap(-1, 0, integBytes, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
 		if err != nil {
-			_ = unix.Munmap(desc)
-			if bufs != nil {
-				_ = unix.Munmap(bufs)
-			}
+			cleanup()
 			return nil, fmt.Errorf("queue %d: allocate integrity buffers: %w", cfg.QueueID, err)
 		}
+	}
+	maps := []validation.Mapping{{Size: uint64(len(desc)), Regions: []validation.Region{
+		{Name: "descriptors", Count: uint64(cfg.Depth), Stride: dl.Stride, Align: 8},
+	}}}
+	if bufs != nil {
+		maps = append(maps, validation.Mapping{Size: uint64(len(bufs)), Regions: []validation.Region{
+			{Name: "data buffers", Count: uint64(cfg.Depth), Stride: uint64(cfg.MaxIOSize), Align: 1},
+		}})
+	}
+	if integ != nil {
+		maps = append(maps, validation.Mapping{Size: uint64(len(integ)), Regions: []validation.Region{
+			{Name: "integrity buffers", Count: uint64(cfg.Depth), Stride: uint64(integSize), Align: 1},
+		}})
+	}
+	if _, err := validation.ValidateLayout(maps); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("mapped queue layout: %w", err)
+	}
+	// Only validated spans become engine pointers.
+	var bufPtr, integPtr unsafe.Pointer
+	if bufs != nil {
+		bufPtr = unsafe.Pointer(&bufs[0])
+	}
+	if integ != nil {
 		integPtr = unsafe.Pointer(&integ[0])
 	}
 
 	q := &Queue{cfg: cfg, desc: desc, bufs: bufs, integ: integ, done: make(chan struct{})}
+	q.capacity.Store(cfg.Capacity)
 	per := (cfg.Depth + cfg.Threads - 1) / cfg.Threads
 	for lo := 0; lo < cfg.Depth; lo += per {
 		q.engines = append(q.engines, newEngine(engineConfig{
-			queueID:       cfg.QueueID,
-			tagLo:         lo,
-			tagHi:         min(lo+per, cfg.Depth),
-			charFd:        cfg.CharFd,
-			desc:          unsafe.Pointer(&desc[0]),
-			descStride:    uintptr(cfg.DescSize),
-			bufs:          bufPtr,
-			bufSize:       cfg.MaxIOSize,
-			userCopy:      cfg.Flags&uapi.UBLK_F_USER_COPY != 0,
-			zeroCopy:      zc,
-			batch:         cfg.Flags&uapi.UBLK_F_BATCH_IO != 0,
-			zoned:         cfg.Flags&uapi.UBLK_F_ZONED != 0,
-			shmem:         cfg.SharedMemory,
-			integ:         integPtr,
-			integSize:     integSize,
-			integInterval: cfg.IntegrityInterval,
-			integMeta:     cfg.IntegrityMetadata,
-			handler:       cfg.Handler,
-			inline:        cfg.Inline,
-			cpus:          cfg.CPUs,
-			logger:        cfg.Logger,
-			newRing:       cfg.newRing,
+			queueID:          cfg.QueueID,
+			capacity:         q.capacity.Load,
+			logicalBlockSize: cfg.LogicalBlockSize,
+			tagLo:            lo,
+			tagHi:            min(lo+per, cfg.Depth),
+			charFd:           cfg.CharFd,
+			desc:             unsafe.Pointer(&desc[0]),
+			descStride:       uintptr(cfg.DescSize),
+			bufs:             bufPtr,
+			bufSize:          cfg.MaxIOSize,
+			userCopy:         cfg.Flags&uapi.UBLK_F_USER_COPY != 0,
+			zeroCopy:         zc,
+			batch:            cfg.Flags&uapi.UBLK_F_BATCH_IO != 0,
+			zoned:            cfg.Flags&uapi.UBLK_F_ZONED != 0,
+			shmem:            cfg.SharedMemory,
+			integ:            integPtr,
+			integSize:        integSize,
+			integInterval:    cfg.IntegrityInterval,
+			integMeta:        cfg.IntegrityMetadata,
+			handler:          cfg.Handler,
+			inline:           cfg.Inline,
+			cpus:             cfg.CPUs,
+			logger:           cfg.Logger,
+			newRing:          cfg.newRing,
 		}))
 	}
 	return q, nil
 }
+
+// SetCapacity updates request validation after a successful UPDATE_SIZE.
+func (q *Queue) SetCapacity(size int64) { q.capacity.Store(size) }
 
 // Start runs the queue's engines and returns once each has submitted a FETCH
 // for every tag it serves. On error the engines that did start are abandoned;

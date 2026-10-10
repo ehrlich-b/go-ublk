@@ -203,6 +203,9 @@ func (d *Device) Resize(newSize int64) error {
 		return fmt.Errorf("resize device %d: %w", d.ID, err)
 	}
 	d.params.Size = newSize
+	for _, q := range d.runners {
+		q.SetCapacity(newSize)
+	}
 	return nil
 }
 
@@ -356,6 +359,9 @@ func Recover(ctx context.Context, id uint32, params DeviceParams, options *Optio
 		return nil, fmt.Errorf("backend size %d does not match device %d's size %d", got, id, devSize)
 	}
 
+	// Keep validation tied to the adopted device, rather than future backend
+	// size changes. Resize updates each running queue explicitly.
+	params.Size = devSize
 	d := newDevice(id, params, options, info.Flags)
 	d.descSize = descSizeOf(info)
 	d.mu.Lock()
