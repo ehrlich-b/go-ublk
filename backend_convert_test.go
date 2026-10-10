@@ -51,6 +51,7 @@ func TestConvertFieldSetCompleteness(t *testing.T) {
 		"Backend":              "typed Backend vs interfaces.Backend; forwarded via DefaultDeviceParams",
 		"Handler":              "data plane only",
 		"Inline":               "data plane only",
+		"Dispatch":             "data plane only",
 		"ThreadsPerQueue":      "data plane, plus UBLK_F_PER_IO_DAEMON in Flags",
 		"SafeStop":             "selects TRY_STOP_DEV in Stop",
 		"Recovery":             "UBLK_F_USER_RECOVERY* in Flags",
