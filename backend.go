@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ehrlich-b/go-ublk/internal/completion"
 	"github.com/ehrlich-b/go-ublk/internal/constants"
 	"github.com/ehrlich-b/go-ublk/internal/ctrl"
 	"github.com/ehrlich-b/go-ublk/internal/logging"
@@ -53,6 +54,9 @@ type Device struct {
 	// kernel, whose queues may then exit before the request returns; the
 	// supervisors must not mistake that for a failure.
 	leaving atomic.Bool
+	// pendingStop retains the exact STOP receipt across timeout and Close.
+	// While unresolved, queues/char fd stay owned and mutations are refused.
+	pendingStop completion.ControlResult
 
 	// done is closed and err set (at most once) when serving ends.
 	doneOnce sync.Once
@@ -958,8 +962,9 @@ func (d *Device) stopTimeout() time.Duration {
 // Stop stops the device: the kernel drains in-flight I/O through the still
 // running queues, removes the block device, and the queues exit. The device
 // stays registered until Close. A stopped device cannot be started again.
-// If the kernel refuses to stop (SafeStop with the device open, or a timeout)
-// the error is returned and the device keeps serving.
+// If the kernel refuses to stop, the error is returned and the device keeps
+// serving. A timeout may leave STOP in flight: resources are retained and
+// Stop or Close must reconcile its final result before another mutation.
 func (d *Device) Stop() error {
 	if d == nil {
 		return ErrInvalidParameters
@@ -979,7 +984,19 @@ func (d *Device) stopLocked() error {
 	default:
 		return fmt.Errorf("device is not started")
 	}
-	controller, err := createController()
+	if d.pendingStop != nil {
+		resolved, err := completion.ReconcileControl(d.pendingStop)
+		if !resolved {
+			return fmt.Errorf("stop outcome pending: %w", err)
+		}
+		d.pendingStop = nil
+		if err != nil {
+			d.leaving.Store(false)
+			return fmt.Errorf("previous stop failed: %w", err)
+		}
+		return d.completeStopLocked()
+	}
+	controller, err := createLifecycleController()
 	if err != nil {
 		return fmt.Errorf("failed to create controller for stop: %w", err)
 	}
@@ -1002,10 +1019,18 @@ func (d *Device) stopLocked() error {
 		err = controller.StopDev(ctx, d.ID)
 	}
 	if err != nil {
-		d.leaving.Store(false)
+		var pending completion.ControlResult
+		if errors.As(err, &pending) {
+			d.pendingStop = pending
+		} else {
+			d.leaving.Store(false)
+		}
 		return fmt.Errorf("failed to stop device: %w", err)
 	}
+	return d.completeStopLocked()
+}
 
+func (d *Device) completeStopLocked() error {
 	close(d.unwatch)
 	if d.metrics != nil {
 		d.metrics.Stop()
@@ -1020,6 +1045,15 @@ func (d *Device) stopLocked() error {
 	}
 	if d.options != nil && d.options.Logger != nil {
 		d.options.Logger.Printf("Device %s stopped", d.Path)
+	}
+	return nil
+}
+
+// Only Stop/Close may reconcile a pending STOP. Other mutations must wait,
+// including after a late success but before the queues have been released.
+func (d *Device) stopMutationGuardLocked() error {
+	if d.pendingStop != nil {
+		return fmt.Errorf("STOP outcome pending; retry Stop or Close: %w", d.pendingStop)
 	}
 	return nil
 }
@@ -1051,7 +1085,7 @@ func (d *Device) Close() error {
 		}
 	}
 
-	controller, err := createController()
+	controller, err := createLifecycleController()
 	if err != nil {
 		return fmt.Errorf("failed to create controller for close: %w", err)
 	}
@@ -1070,6 +1104,18 @@ func (d *Device) Close() error {
 	}
 	return nil
 }
+
+// This private seam drives the high-level lifecycle through a fake control
+// peer without opening /dev/ublk-control. Normal calls use the same factory
+// as creation, so existing controller-acquisition error tests still apply.
+type lifecycleController interface {
+	StopDev(context.Context, uint32) error
+	TryStopDev(context.Context, uint32) error
+	DelDev(context.Context, uint32) error
+	Close() error
+}
+
+var createLifecycleController = func() (lifecycleController, error) { return createController() }
 
 // Done is closed when the device stops serving: after Stop, Close or Detach,
 // when the context given to Start is cancelled, or when a queue fails.

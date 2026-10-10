@@ -185,6 +185,9 @@ func FindDevices(tag uint64) ([]uint32, error) {
 func (d *Device) Resize(newSize int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := d.stopMutationGuardLocked(); err != nil {
+		return err
+	}
 	if d.state != DeviceStateRunning {
 		return fmt.Errorf("device is %s; Resize needs a running device", d.state)
 	}
@@ -226,6 +229,9 @@ const quiesceTimeout = 30 * time.Second
 func (d *Device) Detach() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := d.stopMutationGuardLocked(); err != nil {
+		return err
+	}
 	if d.state != DeviceStateRunning {
 		return fmt.Errorf("device is %s; Detach needs a running device", d.state)
 	}
@@ -405,6 +411,11 @@ func Recover(ctx context.Context, id uint32, params DeviceParams, options *Optio
 // only writes can then match. The memory must stay mapped until
 // UnregisterSharedMemory returns. Returns the region's index.
 func (d *Device) RegisterSharedMemory(mem []byte, readOnly bool) (uint16, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.stopMutationGuardLocked(); err != nil {
+		return 0, err
+	}
 	if !d.Features().Has(FeatureSharedMemoryZC) {
 		return 0, fmt.Errorf("%w: the device was not created with SharedMemoryZeroCopy (kernel 7.1+)", ErrNotImplemented)
 	}
@@ -433,6 +444,11 @@ func (d *Device) RegisterSharedMemory(mem []byte, readOnly bool) (uint16, error)
 // RegisterSharedMemory. The kernel freezes the device's queue while it does,
 // so no request is using the region afterwards.
 func (d *Device) UnregisterSharedMemory(index uint16) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.stopMutationGuardLocked(); err != nil {
+		return err
+	}
 	c, err := createController()
 	if err != nil {
 		return err

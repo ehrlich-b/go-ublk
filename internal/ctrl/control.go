@@ -81,6 +81,7 @@ type InFlightError struct {
 
 	done   chan struct{}
 	result error
+	reaped bool
 }
 
 func (e *InFlightError) Error() string {
@@ -100,6 +101,17 @@ func (e *InFlightError) Result() error {
 		return e.result
 	default:
 		return nil
+	}
+}
+
+// Reaped reports whether the command's final kernel CQE was received. A
+// transport return with no Result is still uncertain even after Done closes.
+func (e *InFlightError) Reaped() bool {
+	select {
+	case <-e.done:
+		return e.reaped
+	default:
+		return false
 	}
 }
 
@@ -326,6 +338,7 @@ func (c *Controller) exec(ctx context.Context, req request) (int32, error) {
 		finished = true
 		if abandoned != nil {
 			abandoned.result = result.err
+			abandoned.reaped = res != nil
 			close(abandoned.done)
 		}
 		mu.Unlock()
