@@ -7,10 +7,10 @@ notoc: true
 wide: true
 ---
 
-One row per item in the kernel's `include/uapi/linux/ublk_cmd.h`. Filter by kind or by go-ublk status, or search by name. Every row has a stable anchor, so `/reference/uapi/#ublk_f_user_recovery` links straight to a flag. Expand **Details** for semantics, dependencies, the introducing commit and go-ublk notes.
+Each `include/uapi/linux/ublk_cmd.h` item has a row and stable anchor, e.g. `/reference/uapi/#ublk_f_user_recovery`. Filter by kind/status or search names. **Details** gives semantics, dependencies, introducing commits, and go-ublk notes.
 
-**Since** is the first mainline release whose header defines the item. A few items were defined before the kernel implemented them (`UBLK_F_SUPPORT_ZERO_COPY` was reserved in 6.0 but only works from 6.15), and the ioctl-encoded `UBLK_U_*` commands date from 6.4 even where the legacy opcode is older; the details say so where it matters. The [kernel version history](/guide/kernel-versions/) tells the same story release by release.
+**Since** means first defined in a mainline header, sometimes before implementation: `UBLK_F_SUPPORT_ZERO_COPY` was reserved in 6.0 but works from 6.15. Encoded `UBLK_U_*` commands date from 6.4; legacy opcodes may be older. Details and the [kernel version history](/guide/kernel-versions/) explain these differences.
 
-**go-ublk** status: *supported* means the library uses or exposes the item today; *partial* means some of its semantics; *missing* means not yet; *n/a* means there is nothing for a server to do.
+**go-ublk** status: *supported* = used/exposed; *partial* = some semantics implemented; *missing* = unimplemented; *n/a* = no server action needed.
 
 {{< uapi-table >}}
