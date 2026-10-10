@@ -177,6 +177,14 @@ benchmark:
 	@echo "Running benchmarks..."
 	$(GOTEST) -bench=. -benchmem ./...
 
+# Fake-ring dispatch bookkeeping; no root or ublk device required on Linux.
+DISPATCH_PACKAGE ?= ./internal/queue
+BENCH_FLAGS ?= -count=3 -benchtime=1s
+.PHONY: benchmark-dispatch
+benchmark-dispatch:
+	$(GOTEST) -run='^TestDispatchHotPathDoesNotAllocate$$' \
+		-bench='^BenchmarkDispatch(Inline|Goroutine|Pool)$$' -benchmem $(BENCH_FLAGS) $(DISPATCH_PACKAGE)
+
 coverage:
 	@echo "Generating coverage report..."
 	$(GOTEST) -coverprofile=coverage.out ./...

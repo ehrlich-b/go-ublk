@@ -212,10 +212,19 @@ func (r *Request) finishResult(res int32, lba uint64, appendResult bool) {
 // Kernels before errno_to_blk_status support in ublk report every failure to
 // the block layer as EIO regardless.
 func Errno(err error) int32 {
+	if err == nil {
+		return 0
+	}
+	// Plain errno values are common handler failures. Avoid allocating the
+	// errors.As target unless the error actually needs unwrapping.
+	if errno, ok := err.(syscall.Errno); ok {
+		if errno > 0 && errno < 4096 {
+			return int32(errno)
+		}
+		return int32(syscall.EIO)
+	}
 	var errno syscall.Errno
 	switch {
-	case err == nil:
-		return 0
 	case errors.As(err, &errno) && errno > 0 && errno < 4096:
 		return int32(errno)
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):

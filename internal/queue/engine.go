@@ -507,6 +507,9 @@ func (e *engine) committed(id uint64, res int32) {
 		e.fail(fmt.Errorf("queue %d: COMMIT_IO_CMDS failed: %w", e.cfg.queueID, syscall.Errno(-res)))
 		return
 	}
+	if len(retry) == 0 {
+		return // A fully consumed command must not copy unrelated pending commits.
+	}
 	unsent := make([]*Request, len(retry))
 	for k, token := range retry {
 		i := int(token.Tag) - e.cfg.tagLo
