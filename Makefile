@@ -188,7 +188,7 @@ benchmark-dispatch:
 # Local gates for dispatch candidates on hosts that cannot run Linux ublk.
 DISPATCH_VM_DIR ?= .scratch/vm-bin
 PORTABLE_PACKAGES = ./internal/completion ./internal/logging ./internal/uapi ./internal/validation
-.PHONY: check-dispatch-linux test-dispatch-portable dispatch-vm-binaries
+.PHONY: check-dispatch-linux test-dispatch-portable test-perf-cleanup dispatch-vm-binaries
 check-dispatch-linux:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOCMD) vet ./...
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) ./... ./examples/...
@@ -198,6 +198,10 @@ test-dispatch-portable:
 	CGO_ENABLED=1 $(GOTEST) -race $(PORTABLE_PACKAGES)
 	$(GOTEST) metrics.go metrics_test.go metrics_percentile_test.go
 	CGO_ENABLED=1 $(GOTEST) -race metrics.go metrics_test.go metrics_percentile_test.go
+
+test-perf-cleanup:
+	bash -n scripts/perf-profile.sh
+	python3 scripts/test-perf-cleanup.py
 
 dispatch-vm-binaries: check-dispatch-linux
 	@mkdir -p $(DISPATCH_VM_DIR)

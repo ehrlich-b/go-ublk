@@ -80,18 +80,54 @@ backing_file=""
 server_stuck=0
 stop_server() {
     local daemon_pid=$server_pid
+    local status=0
+    local daemon_stopped=1
     server_pid=""
     if kill -0 "$daemon_pid" 2>/dev/null; then
-        kill -INT "$daemon_pid"
+        kill -INT "$daemon_pid" || status=1
         # Bound cleanup without SIGKILL or deleting unrelated devices. The
         # example's own shutdown backstop is 15 seconds; allow twice that.
         if ! timeout 30s tail --pid="$daemon_pid" -f /dev/null; then
             server_stuck=1
+            daemon_stopped=0
+            status=1
             echo "perf-profile: daemon $daemon_pid did not stop; inspect its log and device" >&2
-            return 1
         fi
     fi
-    wait "$daemon_pid"
+    if [[ $daemon_stopped == 1 ]]; then
+        wait "$daemon_pid" || status=1
+    fi
+    if [[ -n $device ]]; then
+        if [[ ! $device =~ ^/dev/ublkb([0-9]+)$ ]]; then
+            server_stuck=1
+            echo "perf-profile: cannot verify cleanup of invalid device path: $device" >&2
+            return 1
+        fi
+        local device_id=${BASH_REMATCH[1]}
+        local registration=/sys/class/ublk-char/ublkc$device_id
+        # The block node disappears at STOP_DEV, before DEL_DEV unregisters
+        # the device. Its sysfs character entry tracks registration instead.
+        if [[ ! -d /sys/class/ublk-char ]]; then
+            server_stuck=1
+            echo "perf-profile: cannot verify $device cleanup: ublk-char sysfs class is unavailable" >&2
+            return 1
+        fi
+        if [[ -e $registration || -L $registration ]]; then
+            echo "perf-profile: $device remains registered; deleting device $device_id" >&2
+            # Reap only this run's ID, with a separate bound for STOP/DEL.
+            if ! timeout 30s "$binary" -del "$device_id"; then
+                server_stuck=1
+                status=1
+                echo "perf-profile: failed to delete device $device_id; inspect its log and device" >&2
+            fi
+            if [[ -e $registration || -L $registration ]]; then
+                server_stuck=1
+                status=1
+                echo "perf-profile: device $device_id is still registered after cleanup" >&2
+            fi
+        fi
+    fi
+    return "$status"
 }
 
 cleanup() {
