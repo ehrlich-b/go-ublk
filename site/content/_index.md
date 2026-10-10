@@ -1,8 +1,8 @@
 ---
 title: "ublk"
 description: "How Linux ublk userspace block devices work, from the control plane to zero copy, and the documentation for go-ublk, a pure-Go ublk library."
-heroTitle: "Linux block devices in pure Go"
-heroLede: "The pre-v0.2.0 inline engine reached **1.37M 4 KiB random-read IOPS** on a four-vCPU Apple M4 VM with a RAM backend. No cgo or liburing. [Measurements and conditions](/go-ublk/performance/); benchmarks of the current default engine are pending."
+heroTitle: "Userspace block devices, explained and built in pure Go"
+heroLede: "**ublk** is FUSE for block devices: a userspace process serves `/dev/ublkbN` over io_uring, in mainline since Linux 6.0. This site explains how it works for any language, and is home to **go-ublk**, a ublk library in pure Go with no cgo and no liburing. Its earlier inline engine reached **1.37M 4 KiB random-read IOPS** on a four-vCPU VM ([conditions](/go-ublk/performance/); the current engine is being re-benchmarked)."
 heroLinks:
   - label: "Learn how ublk works"
     url: "/guide/"
