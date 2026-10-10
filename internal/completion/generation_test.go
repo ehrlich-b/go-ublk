@@ -98,6 +98,34 @@ func TestGenerationExhaustionAndZeroHandle(t *testing.T) {
 	}
 }
 
+func TestBeginPhaseRejectsRetiredHandlesBeforeFieldReset(t *testing.T) {
+	for _, phase := range []uint32{Dispatching, Async} {
+		var o Ownership
+		if err := o.BeginPhase(Async); err != nil {
+			t.Fatal(err)
+		}
+		old := o.Generation()
+		if err := FinishGeneration(&o, old, func() {}, func() {}); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.BeginPhase(phase); err != nil {
+			t.Fatal(err)
+		}
+		if o.Generation() != old+1 || o.Load() != phase {
+			t.Fatal("wrong delivery identity or phase")
+		}
+		if err := Access(&o, old, func() error { t.Error("retired handle accessed recycled fields"); return nil }); !errors.Is(err, ErrStaleRequest) {
+			t.Fatal(err)
+		}
+		if err := FinishGeneration(&o, old, func() { t.Error("retired handle staged a result") }, func() { t.Error("retired handle published") }); !errors.Is(err, ErrStaleRequest) {
+			t.Fatal(err)
+		}
+		if err := FinishGeneration(&o, o.Generation(), func() {}, func() {}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestBufferPanicReleasesOwnership(t *testing.T) {
 	var o Ownership
 	_ = o.Begin()
@@ -146,13 +174,11 @@ func TestStaleHandlesRaceWithReuse(t *testing.T) {
 	close(start)
 	for range 1000 {
 		_ = FinishGeneration(&o, o.Generation(), func() {}, func() {})
-		o.Store(Idle)
-		_ = o.Begin()
+		_ = o.BeginPhase(Async)
 		for i := range payload {
 			payload[i] = 0xcd
 		}
 		result = 0
-		o.Store(Async)
 	}
 	wg.Wait()
 	if effects.Load() != 0 || result != 0 || !bytes.Equal(payload[:], bytes.Repeat([]byte{0xcd}, len(payload))) {

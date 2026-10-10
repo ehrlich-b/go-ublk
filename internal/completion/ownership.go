@@ -41,11 +41,18 @@ func (o *Ownership) Store(phase uint32) {
 // Begin starts a delivery before any recycled fields or buffers are exposed.
 // Never wrap: a retired generation must not authenticate a retained handle.
 func (o *Ownership) Begin() error {
+	return o.BeginPhase(Idle)
+}
+
+// BeginPhase advances the generation and selects its initial phase in one
+// store. The engine fills recycled fields before exposing the new handle;
+// retired handles already fail the generation check while it does so.
+func (o *Ownership) BeginPhase(phase uint32) error {
 	word := o.word.Load()
 	if word>>stateBits == MaxGeneration {
 		return ErrGenerationExhausted
 	}
-	o.word.Store((word>>stateBits + 1) << stateBits)
+	o.word.Store((word>>stateBits+1)<<stateBits | uint64(phase))
 	return nil
 }
 
@@ -74,7 +81,7 @@ func claim(state *Ownership, generation uint64, inline, async uint32) (uint64, e
 			return 0, ErrAlreadyCompleted
 		}
 		if state.word.CompareAndSwap(word, claimed) {
-			return base, nil
+			return claimed, nil
 		}
 	}
 }
@@ -82,12 +89,15 @@ func claim(state *Ownership, generation uint64, inline, async uint32) (uint64, e
 // FinishGeneration claims the exact generation before staging results or
 // touching borrowed data. Publication follows staging; rejection has no effect.
 func FinishGeneration(state *Ownership, generation uint64, stage, enqueue func()) error {
-	base, err := claim(state, generation, completingInline, completingAsync)
+	claimed, err := claim(state, generation, completingInline, completingAsync)
 	if err != nil {
 		return err
 	}
 	stage()
-	if state.word.CompareAndSwap(base|uint64(completingInline), base|uint64(Done)) {
+	base := generation << stateBits
+	// An async claim cannot become inline. Avoid a guaranteed-failing RMW
+	// (and its exclusive cache-line acquisition) on every async completion.
+	if claimed == base|uint64(completingInline) && state.word.CompareAndSwap(claimed, base|uint64(Done)) {
 		return nil
 	}
 	state.word.Store(base | uint64(Queued))
@@ -99,12 +109,13 @@ func FinishGeneration(state *Ownership, generation uint64, stage, enqueue func()
 // claim them until it returns. Slices must not escape the callback. A panic
 // releases ownership before propagating to the handler's recovery path.
 func Access(state *Ownership, generation uint64, use func() error) error {
-	base, err := claim(state, generation, accessingInline, accessingAsync)
+	claimed, err := claim(state, generation, accessingInline, accessingAsync)
 	if err != nil {
 		return err
 	}
+	base := generation << stateBits
 	defer func() {
-		if !state.word.CompareAndSwap(base|uint64(accessingInline), base|uint64(Dispatching)) {
+		if claimed == base|uint64(accessingAsync) || !state.word.CompareAndSwap(claimed, base|uint64(Dispatching)) {
 			state.word.Store(base | uint64(Async))
 		}
 	}()

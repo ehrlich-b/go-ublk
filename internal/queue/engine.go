@@ -734,7 +734,11 @@ func (e *engine) dispatch(i int) {
 	tag := i + e.cfg.tagLo
 	d := e.descriptor(tag)
 	r := &e.reqs[i]
-	if err := r.state.Begin(); err != nil {
+	phase := reqAsync
+	if e.cfg.inline {
+		phase = reqDispatching
+	}
+	if err := r.state.BeginPhase(phase); err != nil {
 		e.fail(err)
 		return
 	}
@@ -812,14 +816,12 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 	}
 
 	if e.cfg.inline {
-		r.state.Store(reqDispatching)
 		e.call(r)
 		if completion.ReturnInline(&r.state) {
 			e.commit(r) // completed before the handler returned
 		}
 		return
 	}
-	r.state.Store(reqAsync)
 	go e.call(r)
 }
 
@@ -827,15 +829,18 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 // the handler fails the request with EIO instead of killing the server with
 // I/O in flight.
 func (e *engine) call(r *Request) {
-	handle := r.Handle()
+	// Recovery only needs identity and log fields. Avoid copying the full
+	// public metadata snapshot onto every handler goroutine's stack.
+	generation := r.state.Generation()
+	queue, tag, op := r.Queue, r.Tag, r.Op
 	defer func() {
 		if p := recover(); p != nil {
 			if e.cfg.logger != nil {
-				e.cfg.logger.Printf("ublk: handler panic on queue %d tag %d %s: %v", handle.Queue, handle.Tag, handle.Op, p)
+				e.cfg.logger.Printf("ublk: handler panic on queue %d tag %d %s: %v", queue, tag, op, p)
 			}
 			// The handler may have completed before panicking, allowing reuse.
 			// Recovery must never fail a later delivery on its behalf.
-			_ = handle.Complete(syscall.EIO)
+			_ = (RequestHandle{r: r, generation: generation}).Complete(syscall.EIO)
 		}
 	}()
 	if e.cfg.userCopy && r.Data != nil && r.Flags&FlagSharedMemory == 0 && (r.Op == OpWrite || r.Op == OpZoneAppend) {

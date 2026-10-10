@@ -321,7 +321,8 @@ no Linux binary was executed locally.
 These budgets check functional correctness of completion handling and do not
 replace the larger assurance campaigns.
 
-The completion benchmark was added before changing ownership and run against
+Historical scalar result at `a5af4a4`: the completion benchmark was added
+before changing ownership and run against
 `8d14671`'s code, then rerun after the change. It measures dispatch, completion
 claim and inline publication without kernel setup. Existing portable UAPI
 microbenchmarks were also run before/after. There is no new mutex or per-request
@@ -354,7 +355,7 @@ Logs, native baseline negative controls and build receipts are in `.scratch/`.
 The baseline controls use `8d14671`'s exact completion code and raw slices: both
 fail the stale-rejection oracle. The new generation regressions pass natively.
 
-`bin/ublk-suite` and `.scratch/vm-bin/*.test` are rebuilt for Linux amd64. The
+`.scratch/vm-bin/ublk-suite` and `.scratch/vm-bin/*.test` are rebuilt for Linux amd64. The
 manifest uses paths relative to the destination directory: copy `ublk-suite`
 and the test files beside `SHA256SUMS`/`REVISION`. On the coordinator's disposable
 VM, from that directory:
@@ -371,6 +372,77 @@ GOMAXPROCS=2 ./ctrl-fuzz.test -test.run='^$' -test.parallel=2 -test.fuzz='^FuzzC
 ```
 
 VM runtime/checkptr and the real-kernel suite on this candidate are pending.
+
+### Generation-handle performance follow-up (2026-10-10)
+
+The coordinator's Debian 13 / Linux 6.12.111 fio runs found an 8–13% IOPS
+regression and roughly 50% higher p99 at `a5af4a4`, beyond the approximately
+3% A/A noise floor. The scalar benchmark above reuses an existing goroutine;
+it misses stack growth in the default per-request goroutine path.
+
+The synchronous adapter nested a buffer borrow around backend I/O, released
+it, then claimed completion separately. Both async release paths also attempted
+an inline CAS that was guaranteed to fail. Full metadata snapshots enlarged
+the adapter and engine recovery frames. Linux amd64 disassembly shows adapter
+frames of 168 / 320 / 160 bytes and engine-call frames of 64 / 224 / 80 bytes
+for `8d14671` / `a5af4a4` / this fix. In a fresh-goroutine CPU profile,
+`runtime.newstack` accounts for 62.55% of sampled CPU before the fix and 0.14%
+after; `runtime.copystack` accounts for 57.23% before. Escape analysis finds no
+per-request handle or callback heap allocation. State words are embedded in
+168-byte requests rather than a packed atomic array; no padding was added.
+
+The adapter now claims one generation before backend I/O and keeps that claim
+through result staging and copy-out. Backend/observer panics stage EIO and
+publish once before re-entering engine recovery. Recovery captures only the
+generation and log fields. Async completion/access skip the failed inline CAS.
+`BeginPhase` combines generation advance and initial phase selection; the
+engine initializes request fields before exposing the new handle. Async
+ownership now needs three atomic writes/RMWs per delivery, versus eight in
+`a5af4a4` and four in `8d14671`, excluding the common completion-list operations.
+Generation/phase still share one atomic word, generations never wrap, and
+stale handles still fail before any recycled field or buffer access.
+
+[Parallel ownership benchmarks](../internal/completion/parallel_bench_test.go)
+include two depth-64 queues with interleaved tags and a separate queue/handler
+handoff. [Adapter benchmarks](../internal/queue/adapter_bench_test.go) compare
+inline/async read/write bookkeeping and fresh goroutines at depth 64. The
+fresh-goroutine benchmark's median ns/request (three 500 ms samples, CPU
+1/2/4/8, Go 1.26.2, Darwin arm64 Apple M4, `taskpolicy -b nice -n 15`, `-p 2`):
+
+| Build | CPU 1 | CPU 2 | CPU 4 | CPU 8 |
+|---|---:|---:|---:|---:|
+| `8d14671` | 751.1 | 560.1 | 404.0 | 346.4 |
+| `a5af4a4` | 2554 | 1673 | 1131 | 1250 |
+| Fixed | 748.3 | 535.6 | 398.2 | 348.9 |
+
+For this Darwin adapter comparison, each revision's actual adapter, request,
+ownership and `engine.call` code was copied into a scratch harness. Linux
+copy/wake callbacks were stubbed; the completion-list CAS and sleeping check
+were retained. The backend returns the full length without copying data.
+All variants used the same harness and ran serially. The benchmark's goroutine
+launch/channel machinery allocates 48 B / 2 objects per request in all builds;
+the existing handle/buffer hot-path allocation gates still require zero.
+Sources, timing logs, CPU profiles and escape-analysis receipts remain under
+`.scratch/perf-*`. These are local performance findings, not measured Linux
+fio results or a market-ranking claim. The coordinator must rerun the same
+interleaved fio protocol against `.scratch/ublk-mem-fixed` to establish whether
+the end-to-end regression is within its noise floor.
+
+Functional correctness gates for this fix pass: Darwin portable tests and
+race tests; Linux amd64 build, vet and normal/checkptr test compilation;
+30-second fuzz budgets for `FuzzCompletionSchedule` (490,284 executions) and
+`FuzzRequestRange` (1,269,786 executions). Native Linux queue tests and fio
+remain the coordinator's runtime gates.
+
+The refreshed `.scratch/vm-bin/` contains the functional test binaries, suite,
+`queue-bench.test` without checkptr instrumentation, and `ublk-mem-fixed`.
+`SHA256SUMS` uses their exact basenames as copied together into one directory.
+The standalone `.scratch/ublk-mem-fixed` has identical bytes. For native Linux
+performance comparison (without requiring a Go toolchain):
+
+```sh
+./queue-bench.test -test.run='^$' -test.bench='BenchmarkBackend(Parallel|Goroutines)$' -test.cpu=1,2,4,8 -test.benchtime=500ms -test.count=3
+```
 
 ## Coverage limits and documentation corrections
 
