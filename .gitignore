@@ -61,3 +61,6 @@ site/public/
 site/resources/
 site/release/
 site/.hugo_build.lock
+
+# Local assurance notes and scratch artifacts
+.scratch/
