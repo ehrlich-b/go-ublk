@@ -1,6 +1,7 @@
 package uring
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/bits"
 	"sync/atomic"
@@ -8,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ehrlich-b/go-ublk/internal/validation"
 )
 
 // Memory ordering
@@ -193,40 +196,67 @@ func (r *IoUring) mapRings(p *ioUringParams) error {
 	if r.flags&IORING_SETUP_CQE32 != 0 {
 		r.cqeShift = 1
 	}
-	sqSize := int(p.sqOff.array + p.sqEntries*4)
-	cqSize := int(p.cqOff.cqes + p.cqEntries<<(4+r.cqeShift))
-	if r.singleMmap {
-		sqSize = max(sqSize, cqSize)
+	layout := validation.RingParams{
+		SQ: validation.RingOffsets{Head: uint64(p.sqOff.head), Tail: uint64(p.sqOff.tail),
+			Mask: uint64(p.sqOff.ringMask), Entries: uint64(p.sqOff.ringEntries),
+			Flags: uint64(p.sqOff.flags), Aux: uint64(p.sqOff.dropped), Array: uint64(p.sqOff.array)},
+		CQ: validation.RingOffsets{Head: uint64(p.cqOff.head), Tail: uint64(p.cqOff.tail),
+			Mask: uint64(p.cqOff.ringMask), Entries: uint64(p.cqOff.ringEntries),
+			Flags: uint64(p.cqOff.flags), Aux: uint64(p.cqOff.overflow), Array: uint64(p.cqOff.cqes)},
+		SQGeometry: validation.RingGeometry{Entries: uint64(p.sqEntries), MappedEntries: uint64(p.sqEntries), Mask: uint64(p.sqEntries - 1)},
+		CQGeometry: validation.RingGeometry{Entries: uint64(p.cqEntries), MappedEntries: uint64(p.cqEntries), Mask: uint64(p.cqEntries - 1)},
+		SQEStride:  uint64(64) << r.sqeShift, CQEStride: uint64(16) << r.cqeShift,
+		SingleMmap: r.singleMmap,
 	}
 	var err error
-	if r.sqRing, err = mmapShared(r.fd, IORING_OFF_SQ_RING, sqSize); err != nil {
+	layout.SQSize, layout.CQSize, layout.SQESize, err = validation.RingSizes(layout)
+	if err != nil {
+		return fmt.Errorf("ring layout: %w", err)
+	}
+	checked, err := validation.ValidateRingLayout(layout)
+	if err != nil {
+		return fmt.Errorf("ring layout: %w", err)
+	}
+	if r.sqRing, err = mmapShared(r.fd, IORING_OFF_SQ_RING, checked.Sizes[0]); err != nil {
 		return fmt.Errorf("mmap SQ ring: %w", err)
 	}
 	if r.singleMmap {
 		r.cqRing = r.sqRing
-	} else if r.cqRing, err = mmapShared(r.fd, IORING_OFF_CQ_RING, cqSize); err != nil {
+	} else if r.cqRing, err = mmapShared(r.fd, IORING_OFF_CQ_RING, checked.Sizes[1]); err != nil {
 		return fmt.Errorf("mmap CQ ring: %w", err)
 	}
-	if r.sqeRing, err = mmapShared(r.fd, IORING_OFF_SQES, int(p.sqEntries)<<(6+r.sqeShift)); err != nil {
+	if r.sqeRing, err = mmapShared(r.fd, IORING_OFF_SQES, checked.Sizes[2]); err != nil {
 		return fmt.Errorf("mmap SQEs: %w", err)
 	}
+	// Check actual spans before reading even the mask/count words. Byte reads
+	// avoid forming pointers into untrusted geometry during validation.
+	layout.SQSize, layout.CQSize, layout.SQESize = uint64(len(r.sqRing)), uint64(len(r.cqRing)), uint64(len(r.sqeRing))
+	if _, err = validation.ValidateRingLayout(layout); err != nil {
+		return fmt.Errorf("mapped ring layout: %w", err)
+	}
+	word := func(b []byte, off uint64) uint64 { return uint64(binary.NativeEndian.Uint32(b[off : off+4])) }
+	layout.SQGeometry.Mask = word(r.sqRing, layout.SQ.Mask)
+	layout.SQGeometry.MappedEntries = word(r.sqRing, layout.SQ.Entries)
+	layout.CQGeometry.Mask = word(r.cqRing, layout.CQ.Mask)
+	layout.CQGeometry.MappedEntries = word(r.cqRing, layout.CQ.Entries)
+	if _, err = validation.ValidateRingLayout(layout); err != nil {
+		return fmt.Errorf("mapped ring geometry: %w", err)
+	}
+	// All offsets, words, masks and array spans have passed the pure gate.
 	sq := unsafe.Pointer(&r.sqRing[0])
-	r.sqHead = (*uint32)(unsafe.Add(sq, p.sqOff.head))
-	r.sqTail = (*uint32)(unsafe.Add(sq, p.sqOff.tail))
-	r.sqFlags = (*uint32)(unsafe.Add(sq, p.sqOff.flags))
-	r.sqMask = *(*uint32)(unsafe.Add(sq, p.sqOff.ringMask))
-	r.sqEntries = p.sqEntries
+	r.sqHead = (*uint32)(unsafe.Add(sq, layout.SQ.Head))
+	r.sqTail = (*uint32)(unsafe.Add(sq, layout.SQ.Tail))
+	r.sqFlags = (*uint32)(unsafe.Add(sq, layout.SQ.Flags))
+	r.sqMask, r.sqEntries = uint32(layout.SQGeometry.Mask), p.sqEntries
 	r.sqes = unsafe.Pointer(&r.sqeRing[0])
 	cq := unsafe.Pointer(&r.cqRing[0])
-	r.cqHead = (*uint32)(unsafe.Add(cq, p.cqOff.head))
-	r.cqTail = (*uint32)(unsafe.Add(cq, p.cqOff.tail))
-	r.cqOverflow = (*uint32)(unsafe.Add(cq, p.cqOff.overflow))
-	r.cqMask = *(*uint32)(unsafe.Add(cq, p.cqOff.ringMask))
-	r.cqEntries = p.cqEntries
-	r.cqes = unsafe.Add(cq, p.cqOff.cqes)
-	// Map SQ slot i to SQE i once, as liburing does; the array is never
-	// written again, so a submission costs no indirection store.
-	array := unsafe.Slice((*uint32)(unsafe.Add(sq, p.sqOff.array)), p.sqEntries)
+	r.cqHead = (*uint32)(unsafe.Add(cq, layout.CQ.Head))
+	r.cqTail = (*uint32)(unsafe.Add(cq, layout.CQ.Tail))
+	r.cqOverflow = (*uint32)(unsafe.Add(cq, layout.CQ.Aux))
+	r.cqMask, r.cqEntries = uint32(layout.CQGeometry.Mask), p.cqEntries
+	r.cqes = unsafe.Add(cq, layout.CQ.Array)
+	// Map SQ slot i to SQE i once; submission needs no indirection store.
+	array := unsafe.Slice((*uint32)(unsafe.Add(sq, layout.SQ.Array)), p.sqEntries)
 	for i := range array {
 		array[i] = uint32(i)
 	}

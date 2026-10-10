@@ -7,6 +7,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ehrlich-b/go-ublk/internal/validation"
 )
 
 // register calls io_uring_register(2), retrying EINTR (a failed registration
@@ -170,7 +172,16 @@ func (r *IoUring) RegisterBufRing(bgid uint16, entries uint32) (*BufRing, error)
 	if entries == 0 || entries&(entries-1) != 0 || entries > 32768 {
 		return nil, fmt.Errorf("buffer ring of %d entries: need a power of two <= 32768: %w", entries, unix.EINVAL)
 	}
-	mem, err := AllocOffHeap(int(entries) * int(unsafe.Sizeof(bufRingEntry{})))
+	layout, err := validation.ValidateLayout([]validation.Mapping{
+		{Size: uint64(entries) * 16, Regions: []validation.Region{
+			{Name: "buffer entries", Count: uint64(entries), Stride: 16, Align: 8},
+			{Name: "buffer tail word", Offset: 12, Count: 1, Stride: 4, Align: 4},
+		}},
+	}, validation.RingGeometry{Entries: uint64(entries), MappedEntries: uint64(entries), Mask: uint64(entries - 1)})
+	if err != nil {
+		return nil, fmt.Errorf("buffer ring layout: %w", err)
+	}
+	mem, err := AllocOffHeap(layout.Sizes[0])
 	if err != nil {
 		return nil, err
 	}
