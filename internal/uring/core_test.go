@@ -212,7 +212,9 @@ func TestNopRoundTrips(t *testing.T) {
 		if r.CQReady() != 0 || r.SQSpaceLeft() != 8 {
 			t.Errorf("flags %#x: CQReady %d, SQSpaceLeft %d after draining", flags, r.CQReady(), r.SQSpaceLeft())
 		}
-		if (r.BigCQE(&CQE{}) == nil) == (flags&IORING_SETUP_CQE32 != 0) {
+		// BigCQE reinterprets ring memory; hand it a full CQE32 so checkptr sees one allocation.
+		var big CQE32
+		if (r.BigCQE(&big.CQE) == nil) == (flags&IORING_SETUP_CQE32 != 0) {
 			t.Errorf("flags %#x: BigCQE availability wrong", flags)
 		}
 	}
