@@ -65,7 +65,7 @@ Before 6.5, the unknown opcode usually returns `-ENODEV`: the driver looks up `d
 | 2 | `UBLK_F_NEED_GET_DATA` | 6.0 | Deliver WRITEs without data; server supplies a buffer with `NEED_GET_DATA` | Cleared by any non-copy mode | [Data copy](/guide/data-copy/) |
 | 3 | `UBLK_F_USER_RECOVERY` | 6.1 | Keep the device across a server exit; recover with a new server | Dropped for unprivileged | [Recovery](/guide/recovery/) |
 | 4 | `UBLK_F_USER_RECOVERY_REISSUE` | 6.1 | On server exit, requeue I/O the server had received instead of failing it | `USER_RECOVERY`; not with `FAIL_IO` | [Recovery](/guide/recovery/) |
-| 5 | `UBLK_F_UNPRIVILEGED_DEV` | 6.3 | Device created and controlled by a non-root owner | Excludes user copy and zero copy | [Unprivileged](/guide/unprivileged/) |
+| 5 | `UBLK_F_UNPRIVILEGED_DEV` | 6.3 | Device created and controlled by a non-root owner | Excludes user copy and fixed-buffer zero copy | [Unprivileged](/guide/unprivileged/) |
 | 6 | `UBLK_F_CMD_IOCTL_ENCODE` | 6.4 | Commands use ioctl-encoded `UBLK_U_*` opcodes | Forced on | below |
 | 7 | `UBLK_F_USER_COPY` | 6.5 | Server copies data with `pread`/`pwrite` on `/dev/ublkcN` | Excludes unprivileged | [Data copy](/guide/data-copy/) |
 | 8 | `UBLK_F_ZONED` | 6.6 | Zoned block device: zone ops, `REPORT_ZONES`, zone append | `USER_COPY` or `SUPPORT_ZERO_COPY` | [Zoned](/guide/zoned/) |
@@ -125,7 +125,7 @@ Unprivileged devices lose `USER_RECOVERY`/`REISSUE` silently at `ADD_DEV`; inspe
 
 go-ublk checks requested features against `GET_FEATURES` before `ADD_DEV`. Missing flags fail `Create` with a named error wrapping `syscall.EOPNOTSUPP`. It also checks the returned flags, except that privileged callers may have `UNPRIVILEGED_DEV` cleared. Before 6.5, only this post-creation check is available.
 
-`DeviceParams` maps options to flags: `Recovery` selects the USER_RECOVERY family; other options are `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (PER_IO_DAEMON), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan`, and `IODescSize`. When supported, go-ublk also requests UPDATE_SIZE for `Device.Resize`, QUIESCE for recoverable devices' `Device.Detach`, and AUTO_BUF_REG for zero copy. These add no protocol cost. It always uses ioctl-encoded commands without requesting the forced CMD_IOCTL_ENCODE or URING_CMD_COMP_IN_TASK bits.
+`DeviceParams` maps options to flags: `Recovery` selects the USER_RECOVERY family; other options are `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (PER_IO_DAEMON), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan`, and `IODescSize`. When supported, go-ublk also requests UPDATE_SIZE for `Device.Resize`, QUIESCE for recoverable devices' `Device.Detach`, and AUTO_BUF_REG for zero copy. These add no protocol cost. It uses ioctl-encoded commands and adds CMD_IOCTL_ENCODE during negotiation; it does not request URING_CMD_COMP_IN_TASK.
 
 `ublk.Probe()` reports what the running kernel supports, and `Device.Features()` what a device was granted.
 
