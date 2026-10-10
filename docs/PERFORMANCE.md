@@ -53,11 +53,25 @@ Darwin numbers are userspace bookkeeping measurements, not Linux results.
 Go 1.26.2, Darwin arm64, Apple M4, `GOMAXPROCS=2`,
 `taskpolicy -b nice -n 15`, three serial samples per mode:
 
-| Mode | Initial 500 ms samples, ns/op | Final 1 s samples, ns/op | B/op | allocs/op |
-|---|---|---|---:|---:|
-| Inline | 180.5, 151.1, 158.8 | 187.6, 186.1, 199.3 | 0 | 0 |
-| Goroutine | 914.7, 936.2, 1000 | 1054, 1141, 1116 | 24 | 1 |
-| Pool | 1005, 832.3, 913.0 | 958.4, 986.6, 1041 | 0 | 0 |
+| Mode | Final 1 s samples, ns/op | B/op | allocs/op |
+|---|---|---:|---:|
+| Inline | 104.0, 145.2, 167.0 | 0 | 0 |
+| Goroutine | 1183, 1103, 1101 | 24 | 1 |
+| Pool | 1050, 998.8, 908.1 | 0 | 0 |
+
+Earlier passes, with the same allocation counts:
+
+| Pass | Inline ns/op | Goroutine ns/op | Pool ns/op |
+|---|---|---|---|
+| Initial, 500 ms | 180.5, 151.1, 158.8 | 914.7, 936.2, 1000 | 1005, 832.3, 913.0 |
+| Errno/batch fixes, 1 s | 187.6, 186.1, 199.3 | 1054, 1141, 1116 | 958.4, 986.6, 1041 |
+| Preserved handoff layout, 1 s | 185.2, 195.2, 197.7 | 1199, 1305, 1311 | 1181, 1137, 1130 |
+
+The final implementation stores pool state at the end of the engine and
+selects dispatch using the mode byte beside `inline` in its configuration.
+Goroutine dispatch does not load the pool channel. A local comparison with
+`1c80053` verifies that configuration size and the offsets of `handlers`,
+`head`, `sleeping` and `wakeMu` match the base.
 
 No timing win is claimed from these samples. All raw outputs and the source
 copy generator are in `.scratch/dispatch-*.log` and
@@ -95,6 +109,8 @@ The complete compiler receipts are `.scratch/escapes-linux.log`; compiler
 escape diagnostics alone are not an allocation count. The zero-allocation
 gate measures the successful non-batch dispatch path. Batch allocation
 removal needs a separate ownership-preserving design and VM validation.
+The plain-errno allocation regression fails against the pre-fix source with
+one allocation in each case, and passes against the final source with zero.
 
 ## VM profiling
 

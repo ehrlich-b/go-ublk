@@ -136,9 +136,7 @@ type engine struct {
 	tags []uint8
 	live int // tags not yet aborted or orphaned
 
-	handlers   atomic.Int32  // requests handed to the handler and not yet committed
-	work       chan *Request // pool jobs; allocated once, sized to the tag range
-	workClosed bool          // engine-owned teardown guard
+	handlers atomic.Int32 // requests handed to the handler and not yet committed
 
 	// Completions from other goroutines: a lock-free stack, drained by the
 	// engine. sleeping is set while the engine may block in the kernel; a
@@ -166,6 +164,10 @@ type engine struct {
 	testBeforeSleep func()
 	err             error
 	done            chan struct{}
+	// Keep pool-only state after the existing completion handoff fields so
+	// opting in does not change their placement in goroutine/inline engines.
+	work       chan *Request // pool jobs; allocated once, sized to the tag range
+	workClosed bool          // engine-owned teardown guard
 }
 
 func newEngine(cfg engineConfig) *engine {
@@ -830,7 +832,7 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 		}
 		return
 	}
-	if e.work != nil {
+	if e.cfg.dispatch == DispatchPool {
 		// At most one uncompleted job per tag can be queued. The depth-sized
 		// channel keeps the engine running even while every worker blocks.
 		e.work <- r
