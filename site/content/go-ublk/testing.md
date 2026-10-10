@@ -5,7 +5,7 @@ description: "How go-ublk is tested, from unit tests to crash and power-fail ora
 weight: 70
 ---
 
-A block device that returns the wrong bytes is worse than one that returns errors, so go-ublk's testing is organized around one question: can this test fail? Every harness below that judges data correctness was first shown to catch an injected fault.
+Data-correctness harnesses include injected-fault controls: a passing byte comparison matters only if the verifier can detect corruption.
 
 ## Layers
 
@@ -14,7 +14,7 @@ A block device that returns the wrong bytes is worse than one that returns error
 | Unit tests | UAPI struct layouts and every constant against fixtures compiled from the 7.3-rc5 C header; ioctl encodings; the io_uring core (SQE layouts, real rings, registration, CQ overflow, a 500-ring leak test); every control command against a fake driver; the queue engine against a fake-kernel model of ublk_drv (copy, user copy, NEED_GET_DATA, zero copy with auto and manual registration, batch I/O with partial commits, shared memory, stop and abandon, errno mapping, a deterministic lost-wakeup test); both example backends | `make test-unit`, any Linux box; CI on every push |
 | Race and static checks | `go test -race`, `gofmt`, `go vet` | CI |
 | Fuzzing | The UAPI decoders, the control-plane decoders, and `FuzzEngine`, which drives the real engine through random request, completion and shutdown scripts against the fake kernel | CI (15 s per target), `make test-uapi-fuzz` |
-| Conformance suite | `ublk-suite`: about 60 real-kernel tests — integrity across queue/depth/block-size combinations, boundaries, flush, FUA, discard and write-zeroes up to 5 GiB, errno propagation, ext4 and xfs, every feature (recovery after SIGKILL, Detach/Recover handoff, zero copy, batch I/O, zoned, integrity, shared memory, unprivileged, resize, safe stop, partition scan), teardown under load, leaks, concurrent creates, chaos. One JSON result per test | `make suite`, then run the binary as root on a disposable machine |
+| Conformance suite | `ublk-suite`: about 60 real-kernel tests: integrity across queue/depth/block-size combinations, boundaries, flush, FUA, discard and write-zeroes up to 5 GiB, errno propagation, ext4 and xfs, every feature (recovery after SIGKILL, Detach/Recover handoff, zero copy, batch I/O, zoned, integrity, shared memory, unprivileged, resize, safe stop, partition scan), teardown under load, leaks, concurrent creates, chaos. One JSON result per test | `make suite`, then run the binary as root on a disposable machine |
 | Kernel matrix | `test/matrix` boots `ublk-suite` under mainline kernels 6.0–7.3-rc and the current kernels of Ubuntu, Debian, Fedora, RHEL-family, openSUSE, Arch and Amazon Linux, in QEMU (TCG locally, KVM in CI) | [compatibility matrix](/reference/matrix/) |
 | Kernel integration | Device creation through the public API on a real kernel, including full-size (1 MiB) requests on both startup paths | disposable VM, root, `GO_UBLK_DISPOSABLE_TEST=1 make test-large-io-kernel` |
 | End to end | I/O through `/dev/ublkbN` with `dd` and `fio` | `make vm-simple-e2e`, `make vm-e2e` |
@@ -29,18 +29,18 @@ A block device that returns the wrong bytes is worse than one that returns error
 
 ### The crash oracle
 
-The crash and power-fail tests have to judge data after the process that wrote it (or the whole machine) has died, so the expected content cannot live in memory:
+Crash oracles must recover expected data after the writer or machine dies:
 
-- Every block is **self-describing**: a magic number, its own block index, a generation number, and a payload derived from both. A block found at the wrong offset is *aliased*; a block whose payload disagrees with its header is *torn*. Neither verdict needs remembered state.
-- One region is rewritten generation by generation, each pass followed by `fdatasync`, and only then is a **durability witness** advanced on disk (fsync, rename, directory fsync, so the witness is itself crash-safe). After the crash, any block older than the witness is a *lost* acknowledged write. The driver waits for several flushed generations before crashing, because with a witness of 1 the requirement is vacuous.
-- A second region is never synced, so every crash lands with unflushed writes in flight, striped one writer per block so "torn" is a real verdict, not a race.
-- A self-test injects a lost, an aliased and a torn block into a plain file and checks that each is caught, and the power-fail verification re-checks the surviving image against an over-claiming witness and requires it to fail.
+- Blocks contain a magic number, block index, generation, and derived payload. Wrong location means aliased; payload/header disagreement means torn. Neither needs remembered state.
+- Rewrite one region by generation, fdatasync each pass, then advance a disk durability witness using fsync/rename/directory fsync. Post-crash blocks older than the witness are lost acknowledged writes. Require several flushed generations before crashing; witness 1 proves nothing.
+- Leave another region unsynced, with one writer per block, to ensure unflushed I/O without mistaking write races for tears.
+- Self-tests inject lost/aliased/torn blocks into a plain file. Power-fail checks also require an overclaiming witness to reject the surviving image.
 
-Each cycle also asserts recovery: the writer blocked on the dead device gets an error rather than hanging, no device leaks after reaping, the device comes back on the same image, a graceful stop works afterwards, there is no oops, and the boot ID is unchanged (or changed, for the hard-reset runs, which is how they prove the reset happened).
+Each cycle checks that blocked writers receive errors, orphan cleanup leaks nothing, the same image can restart and stop gracefully, and no oops occurs. Boot ID must stay unchanged except on hard-reset runs, where a change proves the reset.
 
 ### Suspect the harness first
 
-Nine "product hangs" in this project's history were test-harness accidents, including a churn script that parsed the `1` out of `USR1` and sent SIGINT to PID 1 (which reboots a systemd VM) and an e2e script whose cleanup killed its own ssh session. The harnesses now refuse to signal PID 1 or below, match processes by exact name, and each judgment comes with a control that shows it can fail. Treat a new hang the same way before blaming the library or the kernel.
+Nine apparent product hangs were harness faults, including parsing `1` from `USR1` and SIGINTing systemd PID 1, and cleanup killing its own ssh session. Harnesses now reject PID <= 1, match exact process names, and test their verdicts against failure controls. Check the harness before attributing a new hang.
 
 ## Verified kernels
 
@@ -54,23 +54,23 @@ Nine "product hangs" in this project's history were test-harness accidents, incl
 | 2026-08-22 | `7.0.0-30-generic` (`linux-hwe-7.0`) | arm64 | Lima VM | Unit, simple e2e, sweep 24/24, loop e2e 14/14, crash 6/6 |
 | 2026-10-03 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | Unit 9/9 packages, full-size I/O test, sweep 24/24, loop e2e 14/14, 1-8 GiB discards and a 3 GiB write-zeroes |
 | 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | Reboots under load with the shipped units, ext4 mounted and ~300 MB dirty: 3 of 5 lost writeback until the mount unit was ordered `Before=user.slice`, then 8 of 8 clean (no I/O errors, clean `e2fsck`) |
-| 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | 4-hour soak (`make vm-soak`) through the shipped units: 23 crash and upgrade handoffs, all recovered in 1.3–6.1 s; fio verified every block; server RSS 13.4 → 13.8 MB and fds 15 → 15 over two steady hours; `e2fsck` clean. The only kernel warning was the VM's virtual display (bochs vblank timeout) |
-| 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | v0.2.0 engine: `ublk-suite` 54/54 applicable tests (2 skipped: features newer than 7.0); systemd recovery under a verifying fio — 2 upgrade handoffs and 1 SIGKILL, 0 I/O errors |
+| 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | 4-hour soak (`make vm-soak`) through the shipped units: 23 crash and upgrade handoffs, all recovered in 1.3–6.1 s; fio verified every block; server RSS 13.4 to 13.8 MB and fds 15 to 15 over two steady hours; `e2fsck` clean. The only kernel warning was the VM's virtual display (bochs vblank timeout) |
+| 2026-10-04 | `7.0.0-38-generic` (`linux-hwe-7.0`) | x86_64 | QEMU (TCG) guest | v0.2.0 engine: `ublk-suite` 54/54 applicable tests (2 skipped: features newer than 7.0); systemd recovery under a verifying fio: 2 upgrade handoffs and 1 SIGKILL, 0 I/O errors |
 
-All runs show no oops, no stuck tasks and no leaked devices unless noted. Timings and IOPS from the emulated (TCG) run are meaningless.
+Unless noted, runs had no oops, stuck tasks, or leaked devices. TCG timings/IOPS do not measure native performance.
 
-These are the hand-run verifications; the [compatibility matrix](/reference/matrix/) has the automated runs of the conformance suite across mainline and distribution kernels. The minimum is Linux 6.4, the first kernel with ioctl-encoded commands; kernels before 6.11 needed the write-zeroes limit fix in v0.2.0 (Critical Bug #24).
+These manual runs complement the automated [matrix](/reference/matrix/). Linux 6.4 is the minimum for ioctl-encoded commands; pre-6.11 kernels need v0.2.0's write-zeroes cap (Critical Bug #24).
 
 ## What is not covered
 
-- A real host power cut. The guest hard reset drops the guest's page cache, not the host's cache of the virtual disk.
-- Long soak tests, memory-pressure and GC-pressure fault injection.
-- Real hardware outside VMs: the v0.2.0 runs used emulated CPUs, so they say nothing about performance.
-- Recovery of zero-copy, zoned and shared-memory devices: `Recover` supports the first two, but only the default, batch and integrity configurations are tested; shared-memory regions cannot be served after a recovery.
+- Host power cuts: guest resets retain the host's virtual-disk cache.
+- Soaks beyond the recorded hours, memory/GC pressure fault injection.
+- Native hardware performance: v0.2.0 matrix CPUs were emulated.
+- Zero-copy/zoned/shared-memory recovery: Recover supports the first two, but tests cover default/batch/integrity only. Recovered shared-memory registrations cannot be served.
 
 ## Running the tests
 
-Unit tests need Linux; on macOS, `make vm-test-unit` cross-compiles them and runs them on the test VM. Everything with `vm-` in its name runs against a VM configured in `Makefile.local` (`VM_SSH`, `VM_SCP`, or `VM_HOST`/`VM_USER`; see `Makefile.local.example` and `docs/VM_TESTING.md`). These targets load modules, create and delete ublk devices, kill processes and reboot the machine: use a disposable VM, never a host you care about.
+Unit tests need Linux; macOS uses `make vm-test-unit` to cross-compile and run in a VM. Configure VM targets through Makefile.local (VM_SSH/VM_SCP or VM_HOST/VM_USER); see Makefile.local.example and docs/VM_TESTING.md. They load modules, mutate devices, kill processes, and reboot: use a disposable VM.
 
 ```sh
 make test-unit          # Linux
@@ -81,4 +81,4 @@ make vm-powerfail       # power-fail consistency
 make vm-shutdown-storm STORM_CYCLES=5
 ```
 
-The oracles in `test/verify` and `test/crash` are standalone programs and work against any block device, so they can test your own backend as well as go-ublk's examples.
+`test/verify` and `test/crash` also test custom backends or any other block device.
