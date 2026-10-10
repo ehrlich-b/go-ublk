@@ -45,7 +45,11 @@ absent. No current comparative performance claim is established by this backlog.
    oracles; their current scope is documented in FEATURES.md. Ring/descriptor
    geometry and request arithmetic now have portable validators and native fuzz
    targets; include those targets in bounded CI and complete the larger assurance
-   campaigns. They do not close ownership, hostile-CQE or lifecycle gaps.
+   campaigns. Batch CQE fields/identities and consumed-prefix ownership now have
+   a portable ledger, deterministic engine replays and `FuzzCompletionSchedule`.
+   Duplicate backend completions now claim ownership before copy/result effects.
+   Stale public Request pointers after tag reuse remain open: an immutable
+   generation-bound completion API is needed. Linux replay gates remain pending.
 7. [ ] **Fresh candidate and CI coverage.** Coordinator runs Linux tests on real VMs:
    x86_64 and arm64, feature-boundary kernels, selected full-distro shutdown/udev
    runs, race/checkptr and GC/memory-pressure stress. Persist exact revision, kernel,
@@ -118,6 +122,18 @@ permanently wedged backend remain part of the shutdown/recovery gates.
   zero-copy file-base and integrity-span arithmetic, boundary tests and native
   `FuzzRingLayout`/`FuzzRequestRange`. Portable tests pass; Linux runtime gates,
   resize transition ordering and the larger fuzz campaigns remain pending.
+- [x] Batch buffer ID/length/commit identity/count guards and generation-aware
+  consumed-prefix accounting (`internal/completion/batch.go`); deterministic
+  fake-kernel schedules and portable `FuzzCompletionSchedule`. Duplicate
+  Request completion claims before result/copy/append-LBA side effects, with
+  Inline-to-async staging handoff (`internal/completion/ownership.go`).
+  Portable race/checkptr and fuzz smoke pass; Linux models are compiled only.
+- [x] Retain and reconcile one in-flight STOP receipt through Device.Stop/Close;
+  refuse conflicting Device mutations until resolution. High-level model counts
+  char handles plus modeled device/control storage; control tests count actual
+  scratch unmaps. Reaped cancellation is distinct from pending/unknown work.
+  START/DEL/recovery pending states, direct transport errors without a receipt,
+  process quotas and unreaped-failure cleanup still need coverage/fixes.
 
 ---
 
@@ -382,6 +398,14 @@ test scope and recorded kernel coverage are in [FEATURES.md](docs/FEATURES.md).
     while the block device is open; `features/safe-stop` checks the device still serves after a
     refused stop.
 
+    **2026-10-10 follow-up:** STOP timeout is not proof the device keeps serving.
+    The exact in-flight receipt is now retained; Stop/Close reconcile late
+    success before releasing resources and do not resubmit a pending STOP.
+    Conflicting Resize/Detach/shared-memory mutations are refused. A reaped
+    cancellation permits a later retry; an unreaped transport outcome is kept
+    pending. The bounded high-level/control regressions compile for Linux;
+    their VM run is still a gate, not a blanket lifecycle-fix claim.
+
 19. **[FIXED — 2026-10-04] `Runner.Close` freed the ring and buffers after a join that timed
     out.** The Runner is gone. A `queue.Queue` frees its descriptor and data mappings only once
     every engine has exited and no handler still holds a request; otherwise `Close` returns
@@ -481,6 +505,8 @@ Portable bounds checks also run natively on Darwin:
 
 ```sh
 taskpolicy -b nice -n 15 go test -p 2 ./internal/validation
+taskpolicy -b nice -n 15 go test -p 2 -race -gcflags=all=-d=checkptr=2 ./internal/completion
+taskpolicy -b nice -n 15 env GOMAXPROCS=2 go test -p 2 -parallel 2 -run XXX -fuzz '^FuzzCompletionSchedule$' -fuzztime 60s ./internal/completion
 taskpolicy -b nice -n 15 env GOMAXPROCS=2 go test -p 2 -parallel 2 -run XXX -fuzz '^FuzzRingLayout$' -fuzztime 60s ./internal/validation
 taskpolicy -b nice -n 15 env GOMAXPROCS=2 go test -p 2 -parallel 2 -run XXX -fuzz '^FuzzRequestRange$' -fuzztime 60s ./internal/validation
 ```

@@ -110,7 +110,7 @@ tests use the [fake kernel](../internal/queue/fakekernel_test.go#L23).
 |---|---|---|---|
 | Effective CPU affinity / pinning | U | [backend.go:754](../backend.go#L754), [engine.go:212](../internal/queue/engine.go#L212); explicit or GET_QUEUE_AFFINITY-derived placement attempted; SchedSetaffinity errors ignored. | Conversion/CPU-mask decoding tests only; no effective-TID placement oracle, no matrix pass proving affinity. |
 | BUF_REG_OFF_DAEMON | U | [recover.go:36](../recover.go#L36), [uapi/constants.go:141](../internal/uapi/constants.go#L141); reported bit only; engine registers on its owning thread. | Names/constants/fixture coverage; no off-owner registration test or matrix pass. |
-| Zone append and reset-all | U | [CompleteZoneAppend:169](../internal/queue/request.go#L169), [commit LBA:943](../internal/queue/engine.go#L943), [batch LBA:440](../internal/queue/engine.go#L440); exposed to Handler. | `features/zoned` never issues these ops; no behavioral unit/model or matrix pass. |
+| Zone append and reset-all | U | [CompleteZoneAppend:169](../internal/queue/request.go#L169), [commit LBA:943](../internal/queue/engine.go#L943), [batch LBA:440](../internal/queue/engine.go#L440); exposed to Handler. | Duplicate completion has an LBA-preservation regression; `features/zoned` never issues these ops, and there is no append/reset-all I/O model or matrix pass. |
 | Integrity formats other than tested CRC16 + RefTag | U | [backend.go:248](../backend.go#L248); none/IP/CRC64 NVMe and other layouts exposed. | Serialization/conversion coverage only; no format-specific corruption/durability test or matrix pass. |
 | IO_DESC_SIZE other than standard 24 or tested 32 | U | [backend.go:354](../backend.go#L354); accepts multiples of 8 through 256. | Validation/layout coverage only; no descriptor-stride I/O test or matrix pass at other sizes. |
 | DMA alignment and segment constraints | U | [device.go:80](../internal/ctrl/device.go#L80); DMAAlignment public; SEGMENT block only internal ctrl/UAPI, no public segment settings. | [parameter round trips:181](../test/ctrl/main.go#L181), UAPI/model tests exist; no recorded behavioral DMA/segment enforcement pass. |
@@ -186,17 +186,108 @@ models, io_uring ABI/index/real-ring tests, control models and public device/bac
 tests. The suite covers real-kernel I/O modes and lifecycle; the focused large-I/O
 test exercises public startup paths. Advanced-mode skips retain their reasons.
 
-These checks cover mapping geometry and request arithmetic, not batch CQE
-identity/buffer IDs/partial-commit accounting, shared-region address decoding,
-registration/loan lifetime, stale completions, recovery reply arithmetic or
-resize transition ordering. Those remain open under the gaps below; no advanced
-mode is promoted by portable tests or cross-compilation alone.
+These bounds checks cover mapping geometry and request arithmetic. The
+completion follow-up below adds batch CQE and pending-STOP checks; shared-region
+address decoding, registration/loan lifetime, stale backend completions,
+recovery reply arithmetic and resize transition ordering still need work.
+No advanced mode is promoted by portable tests or cross-compilation alone.
+
+## Completion and pending STOP follow-up (2026-10-10)
+
+Work starts at `8c2135a`. The supplied worker brief reports a real 6.12 kernel
+run for that revision: **44 suite passes, zero failures, checkptr clean**.
+That observation is the starting floor, not a runtime pass for these changes;
+the brief supplies no exact kernel build hash here.
+
+**Ticket 4 — batch completions.** Previously FETCH sliced the tag-buffer array
+with an unchecked buffer ID and length, and COMMIT indexed an unchecked slot
+and divided its result without checking alignment or the submitted count.
+[FetchTags and the batch ledger](../internal/completion/batch.go) now reject
+those fields before accesses or dispatch. Each commit submission has a distinct
+echoed identity and snapshots `(tag, generation)` independently of mutable
+Request pointers. A partial commit retries exactly the unconsumed suffix;
+a contradictory suffix that has already been reused, a duplicate delivery or
+an old CQE for a reused commit slot fails. Invalid counts fail the engine
+without retransmitting an uncertain completion.
+
+[Deterministic engine schedules](../internal/queue/completion_schedule_test.go)
+replay all five unchanged `FuzzEngine` scripts and retain malformed-field,
+duplicate and partial-commit/early-fetch regressions. The portable
+[FuzzCompletionSchedule](../internal/completion/batch_test.go) drives the same
+decoder and ledger with a fixed-buffer fake completion source and an independent
+ownership/terminal-result oracle. Raw hostile fields are not modulo-normalized;
+oracle selftests detect a premature tag return and duplicate terminal result.
+These cover batch ownership, not all ordinary/registration/file/wake CQE phases
+or partial io_uring submissions. Linux engine replays are compiled, not run here.
+
+**Ticket 5 — one pending STOP transition.** `Device.Stop` previously discarded
+its in-flight receipt and cleared `leaving` on timeout, so `Close` could submit
+another STOP while the original still ran. It now retains the exact receipt;
+Stop/Close reconcile a reaped late result, and Resize, Detach and shared-memory
+mutations refuse while the receipt is pending. A late success performs stop
+cleanup once and Close then deletes without resubmitting STOP. Reaped cancellation
+permits a later retry; a transport return without a final kernel CQE remains
+pending. The public state string remains `running` until reconciliation.
+
+The bounded [high-level API model](../pending_stop_test.go) checks a real retained
+char fd plus modeled device/control-ring/storage counts across timeout, refused
+mutations, late success and Close/retry. Separate [control tests](../internal/ctrl/pending_outcome_test.go)
+check real mmap scratch ownership and the receipt's `Reaped` flag for success,
+cancellation and an unreaped wait failure. Both Linux models await VM execution.
+The [portable reconciliation gate](../internal/completion/control.go) is tested
+on Darwin. START/DEL/recovery pending operations, direct transport errors without
+an in-flight receipt, process-wide quotas and eventual cleanup of unreaped
+transport failures remain outside this narrow fix.
+
+**Ticket 6 — backend completion ownership.** `Request.finish` previously wrote
+the result, copied user-copy read bytes and (for append) set the LBA before
+winning its CAS. [Completion ownership](../internal/completion/ownership.go)
+now claims before staging and publishes only afterwards. Returning from an
+Inline handler while another goroutine stages completion transfers publication
+to the async path; the engine cannot commit half-staged bytes. Portable race
+tests check the poisoned buffer, result and enqueue count; Linux
+[regressions](../internal/queue/completion_ownership_test.go) check user-copy
+and append side effects and retain the stale-pointer witness.
+
+**Still open:** a retained public `*Request` aliases the tag's next request.
+An old caller can successfully complete that newer request and commit its
+poisoned read bytes. A generation field inside the recycled object cannot
+authenticate which delivery the caller owns. Recommend an immutable completion
+handle containing device epoch, queue, tag and generation, with the generation
+validated before any result/copy/enqueue effect. Legacy pointer-only Complete
+methods must be retired or backed by a distinct Request object per delivery;
+keeping them unrestricted would bypass the handle. This public API migration
+(or an allocation/lifetime change to the preallocated request path) is not
+implemented here. Batch command generations do not fix backend pointer reuse.
+
+Local gates use Go 1.26.2, Darwin arm64 and Linux amd64 cross-compilation:
+portable completion/validation/UAPI/logging tests with race and checkptr;
+Linux build/vet and all-package normal/checkptr test compilation. No Linux
+binary is executed locally. The final two-worker fuzz runs passed:
+`FuzzCompletionSchedule` **1,191,083** executions / 60 s,
+`FuzzRequestRange` **1,187,155** / 30 s, and
+`FuzzRingLayout` **1,127,630** / 30 s. These are smoke budgets, not the larger
+assurance campaigns. Logs and compiled artifacts are retained in `.scratch/`.
+
+`bin/ublk-suite` is rebuilt, as are checkptr binaries for the four internal
+packages (queue, ctrl, uring, uapi) and the public package (`ublk.test`) so the
+new high-level STOP model is included. From this clone in the disposable VM:
+
+```sh
+for p in ublk queue ctrl uring uapi; do
+  sudo .scratch/vm-bin/$p.test -test.v -test.timeout=5m || exit 1
+done
+sudo ./bin/ublk-suite
+```
+
+VM runtime/checkptr and real-kernel suite results on this candidate are pending;
+no lifecycle or advanced-mode support tier changes follow from these gates.
 
 ## Coverage limits and documentation corrections
 
 The fuzz foundation includes [FuzzFixedUAPI/FuzzParamsUAPI/FuzzUAPIEncodings](../internal/uapi/fuzz_test.go#L12),
 [FuzzCtrlDecoders](../internal/ctrl/fuzz_test.go#L15), [FuzzEngine](../internal/queue/fuzz_test.go#L21),
-and the portable bounds targets described above.
+and the portable bounds and completion targets described above.
 FuzzEngine exercises copy, NEED_GET_DATA and batch with depths 1..8, at most
 64 scripted requests, valid tags, five operations and 24-byte descriptors.
 It does not reach user copy, ZC, shared regions, recovery, zoned or integrity.
@@ -227,7 +318,7 @@ exists in every configuration. Run kernel tests in disposable Linux guests.
 | **4. Unprivileged boundary and real udev** | Current suite uses one nobody owner with root-emulated udev and root I/O. In a full-distro guest install the supplied rule/helper, run two unrelated UIDs and user namespaces; assert owner access and rejection of cross-owner control/I/O, forged/stale dev paths, ID reuse and forbidden flag combinations; delay/fail node ownership and verify bounded cleanup and no leaked device. |
 | **5. FLUSH/FUA durability and ordering** | FUA tests count dispatch/acceptance; historical SIGKILL/guest-reset checks do not drop the host's virtual-disk cache. Use an independently validated lost/torn/aliased-block oracle on a durable file/block backend, reorder/delay writes across FLUSH and FUA, assert completion only after the promised writes are stable, then remove the backing host/cache failure domain. Cover buffered, O_DSYNC and ZC plus integrity metadata; retain synced and unsynced witnesses and demonstrate injected failures are detected. |
 
-Further work: adversarial batch exhaustion/partial SQ submission and invalid-CQE
-models, acquisition-failure resource accounting, effective CPU-affinity checks,
+Further work: batch buffer exhaustion/partial SQ submission and hostile ordinary,
+registration/file/wake CQE models, acquisition-failure resource accounting, effective CPU-affinity checks,
 append/reset-all and other integrity/descriptor formats, public NOUNMAP semantics,
 and fresh candidate runs on x86_64 and arm64. These qualify the scopes above.
