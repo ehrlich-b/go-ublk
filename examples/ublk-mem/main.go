@@ -47,6 +47,7 @@ func main() {
 		sizeStr     = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
 		backendName = flag.String("backend", "ram", "Backend: ram or null (complete without touching data)")
 		inline      = flag.Bool("inline", false, "Run handlers on the queue's I/O thread")
+		dispatch    = flag.String("dispatch", "goroutine", "Handler dispatch: goroutine or pool (ignored with -inline)")
 		zip         = flag.Bool("zip", false, "Compress the contents in RAM (flate, 64KB chunks)")
 		verbose     = flag.Bool("v", false, "Verbose output")
 		minimal     = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
@@ -117,6 +118,14 @@ func main() {
 
 	// Create device parameters
 	params.Inline = *inline
+	switch *dispatch {
+	case "goroutine":
+		params.Dispatch = ublk.DispatchGoroutine
+	case "pool":
+		params.Dispatch = ublk.DispatchPool
+	default:
+		log.Fatalf("invalid dispatch %q: use goroutine or pool", *dispatch)
+	}
 	if *minimal {
 		// Use minimal parameters for testing
 		params.QueueDepth = 1 // Absolute minimum
@@ -144,7 +153,7 @@ func main() {
 		logger.Info("using minimal queue depth for faster initialization", "depth", params.QueueDepth)
 	}
 	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size,
-		"backend", *backendName, "compressed", *zip, "inline", *inline)
+		"backend", *backendName, "compressed", *zip, "inline", *inline, "dispatch", *dispatch)
 
 	// Create and serve the device
 	ctx, cancel := context.WithCancel(context.Background())

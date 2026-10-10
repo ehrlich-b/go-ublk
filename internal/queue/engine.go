@@ -116,6 +116,7 @@ type engineConfig struct {
 	integMeta     int
 	handler       Handler
 	inline        bool
+	dispatch      DispatchMode
 	cpus          []int // CPUs to run on; empty: no affinity
 	logger        interfaces.Logger
 	newRing       func(entries uint32) (ring, error)
@@ -135,7 +136,9 @@ type engine struct {
 	tags []uint8
 	live int // tags not yet aborted or orphaned
 
-	handlers atomic.Int32 // requests handed to the handler and not yet committed
+	handlers   atomic.Int32  // requests handed to the handler and not yet committed
+	work       chan *Request // pool jobs; allocated once, sized to the tag range
+	workClosed bool          // engine-owned teardown guard
 
 	// Completions from other goroutines: a lock-free stack, drained by the
 	// engine. sleeping is set while the engine may block in the kernel; a
@@ -183,6 +186,7 @@ func newEngine(cfg engineConfig) *engine {
 	if e.cfg.waitInterval == 0 {
 		e.cfg.waitInterval = time.Second
 	}
+	e.startDispatch()
 	return e
 }
 
@@ -517,6 +521,7 @@ func (e *engine) committed(id uint64, res int32) {
 // Data buffers are not touched here: the Queue frees them only once every
 // engine has exited and no handler holds a request.
 func (e *engine) teardown() {
+	e.stopDispatch()
 	e.retireWake()
 	e.wakeMu.Lock()
 	if e.wakeFd >= 0 {
@@ -820,6 +825,12 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 		if completion.ReturnInline(&r.state) {
 			e.commit(r) // completed before the handler returned
 		}
+		return
+	}
+	if e.work != nil {
+		// At most one uncompleted job per tag can be queued. The depth-sized
+		// channel keeps the engine running even while every worker blocks.
+		e.work <- r
 		return
 	}
 	go e.call(r)

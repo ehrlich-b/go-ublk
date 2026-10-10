@@ -35,6 +35,7 @@ type QueueConfig struct {
 	DescSize         int    // bytes per I/O descriptor (dev_info.io_desc_size); 0 means 24
 	Handler          Handler
 	Inline           bool
+	Dispatch         DispatchMode
 	Threads          int   // engines (OS threads) per queue; >1 needs UBLK_F_PER_IO_DAEMON
 	CPUs             []int // CPUs to pin the queue's threads to; empty: no affinity
 	// ZeroCopyFile, if >= 0, serves every request zero-copy against this
@@ -100,6 +101,9 @@ func newIoUring(entries uint32) (*uring.IoUring, error) {
 
 // NewQueue maps the queue's memory and prepares its engines; Start runs them.
 func NewQueue(cfg QueueConfig) (*Queue, error) {
+	if cfg.Dispatch != DispatchGoroutine && cfg.Dispatch != DispatchPool {
+		return nil, fmt.Errorf("invalid dispatch mode %d", cfg.Dispatch)
+	}
 	if cfg.Depth < 1 || cfg.Depth > uapi.UBLK_MAX_QUEUE_DEPTH {
 		return nil, fmt.Errorf("queue depth %d outside 1..%d", cfg.Depth, uapi.UBLK_MAX_QUEUE_DEPTH)
 	}
@@ -246,6 +250,7 @@ func NewQueue(cfg QueueConfig) (*Queue, error) {
 			integMeta:        cfg.IntegrityMetadata,
 			handler:          cfg.Handler,
 			inline:           cfg.Inline,
+			dispatch:         cfg.Dispatch,
 			cpus:             cfg.CPUs,
 			logger:           cfg.Logger,
 			newRing:          cfg.newRing,

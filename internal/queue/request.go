@@ -126,7 +126,7 @@ type Request struct {
 }
 
 // Request completion states. A request is handed to the handler in
-// reqDispatching (inline mode) or reqAsync (goroutine mode); Complete moves it
+// reqDispatching (inline mode) or reqAsync (goroutine/pool mode); Complete moves it
 // to reqDone (inline: the engine commits it when the handler returns) or
 // reqQueued (pushed to the engine's completion list).
 const (

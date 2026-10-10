@@ -98,11 +98,16 @@ type DeviceParams struct {
 	MaxIOSize int
 
 	// Inline calls the backend on each queue's own I/O thread instead of a
-	// goroutine per request. It has the lowest latency, but a queue then
+	// worker goroutine. It has the lowest latency, but a queue then
 	// serves one request at a time, so it suits only backends that never block
 	// (RAM). The default runs every request on its own goroutine, so up to
 	// QueueDepth requests per queue are in flight at once.
 	Inline bool
+
+	// Dispatch selects goroutine-per-request or pooled handlers. The zero
+	// value is DispatchGoroutine. Inline takes precedence; zero copy does
+	// not invoke handlers and ignores both scheduling options.
+	Dispatch DispatchMode
 
 	// Recovery makes the block device survive its server: see RecoveryMode,
 	// Device.Detach and Recover.
@@ -300,6 +305,9 @@ func (p *DeviceParams) size() int64 {
 // so a caller finds out at creation time rather than from a device that fails
 // in a confusing way later.
 func validateParams(params *DeviceParams) error {
+	if params.Dispatch != DispatchGoroutine && params.Dispatch != DispatchPool {
+		return fmt.Errorf("invalid dispatch mode %d", params.Dispatch)
+	}
 	switch {
 	case params.Backend == nil && params.Handler == nil:
 		return fmt.Errorf("Backend is nil")
@@ -797,6 +805,7 @@ func (d *Device) startQueues() error {
 			Flags:            d.flags,
 			Handler:          d.handler,
 			Inline:           d.params.Inline,
+			Dispatch:         d.params.Dispatch,
 			Threads:          threads,
 			CPUs:             cpus,
 			Logger:           d.options.Logger,

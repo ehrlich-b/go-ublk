@@ -14,161 +14,163 @@ import (
 // Each fake-kernel step is explicit. Retain a generation, commit it, reuse its
 // tag, then reject old completion/access while the new read remains poisoned.
 func TestRequestHandleRejectsStaleCompletionAndBuffersAfterReuse(t *testing.T) {
-	for _, tc := range []struct {
-		name                                      string
-		batch, userCopy, integrity, async, shared bool
-	}{
-		{name: "copy-inline"}, {name: "copy-goroutine", async: true},
-		{name: "user-copy-inline", userCopy: true}, {name: "user-copy-goroutine", userCopy: true, async: true},
-		{name: "batch-copy", batch: true}, {name: "batch-user-copy", batch: true, userCopy: true},
-		{name: "integrity", integrity: true}, {name: "batch-integrity", integrity: true, batch: true},
-		{name: "shared-memory", shared: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			k := newFakeKernel(t, 1, testBufSize)
-			k.desc = append(k.desc, make([]byte, 8)...)
-			if tc.userCopy {
-				f, err := os.CreateTemp(t.TempDir(), "user-copy")
-				if err != nil {
+	forEachDispatch(t, func(t *testing.T, mode dispatchCase) {
+		for _, tc := range []struct {
+			name                               string
+			batch, userCopy, integrity, shared bool
+		}{
+			{name: "copy"},
+			{name: "user-copy", userCopy: true},
+			{name: "batch-copy", batch: true}, {name: "batch-user-copy", batch: true, userCopy: true},
+			{name: "integrity", integrity: true}, {name: "batch-integrity", integrity: true, batch: true},
+			{name: "shared-memory", shared: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				k := newFakeKernel(t, 1, testBufSize)
+				k.desc = append(k.desc, make([]byte, 8)...)
+				if tc.userCopy {
+					f, err := os.CreateTemp(t.TempDir(), "user-copy")
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = f.Close() })
+					k.ufile = int(f.Fd())
+				}
+				metadata := bytes.Repeat([]byte{0xd7}, 16)
+				deliveries := make(chan RequestHandle, 2)
+				cfg := engineConfig{capacity: testCapacity, logicalBlockSize: 512, tagHi: 1,
+					charFd: k.ufile, desc: unsafe.Pointer(&k.desc[0]), descStride: 32,
+					bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
+					userCopy: tc.userCopy, inline: mode.inline, dispatch: mode.dispatch, batch: tc.batch,
+					handler: RequestHandlerFunc(func(h RequestHandle) { deliveries <- h }),
+				}
+				flags := uint32(0)
+				if tc.integrity {
+					cfg.integ, cfg.integSize = unsafe.Pointer(&metadata[0]), len(metadata)
+					cfg.integInterval, cfg.integMeta = 512, 8
+					flags = uint32(FlagIntegrity)
+				}
+				shm := uint64(0)
+				region := make([]byte, testBufSize)
+				if tc.shared {
+					cfg.shmem = &SharedMemory{}
+					cfg.shmem.Add(3, region)
+					shm = 3 << 32
+				}
+				e := newEngine(cfg)
+				e.ring = k
+				t.Cleanup(e.teardown)
+				if tc.batch {
+					if err := e.setupBatch(); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := e.prepIO(uapi.UBLK_IO_FETCH_REQ, 0, 0); err != nil {
+						t.Fatal(err)
+					}
+				}
+				_, _ = k.Submit()
+				reapScheduled(e, k)
+				k.inject(0, fkReq{op: uapi.UBLK_IO_OP_READ, nr: 1, flags: flags, id: 1, shm: shm})
+				reapScheduled(e, k)
+				old := <-deliveries
+				if err := old.WithBuffers(func(data, meta, extra []byte) error {
+					for i := range data {
+						data[i] = 0x31
+					}
+					for i := range meta {
+						meta[i] = 0x41
+					}
+					if len(extra) != 8 {
+						t.Fatal("missing descriptor extension")
+					}
+					return nil
+				}); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = f.Close() })
-				k.ufile = int(f.Fd())
-			}
-			metadata := bytes.Repeat([]byte{0xd7}, 16)
-			deliveries := make(chan RequestHandle, 2)
-			cfg := engineConfig{capacity: testCapacity, logicalBlockSize: 512, tagHi: 1,
-				charFd: k.ufile, desc: unsafe.Pointer(&k.desc[0]), descStride: 32,
-				bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-				userCopy: tc.userCopy, inline: !tc.async, batch: tc.batch,
-				handler: RequestHandlerFunc(func(h RequestHandle) { deliveries <- h }),
-			}
-			flags := uint32(0)
-			if tc.integrity {
-				cfg.integ, cfg.integSize = unsafe.Pointer(&metadata[0]), len(metadata)
-				cfg.integInterval, cfg.integMeta = 512, 8
-				flags = uint32(FlagIntegrity)
-			}
-			shm := uint64(0)
-			region := make([]byte, testBufSize)
-			if tc.shared {
-				cfg.shmem = &SharedMemory{}
-				cfg.shmem.Add(3, region)
-				shm = 3 << 32
-			}
-			e := newEngine(cfg)
-			e.ring = k
-			t.Cleanup(e.teardown)
-			if tc.batch {
-				if err := e.setupBatch(); err != nil {
+				if err := old.Complete(nil); err != nil {
 					t.Fatal(err)
 				}
-			} else {
-				if err := e.prepIO(uapi.UBLK_IO_FETCH_REQ, 0, 0); err != nil {
+				if err := old.WithBuffers(func(_, _, _ []byte) error { t.Error("completed buffer exposed"); return nil }); !errors.Is(err, ErrRequestCompleted) {
 					t.Fatal(err)
 				}
-			}
-			_, _ = k.Submit()
-			reapScheduled(e, k)
-			k.inject(0, fkReq{op: uapi.UBLK_IO_OP_READ, nr: 1, flags: flags, id: 1, shm: shm})
-			reapScheduled(e, k)
-			old := <-deliveries
-			if err := old.WithBuffers(func(data, meta, extra []byte) error {
-				for i := range data {
-					data[i] = 0x31
+				e.drainCompletions()
+				if tc.batch {
+					e.flushBatchCommits()
 				}
-				for i := range meta {
-					meta[i] = 0x41
+				_, _ = k.Submit()
+				reapScheduled(e, k)
+				k.inject(0, fkReq{op: uapi.UBLK_IO_OP_READ, nr: 1, sector: 1, flags: flags, id: 2, shm: shm})
+				reapScheduled(e, k)
+				current := <-deliveries
+				if current.generation == old.generation || current.r != old.r || old.Offset != 0 || current.Offset != 512 {
+					t.Fatal("delivery identity/snapshot not preserved")
 				}
-				if len(extra) != 8 {
-					t.Fatal("missing descriptor extension")
+				if err := current.WithBuffers(func(data, meta, extra []byte) error {
+					for i := range data {
+						data[i] = 0xcd
+					}
+					for i := range meta {
+						meta[i] = 0xd7
+					}
+					for i := range extra {
+						extra[i] = 0xa5
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
 				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := old.Complete(nil); err != nil {
-				t.Fatal(err)
-			}
-			if err := old.WithBuffers(func(_, _, _ []byte) error { t.Error("completed buffer exposed"); return nil }); !errors.Is(err, ErrRequestCompleted) {
-				t.Fatal(err)
-			}
-			e.drainCompletions()
-			if tc.batch {
-				e.flushBatchCommits()
-			}
-			_, _ = k.Submit()
-			reapScheduled(e, k)
-			k.inject(0, fkReq{op: uapi.UBLK_IO_OP_READ, nr: 1, sector: 1, flags: flags, id: 2, shm: shm})
-			reapScheduled(e, k)
-			current := <-deliveries
-			if current.generation == old.generation || current.r != old.r || old.Offset != 0 || current.Offset != 512 {
-				t.Fatal("delivery identity/snapshot not preserved")
-			}
-			if err := current.WithBuffers(func(data, meta, extra []byte) error {
-				for i := range data {
-					data[i] = 0xcd
+				for _, stale := range []func() error{
+					func() error { return old.Complete(nil) }, func() error { return old.Complete(syscall.ENOSPC) },
+					func() error { return old.CompleteN(512, nil) }, func() error { return old.CompleteZoneAppend(99, nil) },
+					func() error { return old.ReportZones([]BlkZone{{Start: 99}}) },
+					func() error {
+						return old.WithBuffers(func(data, meta, extra []byte) error {
+							clear(data)
+							clear(meta)
+							clear(extra)
+							t.Error("stale buffer callback ran")
+							return nil
+						})
+					},
+				} {
+					if err := stale(); !errors.Is(err, ErrStaleRequest) {
+						t.Fatalf("stale call: %v", err)
+					}
 				}
-				for i := range meta {
-					meta[i] = 0xd7
+				if e.handlers.Load() != 1 || current.r.result != 0 || current.r.lba != 0 {
+					t.Fatal("stale completion changed new request/result")
 				}
-				for i := range extra {
-					extra[i] = 0xa5
+				if err := current.WithBuffers(func(data, meta, extra []byte) error {
+					if !bytes.Equal(data, bytes.Repeat([]byte{0xcd}, 512)) || !bytes.Equal(meta, bytes.Repeat([]byte{0xd7}, len(meta))) || !bytes.Equal(extra, bytes.Repeat([]byte{0xa5}, 8)) {
+						t.Fatal("stale handle changed poisoned buffers")
+					}
+					for i := range data {
+						data[i] = 0x52
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
 				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			for _, stale := range []func() error{
-				func() error { return old.Complete(nil) }, func() error { return old.Complete(syscall.ENOSPC) },
-				func() error { return old.CompleteN(512, nil) }, func() error { return old.CompleteZoneAppend(99, nil) },
-				func() error { return old.ReportZones([]BlkZone{{Start: 99}}) },
-				func() error {
-					return old.WithBuffers(func(data, meta, extra []byte) error {
-						clear(data)
-						clear(meta)
-						clear(extra)
-						t.Error("stale buffer callback ran")
-						return nil
-					})
-				},
-			} {
-				if err := stale(); !errors.Is(err, ErrStaleRequest) {
-					t.Fatalf("stale call: %v", err)
+				if err := current.Complete(nil); err != nil {
+					t.Fatal(err)
 				}
-			}
-			if e.handlers.Load() != 1 || current.r.result != 0 || current.r.lba != 0 {
-				t.Fatal("stale completion changed new request/result")
-			}
-			if err := current.WithBuffers(func(data, meta, extra []byte) error {
-				if !bytes.Equal(data, bytes.Repeat([]byte{0xcd}, 512)) || !bytes.Equal(meta, bytes.Repeat([]byte{0xd7}, len(meta))) || !bytes.Equal(extra, bytes.Repeat([]byte{0xa5}, 8)) {
-					t.Fatal("stale handle changed poisoned buffers")
+				e.drainCompletions()
+				if tc.batch {
+					e.flushBatchCommits()
 				}
-				for i := range data {
-					data[i] = 0x52
+				_, _ = k.Submit()
+				reapScheduled(e, k)
+				commits, violations := k.snapshot()
+				if e.err != nil || len(commits) != 2 || len(violations) != 0 || e.handlers.Load() != 0 || commits[1].id != 2 || commits[1].result != 512 {
+					t.Fatalf("commit ledger: err=%v commits=%v violations=%v", e.err, commits, violations)
 				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := current.Complete(nil); err != nil {
-				t.Fatal(err)
-			}
-			e.drainCompletions()
-			if tc.batch {
-				e.flushBatchCommits()
-			}
-			_, _ = k.Submit()
-			reapScheduled(e, k)
-			commits, violations := k.snapshot()
-			if e.err != nil || len(commits) != 2 || len(violations) != 0 || e.handlers.Load() != 0 || commits[1].id != 2 || commits[1].result != 512 {
-				t.Fatalf("commit ledger: err=%v commits=%v violations=%v", e.err, commits, violations)
-			}
-			if !tc.shared && (!bytes.Equal(commits[0].data, bytes.Repeat([]byte{0x31}, 512)) || !bytes.Equal(commits[1].data, bytes.Repeat([]byte{0x52}, 512))) {
-				t.Fatal("committed stale data")
-			}
-		})
-	}
+				if !tc.shared && (!bytes.Equal(commits[0].data, bytes.Repeat([]byte{0x31}, 512)) || !bytes.Equal(commits[1].data, bytes.Repeat([]byte{0x52}, 512))) {
+					t.Fatal("committed stale data")
+				}
+			})
+		}
+	})
 }
 
 func TestRequestHandleZeroCopyGenerationAfterReuse(t *testing.T) {
