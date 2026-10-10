@@ -274,20 +274,24 @@ func (q *Queue) Start() error {
 		}
 		started++
 	}
-	go func() {
-		for _, e := range q.engines[:started] {
-			<-e.done
-		}
-		close(q.done)
-	}()
 	if err != nil {
 		for _, e := range q.engines[:started] {
 			e.abandon()
 		}
+		// The failed engine already tore down before reporting its error.
+		// Later engines never ran, but NewQueue created their pool workers.
+		for _, e := range q.engines[started+1:] {
+			e.stopDispatch()
+		}
 		q.engines = q.engines[:started]
-		return err
 	}
-	return nil
+	go func() {
+		for _, e := range q.engines {
+			<-e.done
+		}
+		close(q.done)
+	}()
+	return err
 }
 
 // Done is closed once every engine has exited: normally after STOP_DEV aborts
