@@ -76,10 +76,11 @@ verify: FORCE
 # Real-kernel conformance suite (test/suite): a static binary that runs every
 # device test as root and prints one JSON result per test. The matrix harness
 # boots it under each kernel. Destructive: only run it on a disposable machine.
+SUITE_BINARY ?= bin/ublk-suite
 suite: FORCE
-	@mkdir -p bin
+	@mkdir -p $(dir $(SUITE_BINARY))
 	@echo "Building ublk-suite..."
-	@CGO_ENABLED=0 GOOS=linux $(GOBUILD) -o bin/ublk-suite ./test/suite
+	@CGO_ENABLED=0 GOOS=linux $(GOBUILD) -o $(SUITE_BINARY) ./test/suite
 
 ublk-chown: FORCE
 	@mkdir -p bin
