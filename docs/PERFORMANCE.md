@@ -95,3 +95,47 @@ The complete compiler receipts are `.scratch/escapes-linux.log`; compiler
 escape diagnostics alone are not an allocation count. The zero-allocation
 gate measures the successful non-batch dispatch path. Batch allocation
 removal needs a separate ownership-preserving design and VM validation.
+
+## VM profiling
+
+Run as root on a disposable Linux VM with `fio`, `perf`, Python 3 and the
+ublk driver available:
+
+```sh
+ROUNDS=3 OUT=.scratch/profile scripts/perf-profile.sh ./ublk-mem \
+  '-backend ram' '-backend ram' '-backend ram -inline' \
+  '-backend null' '-backend null -dispatch pool' '-backend null -inline'
+```
+
+Each flag set gets a fresh 512 MiB device with two queues and depth 64. Rounds
+interleave variants and rotate their starting position. Duplicate baseline
+sets supply an A/A comparison. Each device runs direct `io_uring` 4 KiB
+randread for 10 seconds at one job/depth 1, then two jobs/depth 32. Flag sets
+accept `-backend`, `-dispatch`, `-inline`, `-zip` and `-v`; booleans use
+`-inline=false` syntax. Geometry, cleanup and profile paths belong to the
+harness. Argument strings are split on whitespace and never evaluated as
+shell code.
+
+`perf stat` attaches to the server's PID and threads for each fio process's
+lifetime and counts `context-switches`, `cpu-migrations` and
+`raw_syscalls:sys_enter`. Counts are divided by fio's aggregate completed
+read I/Os. IOPS and p50/p99 come from the group-reported read result's
+`clat_ns` percentiles, converted to microseconds. Counters cover server
+threads, rather than fio or total system CPU. The brief process launch/exit
+interval around fio is included in the perf window. Unsupported, uncounted
+or missing events fail the report instead of becoming zero.
+
+Per-run rows are printed and saved as `results.tsv`. The final table groups
+by flag set and workload, reports the median of each round's IOPS/p50/p99,
+and divides summed counters by summed I/Os. Raw fio JSON, perf CSV, server
+logs, binary checksum and run geometry remain in the output directory.
+`CPU_PROFILE=1` additionally writes a per-device `cpu.pprof`; use it in a
+separate profiling pass because sampling can perturb comparisons.
+
+The harness discovers only the device announced by its own server. Cleanup
+signals only that PID, waits up to 30 seconds and reports a stuck daemon
+without killing or reaping unrelated devices. Output directories must be
+new. Local validation includes Bash syntax, ShellCheck, Python compilation,
+synthetic fio/perf normalization and aggregation, invalid-event rejection,
+argument rejection and mocked startup failure/cleanup. Actual perf/fio and
+CPU-profile capture remain coordinator-owned VM gates.
