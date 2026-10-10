@@ -11,14 +11,14 @@ weight: 10
 |---|---|
 | Linux kernel | 6.4 or newer: go-ublk always sends ioctl-encoded commands, which older kernels do not understand. Newer features need newer kernels and are reported by `ublk.Probe()`. The [compatibility matrix](/reference/matrix/) lists every kernel the conformance suite has run on |
 | Kernel module | `ublk_drv` loaded, so that `/dev/ublk-control` exists |
-| Privileges | root, or `CAP_SYS_ADMIN`, to create devices — or an unprivileged user with the udev rule in `examples/ublk-chown` |
+| Privileges | root, or `CAP_SYS_ADMIN`, to create devices; or an unprivileged user with the udev rule in `examples/ublk-chown` |
 | Go | 1.25 or newer (the module's `go` directive) |
 | Architectures | amd64 and arm64 are tested. The code has no architecture-specific assembly |
 
 > [!WARNING]
-> Some Ubuntu 6.17 kernels (generic builds from about -24 through -40, and `6.17.0-1019-aws`) oops the host the first time any ublk server adds a device. This is a kernel packaging bug, not something a server can work around. See [Known kernel bugs](/guide/kernel-bugs/) before choosing a kernel.
+> Ubuntu generic 6.17 builds around -24 through -40 and 6.17.0-1019-aws can oops during ADD_DEV. Check [kernel bugs](/guide/kernel-bugs/) before choosing a build; userspace cannot fix the packaging error.
 
-Load the module and make it load at boot:
+Load ublk now and at boot:
 
 ```sh
 sudo modprobe ublk_drv
@@ -26,7 +26,7 @@ echo ublk_drv | sudo tee /etc/modules-load.d/ublk.conf
 ls -l /dev/ublk-control
 ```
 
-If `modprobe` cannot find the module, the kernel may ship it in a separate package (Ubuntu's AWS kernels put it in `linux-modules-extra-$(uname -r)`), or not build it at all (WSL2 kernels do not).
+Missing module: check separate packages, e.g. Ubuntu AWS `linux-modules-extra-$(uname -r)`. Checked WSL2 kernels omit it.
 
 ## Install
 
@@ -34,11 +34,11 @@ If `modprobe` cannot find the module, the kernel may ship it in a separate packa
 go get github.com/ehrlich-b/go-ublk
 ```
 
-The package is Linux-only: it talks to io_uring and the ublk driver directly. It has no cgo, so `CGO_ENABLED=0` builds and cross-compilation from another OS work as for any Go program (`GOOS=linux GOARCH=arm64 go build`). It does not compile for other operating systems.
+Linux-only, without cgo. Use CGO_ENABLED=0 and cross-compile from other systems, e.g. `GOOS=linux GOARCH=arm64 go build`.
 
 ## Your first device
 
-A RAM disk in about forty lines. The backend is a byte slice behind a lock; go-ublk calls it from many goroutines at once (one per in-flight request), so it must be safe for concurrent use.
+A roughly forty-line RAM disk uses a locked byte slice: requests run concurrently, one goroutine each.
 
 ```go
 package main
@@ -101,7 +101,7 @@ func main() {
 }
 ```
 
-Build and run it as root, then use the device from another terminal:
+Run as root; use the device from another terminal:
 
 ```sh
 go build -o ramdisk . && sudo ./ramdisk
@@ -114,30 +114,30 @@ echo hello | sudo tee /mnt/hello.txt
 sudo umount /mnt
 ```
 
-Press Ctrl-C in the first terminal to tear the device down. Two things in that program are load-bearing:
+After unmounting, Ctrl-C stops the server. Two requirements:
 
-- **`device.Close()` before exit.** A process that exits without it leaves the device registered in the kernel with nothing serving it. It cannot do I/O, it pins the module, and it has to be deleted by hand (below) — unless the device was created with a [recovery mode](/go-ublk/lifecycle/#detach-and-recover), in which case a new process can take it over.
-- **Handling SIGHUP as well as SIGINT and SIGTERM.** When a login session ends, systemd-logind sends SIGTERM and then SIGHUP; an unhandled SIGHUP kills the server while it is still draining I/O. For anything long-lived, run the server as a systemd service instead; see [Deployment](/go-ublk/deployment/).
+- Close before exit, or registration pins the module with no serving process. Delete the orphan, or [recover it](/go-ublk/lifecycle/#detach-and-recover) if enabled.
+- Handle SIGHUP alongside SIGINT/SIGTERM: logind sends SIGTERM then SIGHUP on session exit, potentially killing a draining server. Use a [systemd service](/go-ublk/deployment/) for long-lived devices.
 
-`DefaultParams` gives 128-deep queues, one queue per CPU (the kernel caps it there anyway), 512-byte blocks, 1 MiB maximum requests and a volatile write cache. [Configuration](/go-ublk/configuration/) lists every field.
+Defaults: one queue per CPU (kernel-capped), depth 128, 512-byte blocks, 1 MiB requests, volatile cache. See [configuration](/go-ublk/configuration/).
 
 ## The example servers
 
-The repository has two complete servers built only on the public API. They are the best reference for a real backend.
+Two reference servers use only the public API:
 
 ```sh
 git clone https://github.com/ehrlich-b/go-ublk && cd go-ublk
 make build
 ```
 
-**`ublk-mem`** is a RAM disk with sharded locks, and with `--zip` a compressed one (64 KiB chunks, flate):
+ublk-mem uses sharded locks; --zip adds flate compression in 64 KiB chunks:
 
 ```sh
 sudo ./bin/ublk-mem --size=1G
 sudo ./bin/ublk-mem --size=1G --zip --queues=4 --depth=64
 ```
 
-**`ublk-loop`** exports a file the way `losetup` does: sparse allocation, discard that punches holes, write-zeroes, and both durability modes.
+ublk-loop exports files like losetup: sparse allocation, hole-punch discard, zeroes, and both durability modes.
 
 ```sh
 sudo ./bin/ublk-loop --file=/var/tmp/disk.img --size=10G          # buffered, flush = fsync
@@ -145,18 +145,18 @@ sudo ./bin/ublk-loop --file=/var/tmp/disk.img --sync              # O_DSYNC, wri
 sudo ./bin/ublk-loop --file=/var/tmp/disk.img --read-only
 ```
 
-Both accept `-v` for debug logging and stop cleanly on SIGINT or SIGTERM.
+Both accept -v for debug and stop on SIGINT/SIGTERM.
 
 ## Cleaning up a leaked device
 
-If a server is killed with SIGKILL, crashes, or exits without `Close`, its device stays registered: the kernel removes `/dev/ublkbN` and fails the I/O that was in flight, but `/dev/ublkcN` and the device ID remain until someone deletes them. Both examples can reap such devices:
+Without recovery, SIGKILL, crash, or exit without Close removes the block node and fails I/O, retaining the char node and ID. Both examples can delete orphans:
 
 ```sh
 sudo ./bin/ublk-mem --del=all     # every registered ublk device
 sudo ./bin/ublk-mem --del=3       # just device 3
 ```
 
-In your own program, the same takes two calls:
+Programmatic cleanup:
 
 ```go
 ids, err := ublk.ListDevices()
@@ -170,10 +170,10 @@ for _, id := range ids {
 }
 ```
 
-`DeleteDevice` is for devices nobody is serving. A device your process still owns should be closed with `Device.Close`, which drains I/O first. `ListDevices` probes IDs 0 through 63 only; see [Troubleshooting](/go-ublk/troubleshooting/).
+DeleteDevice cleans unserved devices; use Device.Close for local devices. ListDevices uses sysfs, falling back to IDs 0-63 when unavailable. See [troubleshooting](/go-ublk/troubleshooting/).
 
 ## Next steps
 
-- [Writing a backend](/go-ublk/backends/): the interface contract, concurrency, durability and errors.
-- [Deployment](/go-ublk/deployment/): the systemd unit a production server needs, and why.
-- [The ublk guide](/guide/): how the kernel side works, if you want to know what go-ublk is doing for you.
+- [Backend contracts](/go-ublk/backends/): concurrency, durability, errors.
+- [Deployment](/go-ublk/deployment/): systemd units and ordering.
+- [ublk guide](/guide/): kernel protocol.
