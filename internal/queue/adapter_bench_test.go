@@ -15,6 +15,7 @@ func (benchmarkBackend) WriteAt(p []byte, _ int64) (int, error) { return len(p),
 func (benchmarkBackend) Flush() error                           { return nil }
 func (benchmarkBackend) Close() error                           { return nil }
 func (benchmarkBackend) Size() int64                            { return 512 << 20 }
+func (benchmarkBackend) NonBlocking() bool                      { return true }
 
 func BenchmarkBackendParallel(b *testing.B) {
 	for _, phase := range []struct {

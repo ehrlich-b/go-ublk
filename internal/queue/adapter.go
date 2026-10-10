@@ -21,6 +21,19 @@ func BackendHandler(b interfaces.Backend, obs interfaces.Observer) Handler {
 	return &backendHandler{b: b, obs: obs}
 }
 
+func (h *backendHandler) NonBlocking() bool {
+	declaration, ok := h.b.(interfaces.NonBlockingDeclarer)
+	if !ok || !declaration.NonBlocking() {
+		return false
+	}
+	if h.obs == nil {
+		return true
+	}
+	// Observers run synchronously inside the adapter and can block too.
+	observerDeclaration, observerOK := h.obs.(interfaces.NonBlockingDeclarer)
+	return observerOK && observerDeclaration.NonBlocking()
+}
+
 func (h *backendHandler) HandleRequest(r *Request) {
 	// A synchronous Backend never receives a handle. Claim this delivery once
 	// around its buffer use, result staging and copy-out, rather than borrowing

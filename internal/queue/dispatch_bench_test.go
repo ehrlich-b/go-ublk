@@ -64,14 +64,19 @@ func (r *dispatchRing) PeekCQE() *uring.CQE {
 func (r *dispatchRing) CQAdvance(uint32) { r.ready = false }
 func (r *dispatchRing) Close() error     { return nil }
 
+func (r *dispatchRing) CQReady() uint32 {
+	if r.ready {
+		return 1
+	}
+	return 0
+}
+
 func (r *dispatchRing) step(e *engine, tag int) {
 	r.tag = uint16(tag)
 	r.cqe = uring.CQE{UserData: kindIO | uint64(tag), Res: uapi.UBLK_IO_RES_OK}
 	r.ready = true
-	cqe := *r.PeekCQE()
-	r.CQAdvance(1)
-	e.handleCQE(cqe.UserData, cqe.Res, cqe.Flags)
-	if !e.cfg.inline {
+	e.drainCQEs()
+	if e.head.Load() != nil || e.handlers.Load() != 0 {
 		for e.head.Load() == nil {
 			runtime.Gosched()
 		}
@@ -125,6 +130,8 @@ func benchmarkDispatch(b *testing.B, inline bool, mode DispatchMode) {
 func BenchmarkDispatchInline(b *testing.B)    { benchmarkDispatch(b, true, DispatchGoroutine) }
 func BenchmarkDispatchGoroutine(b *testing.B) { benchmarkDispatch(b, false, DispatchGoroutine) }
 func BenchmarkDispatchPool(b *testing.B)      { benchmarkDispatch(b, false, DispatchPool) }
+func BenchmarkDispatchAuto(b *testing.B)      { benchmarkDispatch(b, false, DispatchAuto) }
+func BenchmarkDispatchAdaptive(b *testing.B)  { benchmarkDispatch(b, false, DispatchAdaptive) }
 
 func TestDispatchHotPathDoesNotAllocate(t *testing.T) {
 	for _, tc := range []struct {
@@ -133,6 +140,7 @@ func TestDispatchHotPathDoesNotAllocate(t *testing.T) {
 		mode   DispatchMode
 	}{
 		{"inline", true, DispatchGoroutine}, {"pool", false, DispatchPool},
+		{"auto", false, DispatchAuto}, {"adaptive", false, DispatchAdaptive},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, ring := newDispatchBenchmark(t, tc.inline, tc.mode)

@@ -104,7 +104,9 @@ type DeviceParams struct {
 	// QueueDepth requests per queue are in flight at once.
 	Inline bool
 
-	// Dispatch selects goroutine-per-request or pooled handlers. The zero
+	// Dispatch selects handler scheduling, including declared nonblocking
+	// inline dispatch (DispatchAuto) and singleton inline dispatch
+	// (DispatchAdaptive). Undeclared handlers stay concurrent. The zero
 	// value is DispatchGoroutine. Inline takes precedence; zero copy does
 	// not invoke handlers and ignores both scheduling options.
 	Dispatch DispatchMode
@@ -305,7 +307,7 @@ func (p *DeviceParams) size() int64 {
 // so a caller finds out at creation time rather than from a device that fails
 // in a confusing way later.
 func validateParams(params *DeviceParams) error {
-	if params.Dispatch != DispatchGoroutine && params.Dispatch != DispatchPool {
+	if params.Dispatch > DispatchAdaptive {
 		return fmt.Errorf("invalid dispatch mode %d", params.Dispatch)
 	}
 	switch {

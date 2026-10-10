@@ -89,6 +89,9 @@ func (m *memoryBackend) Size() int64 {
 	return m.size
 }
 
+// NonBlocking permits inline dispatch: operations use only RAM and shard locks.
+func (*memoryBackend) NonBlocking() bool { return true }
+
 func (m *memoryBackend) Close() error {
 	m.data = nil
 	return nil
@@ -129,7 +132,8 @@ func (m *memoryBackend) WriteZeroes(offset, length int64) error {
 
 // Compile-time interface checks
 var (
-	_ ublk.Backend            = (*memoryBackend)(nil)
-	_ ublk.DiscardBackend     = (*memoryBackend)(nil)
-	_ ublk.WriteZeroesBackend = (*memoryBackend)(nil)
+	_ ublk.Backend             = (*memoryBackend)(nil)
+	_ ublk.DiscardBackend      = (*memoryBackend)(nil)
+	_ ublk.WriteZeroesBackend  = (*memoryBackend)(nil)
+	_ ublk.NonBlockingDeclarer = (*memoryBackend)(nil)
 )

@@ -42,7 +42,7 @@ func TestRequestHandleRejectsStaleCompletionAndBuffersAfterReuse(t *testing.T) {
 					charFd: k.ufile, desc: unsafe.Pointer(&k.desc[0]), descStride: 32,
 					bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
 					userCopy: tc.userCopy, inline: mode.inline, dispatch: mode.dispatch, batch: tc.batch,
-					handler: RequestHandlerFunc(func(h RequestHandle) { deliveries <- h }),
+					handler: mode.handler(RequestHandlerFunc(func(h RequestHandle) { deliveries <- h })),
 				}
 				flags := uint32(0)
 				if tc.integrity {

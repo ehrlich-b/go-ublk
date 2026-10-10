@@ -101,7 +101,7 @@ func newIoUring(entries uint32) (*uring.IoUring, error) {
 
 // NewQueue maps the queue's memory and prepares its engines; Start runs them.
 func NewQueue(cfg QueueConfig) (*Queue, error) {
-	if cfg.Dispatch != DispatchGoroutine && cfg.Dispatch != DispatchPool {
+	if cfg.Dispatch > DispatchAdaptive {
 		return nil, fmt.Errorf("invalid dispatch mode %d", cfg.Dispatch)
 	}
 	if cfg.Depth < 1 || cfg.Depth > uapi.UBLK_MAX_QUEUE_DEPTH {

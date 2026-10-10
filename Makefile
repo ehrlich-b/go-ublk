@@ -183,7 +183,32 @@ BENCH_FLAGS ?= -count=3 -benchtime=1s
 .PHONY: benchmark-dispatch
 benchmark-dispatch:
 	$(GOTEST) -run='^TestDispatchHotPathDoesNotAllocate$$' \
-		-bench='^BenchmarkDispatch(Inline|Goroutine|Pool)$$' -benchmem $(BENCH_FLAGS) $(DISPATCH_PACKAGE)
+		-bench='^BenchmarkDispatch(Inline|Goroutine|Pool|Auto|Adaptive)$$' -benchmem $(BENCH_FLAGS) $(DISPATCH_PACKAGE)
+
+# Local gates for dispatch candidates on hosts that cannot run Linux ublk.
+DISPATCH_VM_DIR ?= .scratch/vm-bin
+PORTABLE_PACKAGES = ./internal/completion ./internal/logging ./internal/uapi ./internal/validation
+.PHONY: check-dispatch-linux test-dispatch-portable dispatch-vm-binaries
+check-dispatch-linux:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOCMD) vet ./...
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) ./... ./examples/...
+
+test-dispatch-portable:
+	$(GOTEST) $(PORTABLE_PACKAGES)
+	CGO_ENABLED=1 $(GOTEST) -race $(PORTABLE_PACKAGES)
+	$(GOTEST) metrics.go metrics_test.go metrics_percentile_test.go
+	CGO_ENABLED=1 $(GOTEST) -race metrics.go metrics_test.go metrics_percentile_test.go
+
+dispatch-vm-binaries: check-dispatch-linux
+	@mkdir -p $(DISPATCH_VM_DIR)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOTEST) -c -o $(DISPATCH_VM_DIR)/queue.test ./internal/queue
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOTEST) -c -o $(DISPATCH_VM_DIR)/ublk.test .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOTEST) -c -o $(DISPATCH_VM_DIR)/ublk-mem.test ./examples/ublk-mem
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOTEST) -c -o $(DISPATCH_VM_DIR)/ublk-loop.test ./examples/ublk-loop
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -o $(DISPATCH_VM_DIR)/ublk-mem ./examples/ublk-mem
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -o $(DISPATCH_VM_DIR)/ublk-loop ./examples/ublk-loop
+	cd $(DISPATCH_VM_DIR) && shasum -a 256 \
+		queue.test ublk.test ublk-mem.test ublk-loop.test ublk-mem ublk-loop > SHA256SUMS
 
 coverage:
 	@echo "Generating coverage report..."

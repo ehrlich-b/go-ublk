@@ -348,6 +348,9 @@ type Observer interface {
 // NoOpObserver is a no-op implementation of Observer
 type NoOpObserver struct{}
 
+// NonBlocking permits automatic inline dispatch with this observer.
+func (NoOpObserver) NonBlocking() bool { return true }
+
 func (NoOpObserver) ObserveRead(uint64, uint64, bool)    {}
 func (NoOpObserver) ObserveWrite(uint64, uint64, bool)   {}
 func (NoOpObserver) ObserveDiscard(uint64, uint64, bool) {}
@@ -358,6 +361,9 @@ func (NoOpObserver) ObserveQueueDepth(uint32)            {}
 type MetricsObserver struct {
 	metrics *Metrics
 }
+
+// NonBlocking permits automatic inline dispatch; recording uses only atomics.
+func (*MetricsObserver) NonBlocking() bool { return true }
 
 // NewMetricsObserver creates an observer that records to the given metrics
 func NewMetricsObserver(m *Metrics) *MetricsObserver {

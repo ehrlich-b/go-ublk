@@ -56,12 +56,12 @@ func TestEngineFlushIgnoresSectorRange(t *testing.T) {
 					inline: dispatch.inline, dispatch: dispatch.dispatch,
 					userCopy: strings.Contains(mode, "user-copy"), batch: strings.HasPrefix(mode, "batch"),
 					newRing: func(uint32) (ring, error) { return k, nil },
-					handler: HandlerFunc(func(r *Request) {
+					handler: dispatch.handler(HandlerFunc(func(r *Request) {
 						if r.Op != OpFlush || r.Offset != 0 || r.Length != 0 || r.Data != nil || r.Integrity != nil {
 							t.Errorf("flush carries a range or borrowed buffer: %+v", r)
 						}
 						adapter.HandleRequest(r)
-					}),
+					})),
 				}
 				var flags RequestFlags
 				if mode == "shared-memory" {
@@ -139,7 +139,7 @@ func TestEngineRequestBoundsBeforeBackend(t *testing.T) {
 					cfg := engineConfig{capacity: func() int64 { return 8192 }, logicalBlockSize: 4096,
 						tagHi: 1, charFd: -1, desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 						bufs: unsafe.Pointer(&k.bufs[0]), bufSize: 4096,
-						handler: BackendHandler(boundsBackend{t}, nil),
+						handler: dispatch.handler(BackendHandler(boundsBackend{t}, nil)),
 						inline:  dispatch.inline, dispatch: dispatch.dispatch}
 					cfg.userCopy = strings.Contains(mode, "user-copy")
 					cfg.batch = strings.HasPrefix(mode, "batch")

@@ -26,6 +26,7 @@ type ring interface {
 	Submit() (int, error)
 	SubmitAndWait(minComplete uint32, timeout time.Duration) (int, error)
 	PeekCQE() *uring.CQE
+	CQReady() uint32
 	CQAdvance(n uint32)
 	Close() error
 }
@@ -168,6 +169,9 @@ type engine struct {
 	// opting in does not change their placement in goroutine/inline engines.
 	work       chan *Request // pool jobs; allocated once, sized to the tag range
 	workClosed bool          // engine-owned teardown guard
+	autoInline bool          // sampled handler declaration; excludes user copy
+	crowded    bool          // current CQE batch contains multiple ready requests
+	cqeBatch   []uring.CQE   // adaptive CQE snapshot, allocated once per engine
 }
 
 func newEngine(cfg engineConfig) *engine {
@@ -393,6 +397,9 @@ func (e *engine) handleFetch(res int32, flags uint32) {
 		e.fail(fmt.Errorf("queue %d: %w", e.cfg.queueID, err))
 		return
 	}
+	wasCrowded := e.crowded
+	e.crowded = e.crowded || len(tokens) > 1
+	defer func() { e.crowded = wasCrowded }()
 	if hasBuf {
 		buf := e.tagBufs[int(bid)*batchTagBufSize : (int(bid)+1)*batchTagBufSize]
 		if len(tokens) > 0 {
@@ -605,15 +612,7 @@ func (e *engine) loop() {
 			e.fail(fmt.Errorf("queue %d: io_uring wait: %w", e.cfg.queueID, err))
 			return
 		}
-		for {
-			cqe := e.ring.PeekCQE()
-			if cqe == nil {
-				break
-			}
-			ud, res, flags := cqe.UserData, cqe.Res, cqe.Flags
-			e.ring.CQAdvance(1)
-			e.handleCQE(ud, res, flags)
-		}
+		e.drainCQEs()
 	}
 }
 
@@ -744,8 +743,9 @@ func (e *engine) dispatch(i int) {
 	tag := i + e.cfg.tagLo
 	d := e.descriptor(tag)
 	r := &e.reqs[i]
+	inline := e.dispatchInline()
 	phase := reqAsync
-	if e.cfg.inline {
+	if inline {
 		phase = reqDispatching
 	}
 	if err := r.state.BeginPhase(phase); err != nil {
@@ -775,7 +775,7 @@ func (e *engine) dispatch(i int) {
 			LogicalBlockSize: uint64(e.cfg.logicalBlockSize), MaxPayload: uint64(e.cfg.bufSize)},
 	}, func(bounds validation.RequestRange) {
 		r.Offset, r.Length = bounds.Offset, bounds.Length
-		e.dispatchValidated(i, r, d)
+		e.dispatchValidated(i, r, d, inline)
 	})
 	if err != nil {
 		r.Offset, r.Length = 0, 0
@@ -785,7 +785,7 @@ func (e *engine) dispatch(i int) {
 }
 
 // dispatchValidated is reachable only through the central range guard.
-func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
+func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc, inline bool) {
 	tag := i + e.cfg.tagLo
 	if e.cfg.zeroCopy != nil {
 		e.dispatchZeroCopy(i, r)
@@ -825,7 +825,7 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 		r.Integrity = unsafe.Slice((*byte)(unsafe.Add(e.cfg.integ, tag*e.cfg.integSize)), n)
 	}
 
-	if e.cfg.inline {
+	if inline {
 		e.call(r)
 		if completion.ReturnInline(&r.state) {
 			e.commit(r) // completed before the handler returned

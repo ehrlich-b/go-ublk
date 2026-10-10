@@ -40,8 +40,8 @@ var (
 )
 
 // Handler serves raw block requests: see Request and DeviceParams.Handler.
-// Unless DeviceParams.Inline is set, every request runs on its own goroutine,
-// so a handler is called concurrently, up to QueueDepth times per queue.
+// Scheduling follows DeviceParams.Inline and Dispatch. A handler must support
+// concurrent calls, up to QueueDepth times per queue, including in adaptive mode.
 type Handler = queue.Handler
 
 // HandlerFunc adapts a function to Handler.

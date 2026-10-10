@@ -8,7 +8,10 @@ import (
 )
 
 func TestEngineDispatchConcurrentBlockingHandlers(t *testing.T) {
-	for _, mode := range dispatchCases[:2] {
+	for _, mode := range dispatchCases {
+		if mode.inline || mode.declared {
+			continue // These cases explicitly promise that the callback never blocks.
+		}
 		t.Run(mode.name, func(t *testing.T) {
 			const depth = 8
 			k := newFakeKernel(t, depth, testBufSize)
@@ -58,7 +61,10 @@ func TestEngineDispatchConcurrentBlockingHandlers(t *testing.T) {
 }
 
 func TestEngineDispatchTeardownAfterCompletion(t *testing.T) {
-	for _, mode := range dispatchCases[:2] {
+	for _, mode := range dispatchCases {
+		if mode.inline || mode.declared {
+			continue // Post-completion blocking violates an inline declaration too.
+		}
 		t.Run(mode.name, func(t *testing.T) {
 			k := newFakeKernel(t, 1, testBufSize)
 			release, returned := make(chan struct{}), make(chan struct{})

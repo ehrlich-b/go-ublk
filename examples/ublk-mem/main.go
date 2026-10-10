@@ -47,15 +47,16 @@ func main() {
 		sizeStr     = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
 		backendName = flag.String("backend", "ram", "Backend: ram or null (complete without touching data)")
 		inline      = flag.Bool("inline", false, "Run handlers on the queue's I/O thread")
-		dispatch    = flag.String("dispatch", "goroutine", "Handler dispatch: goroutine or pool (ignored with -inline)")
-		zip         = flag.Bool("zip", false, "Compress the contents in RAM (flate, 64KB chunks)")
-		verbose     = flag.Bool("v", false, "Verbose output")
-		minimal     = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
-		numQueues   = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
-		queueDepth  = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
-		cpuprofile  = flag.String("cpuprofile", "", "Write CPU profile to file")
-		memprofile  = flag.String("memprofile", "", "Write memory profile to file")
-		delSpec     = flag.String("del", "",
+		dispatch    = flag.String("dispatch", "goroutine",
+			"Handler dispatch: goroutine, pool, auto or adaptive (ignored with -inline)")
+		zip        = flag.Bool("zip", false, "Compress the contents in RAM (flate, 64KB chunks)")
+		verbose    = flag.Bool("v", false, "Verbose output")
+		minimal    = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
+		numQueues  = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
+		queueDepth = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
+		cpuprofile = flag.String("cpuprofile", "", "Write CPU profile to file")
+		memprofile = flag.String("memprofile", "", "Write memory profile to file")
+		delSpec    = flag.String("del", "",
 			"Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all' to reap every registered device")
 	)
 	flag.Parse()
@@ -108,11 +109,7 @@ func main() {
 			log.Fatal("-zip requires -backend ram")
 		}
 		params.Size = size
-		params.Handler = ublk.RequestHandlerFunc(func(r ublk.RequestHandle) {
-			if err := r.Complete(nil); err != nil {
-				panic(err)
-			}
-		})
+		params.Handler = nullHandler{}
 	default:
 		log.Fatalf("invalid backend %q: use ram or null", *backendName)
 	}
@@ -124,8 +121,12 @@ func main() {
 		params.Dispatch = ublk.DispatchGoroutine
 	case "pool":
 		params.Dispatch = ublk.DispatchPool
+	case "auto":
+		params.Dispatch = ublk.DispatchAuto
+	case "adaptive":
+		params.Dispatch = ublk.DispatchAdaptive
 	default:
-		log.Fatalf("invalid dispatch %q: use goroutine or pool", *dispatch)
+		log.Fatalf("invalid dispatch %q: use goroutine, pool, auto or adaptive", *dispatch)
 	}
 	if *minimal {
 		// Use minimal parameters for testing

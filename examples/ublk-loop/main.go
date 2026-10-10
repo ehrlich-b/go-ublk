@@ -29,6 +29,9 @@ func main() {
 		sizeStr    = flag.String("size", "", "Device size (e.g. 1G); default is the file's current size")
 		numQueues  = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
 		queueDepth = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
+		inline     = flag.Bool("inline", false, "Run handlers on the queue's I/O thread")
+		dispatch   = flag.String("dispatch", "goroutine",
+			"Handler dispatch: goroutine, pool, auto or adaptive (ignored with -inline)")
 		syncWrites = flag.Bool("sync", false, "Open the file O_DSYNC and advertise a write-through device")
 		readOnly   = flag.Bool("read-only", false, "Export the file read-only")
 		verbose    = flag.Bool("v", false, "Verbose output")
@@ -79,6 +82,19 @@ func main() {
 	params.ReadOnly = *readOnly
 	params.DeviceID = int32(*devID)
 	params.EnableZeroCopy = *zeroCopy
+	params.Inline = *inline
+	switch *dispatch {
+	case "goroutine":
+		params.Dispatch = ublk.DispatchGoroutine
+	case "pool":
+		params.Dispatch = ublk.DispatchPool
+	case "auto":
+		params.Dispatch = ublk.DispatchAuto
+	case "adaptive":
+		params.Dispatch = ublk.DispatchAdaptive
+	default:
+		log.Fatalf("invalid dispatch %q: use goroutine, pool, auto or adaptive", *dispatch)
+	}
 
 	// The durability contract, stated once, in the one place that knows the
 	// answer. Buffered writes to a file are in the page cache when WriteAt

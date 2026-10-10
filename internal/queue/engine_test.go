@@ -28,12 +28,31 @@ type dispatchCase struct {
 	name     string
 	inline   bool
 	dispatch DispatchMode
+	declared bool
 }
 
 var dispatchCases = []dispatchCase{
 	{name: "goroutine", dispatch: DispatchGoroutine},
 	{name: "pool", dispatch: DispatchPool},
 	{name: "inline", inline: true},
+	{name: "auto-declared", dispatch: DispatchAuto, declared: true},
+	{name: "auto-unknown", dispatch: DispatchAuto},
+	{name: "adaptive-declared", dispatch: DispatchAdaptive, declared: true},
+	{name: "adaptive-unknown", dispatch: DispatchAdaptive},
+}
+
+type declaredHandler struct {
+	Handler
+	nonBlocking bool
+}
+
+func (h declaredHandler) NonBlocking() bool { return h.nonBlocking }
+
+func (mode dispatchCase) handler(h Handler) Handler {
+	if mode.declared {
+		return declaredHandler{Handler: h, nonBlocking: true}
+	}
+	return h
 }
 
 func forEachDispatch(t *testing.T, run func(*testing.T, dispatchCase)) {
@@ -63,7 +82,7 @@ func startEngineWait(t *testing.T, k *fakeKernel, h Handler, mode dispatchCase, 
 		bufs:         unsafe.Pointer(&k.bufs[0]),
 		bufSize:      testBufSize,
 		userCopy:     k.ufile >= 0,
-		handler:      h,
+		handler:      mode.handler(h),
 		inline:       mode.inline,
 		dispatch:     mode.dispatch,
 		newRing:      func(uint32) (ring, error) { return k, nil },
@@ -451,7 +470,7 @@ func TestEngineNoLostWakeup(t *testing.T) {
 			tagLo: 0, tagHi: 1, charFd: -1,
 			desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 			bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-			handler: RequestHandlerFunc(func(h RequestHandle) { pending <- h }),
+			handler: mode.handler(RequestHandlerFunc(func(h RequestHandle) { pending <- h })),
 			inline:  mode.inline, dispatch: mode.dispatch, waitInterval: time.Hour,
 			newRing: func(uint32) (ring, error) { return k, nil },
 		})
@@ -570,7 +589,7 @@ func startBatchEngine(t *testing.T, k *fakeKernel, h Handler, mode dispatchCase)
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
 		userCopy: k.ufile >= 0, batch: true,
-		handler: h, inline: mode.inline, dispatch: mode.dispatch, waitInterval: 20 * time.Millisecond,
+		handler: mode.handler(h), inline: mode.inline, dispatch: mode.dispatch, waitInterval: 20 * time.Millisecond,
 		newRing: func(uint32) (ring, error) { return k, nil },
 	})
 	if err := e.start(); err != nil {
@@ -658,7 +677,7 @@ func TestEngineSharedMemory(t *testing.T) {
 			capacity: testCapacity, logicalBlockSize: 512,
 			tagLo: 0, tagHi: 2, charFd: -1, desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 			bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize, shmem: shm,
-			handler: h, inline: mode.inline, dispatch: mode.dispatch, waitInterval: 20 * time.Millisecond,
+			handler: mode.handler(h), inline: mode.inline, dispatch: mode.dispatch, waitInterval: 20 * time.Millisecond,
 			newRing: func(uint32) (ring, error) { return k, nil },
 		})
 		if err := e.start(); err != nil {

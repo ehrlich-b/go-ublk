@@ -341,6 +341,12 @@ func (k *fakeKernel) CQAdvance(n uint32) {
 	k.cq = k.cq[n:]
 }
 
+func (k *fakeKernel) CQReady() uint32 {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return uint32(len(k.cq))
+}
+
 func (k *fakeKernel) Close() error {
 	k.mu.Lock()
 	defer k.mu.Unlock()

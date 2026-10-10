@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Run on the coordinator's disposable Linux VM as root.
 # Usage: scripts/perf-profile.sh /path/to/ublk-mem '-backend ram' '-backend null -inline'
+# Loop: SERVER=loop BACKING_DIR=/dev/shm scripts/perf-profile.sh /path/to/ublk-loop '-dispatch auto'
 # ROUNDS=3 OUT=.scratch/profile CPU_PROFILE=1 scripts/perf-profile.sh ...
 set -euo pipefail
 
 fail() { echo "perf-profile: $*" >&2; exit 1; }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
-    echo "Usage: ROUNDS=3 CPU_PROFILE=0 OUT=<new-directory> $0 <ublk-mem> '<flags>' ['<flags>' ...]"
+    echo "Usage: SERVER=mem|loop ROUNDS=3 CPU_PROFILE=0 OUT=<new-directory> $0 <binary> '<flags>' ..."
+    echo "Loop requires BACKING_DIR=<existing tmpfs directory>; the harness owns its 512 MiB file."
     exit 0
 fi
-[[ $# -ge 2 ]] || fail "provide a ublk-mem binary and at least one quoted flag set"
+[[ $# -ge 2 ]] || fail "provide a server binary and at least one quoted flag set"
 [[ $(uname -s) == Linux ]] || fail "requires Linux"
 [[ $(id -u) == 0 ]] || fail "run as root on a disposable benchmark VM"
 for command in fio perf python3 modprobe timeout tail awk sha256sum realpath tee; do
@@ -23,8 +25,19 @@ shift
 flag_sets=("$@")
 rounds=${ROUNDS:-3}
 cpu_profile=${CPU_PROFILE:-0}
+server=${SERVER:-mem}
+[[ $server == mem || $server == loop ]] || fail "SERVER must be mem or loop"
 [[ $rounds =~ ^[1-9][0-9]*$ ]] || fail "ROUNDS must be a positive integer"
 [[ $cpu_profile == 0 || $cpu_profile == 1 ]] || fail "CPU_PROFILE must be 0 or 1"
+[[ $server != loop || $cpu_profile == 0 ]] || fail "CPU_PROFILE is only supported by ublk-mem"
+backing_dir=${BACKING_DIR:-}
+if [[ $server == loop ]]; then
+    for command in stat mktemp dd rm; do
+        command -v "$command" >/dev/null || fail "missing command: $command"
+    done
+    [[ -d $backing_dir ]] || fail "BACKING_DIR must name an existing tmpfs directory"
+    [[ $(stat -f -c %T "$backing_dir") == tmpfs ]] || fail "BACKING_DIR must be on tmpfs"
+fi
 out=${OUT:-.scratch/perf-profile-$(date -u +%Y%m%dT%H%M%SZ)}
 [[ ! -e $out ]] || fail "output directory already exists: $out"
 mkdir -p "$out"
@@ -41,17 +54,21 @@ for flag_set in "${flag_sets[@]}"; do
         argument=${flags[$argument_index]}
         case "$argument" in
             -backend|--backend)
+                [[ $server == mem ]] || fail "-backend is only supported by ublk-mem"
                 argument_index=$((argument_index + 1))
                 value=${flags[$argument_index]:-}
                 [[ $value == ram || $value == null ]] || fail "backend must be ram or null" ;;
             -dispatch|--dispatch)
                 argument_index=$((argument_index + 1))
                 value=${flags[$argument_index]:-}
-                [[ $value == goroutine || $value == pool ]] || fail "dispatch must be goroutine or pool" ;;
+                [[ $value == goroutine || $value == pool || $value == auto || $value == adaptive ]] ||
+                    fail "dispatch must be goroutine, pool, auto or adaptive" ;;
             -backend=ram|--backend=ram|-backend=null|--backend=null|\
+            -zip|--zip|-zip=true|--zip=true|-zip=false|--zip=false)
+                [[ $server == mem ]] || fail "RAM backend flags are only supported by ublk-mem" ;;
             -dispatch=goroutine|--dispatch=goroutine|-dispatch=pool|--dispatch=pool|\
+            -dispatch=auto|--dispatch=auto|-dispatch=adaptive|--dispatch=adaptive|\
             -inline|--inline|-inline=true|--inline=true|-inline=false|--inline=false|\
-            -zip|--zip|-zip=true|--zip=true|-zip=false|--zip=false|\
             -v|--v|-v=true|--v=true|-v=false|--v=false) ;;
             *) fail "unsupported or harness-owned flag: $argument" ;;
         esac
@@ -59,6 +76,8 @@ for flag_set in "${flag_sets[@]}"; do
 done
 
 server_pid=""
+backing_file=""
+server_stuck=0
 stop_server() {
     local daemon_pid=$server_pid
     server_pid=""
@@ -67,6 +86,7 @@ stop_server() {
         # Bound cleanup without SIGKILL or deleting unrelated devices. The
         # example's own shutdown backstop is 15 seconds; allow twice that.
         if ! timeout 30s tail --pid="$daemon_pid" -f /dev/null; then
+            server_stuck=1
             echo "perf-profile: daemon $daemon_pid did not stop; inspect its log and device" >&2
             return 1
         fi
@@ -80,6 +100,9 @@ cleanup() {
     if [[ -n $server_pid ]]; then
         stop_server || status=1
     fi
+    if [[ -n $backing_file && $server_stuck == 0 ]]; then
+        rm -f -- "$backing_file"
+    fi
     exit "$status"
 }
 trap cleanup EXIT
@@ -87,6 +110,14 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 events=context-switches,cpu-migrations,raw_syscalls:sys_enter
+server_flags=()
+if [[ $server == loop ]]; then
+    backing_file=$(mktemp "$backing_dir/ublk-perf.XXXXXXXX")
+    # Materialize every tmpfs page so randread measures the file adapter,
+    # rather than repeatedly serving a sparse file's shared zero page.
+    dd if=/dev/zero of="$backing_file" bs=1M count=512 status=none
+    server_flags=(-file "$backing_file")
+fi
 modprobe ublk_drv
 perf stat --no-big-num -x ';' -o "$out/event-check.csv" -e "$events" -- true
 {
@@ -94,6 +125,7 @@ perf stat --no-big-num -x ';' -o "$out/event-check.csv" -e "$events" -- true
     uname -a
     sha256sum "$binary"
     printf 'binary=%s\nrounds=%s\nsize=512M queues=2 depth=64 runtime=10s\n' "$binary" "$rounds"
+    printf 'server=%s backing_file=%s\n' "$server" "$backing_file"
     for index in "${!flag_sets[@]}"; do
         printf 'set=%s flags=%s\n' "$index" "${flag_sets[$index]}"
     done
@@ -112,7 +144,7 @@ for ((round=1; round<=rounds; round++)); do
         if [[ $cpu_profile == 1 ]]; then
             profile_flags=(-cpuprofile "$run_dir/cpu.pprof")
         fi
-        "$binary" "${flags[@]}" -size 512M -queues 2 -depth 64 \
+        "$binary" "${server_flags[@]}" "${flags[@]}" -size 512M -queues 2 -depth 64 \
             "${profile_flags[@]}" > "$run_dir/server.log" 2>&1 &
         server_pid=$!
         device=""

@@ -19,13 +19,17 @@ func scheduledBatchEngine(t *testing.T, depth int, h Handler) (*engine, *fakeKer
 }
 
 func scheduledEngine(t *testing.T, depth int, h Handler, batch bool) (*engine, *fakeKernel) {
+	return scheduledEngineMode(t, depth, h, batch, dispatchCase{inline: true})
+}
+
+func scheduledEngineMode(t *testing.T, depth int, h Handler, batch bool, mode dispatchCase) (*engine, *fakeKernel) {
 	t.Helper()
 	k := newFakeKernel(t, depth, testBufSize)
 	e := newEngine(engineConfig{
 		capacity: testCapacity, logicalBlockSize: 512, tagHi: depth, charFd: -1,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-		handler: h, inline: true, batch: batch,
+		handler: mode.handler(h), inline: mode.inline, dispatch: mode.dispatch, batch: batch,
 	})
 	e.ring = k
 	if batch {
@@ -136,11 +140,7 @@ func TestCompletionScheduleExistingScriptsReplay(t *testing.T) {
 }
 
 func reapScheduled(e *engine, k *fakeKernel) {
-	for c := k.PeekCQE(); c != nil; c = k.PeekCQE() {
-		ud, res, flags := c.UserData, c.Res, c.Flags
-		k.CQAdvance(1)
-		e.handleCQE(ud, res, flags)
-	}
+	e.drainCQEs()
 	e.drainCompletions()
 }
 

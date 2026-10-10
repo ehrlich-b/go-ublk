@@ -77,7 +77,8 @@ func testEngineScript(t *testing.T, script []byte, dispatch dispatchCase) {
 		tagLo: 0, tagHi: depth, charFd: -1,
 		desc: unsafe.Pointer(&k.desc[0]), descStride: 24,
 		bufs: unsafe.Pointer(&k.bufs[0]), bufSize: testBufSize,
-		handler: h, inline: inline, dispatch: dispatch.dispatch, batch: batch, waitInterval: 5 * time.Millisecond,
+		handler: dispatch.handler(h), inline: inline, dispatch: dispatch.dispatch,
+		batch: batch, waitInterval: 5 * time.Millisecond,
 		newRing: func(uint32) (ring, error) { return k, nil },
 	})
 	if err := e.start(); err != nil {

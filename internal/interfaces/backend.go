@@ -12,6 +12,14 @@ type Backend interface {
 	Flush() error
 }
 
+// NonBlockingDeclarer permits inline dispatch of a Backend or Handler. Returning
+// true promises prompt return for every operation, including flush, discard,
+// integrity and FUA. It must not wait for external I/O or request completion.
+// The declaration is sampled once when an engine is created.
+type NonBlockingDeclarer interface {
+	NonBlocking() bool
+}
+
 // DiscardBackend is an optional interface for TRIM/DISCARD support.
 type DiscardBackend interface {
 	Backend
