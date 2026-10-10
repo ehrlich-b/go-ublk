@@ -734,6 +734,10 @@ func (e *engine) dispatch(i int) {
 	tag := i + e.cfg.tagLo
 	d := e.descriptor(tag)
 	r := &e.reqs[i]
+	if err := r.state.Begin(); err != nil {
+		e.fail(err)
+		return
+	}
 	r.Op = Op(d.OpFlags & 0xff)
 	r.Flags = RequestFlags(d.OpFlags &^ 0xff)
 	r.DescriptorExtra = nil
@@ -823,14 +827,15 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 // the handler fails the request with EIO instead of killing the server with
 // I/O in flight.
 func (e *engine) call(r *Request) {
+	handle := r.Handle()
 	defer func() {
 		if p := recover(); p != nil {
 			if e.cfg.logger != nil {
-				e.cfg.logger.Printf("ublk: handler panic on queue %d tag %d %s: %v", r.Queue, r.Tag, r.Op, p)
+				e.cfg.logger.Printf("ublk: handler panic on queue %d tag %d %s: %v", handle.Queue, handle.Tag, handle.Op, p)
 			}
-			if s := r.state.Load(); s == reqDispatching || s == reqAsync {
-				r.finish(-int32(syscall.EIO))
-			}
+			// The handler may have completed before panicking, allowing reuse.
+			// Recovery must never fail a later delivery on its behalf.
+			_ = handle.Complete(syscall.EIO)
 		}
 	}()
 	if e.cfg.userCopy && r.Data != nil && r.Flags&FlagSharedMemory == 0 && (r.Op == OpWrite || r.Op == OpZoneAppend) {

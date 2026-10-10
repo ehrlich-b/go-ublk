@@ -8,7 +8,10 @@ import (
 
 func TestCompletionClaimsBeforeCopyAndRejectsConcurrentDuplicate(t *testing.T) {
 	for _, initial := range []uint32{Dispatching, Async} {
-		var state atomic.Uint32
+		var state Ownership
+		if err := state.Begin(); err != nil {
+			t.Fatal(err)
+		}
 		state.Store(initial)
 		entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 		var copies, enqueues atomic.Int32
@@ -42,7 +45,10 @@ func TestCompletionClaimsBeforeCopyAndRejectsConcurrentDuplicate(t *testing.T) {
 }
 
 func TestInlineCompletionPublishesOnlyAfterStaging(t *testing.T) {
-	var state atomic.Uint32
+	var state Ownership
+	if err := state.Begin(); err != nil {
+		t.Fatal(err)
+	}
 	state.Store(Dispatching)
 	result, enqueued := 0, false
 	if err := Finish(&state, func() { result = 512 }, func() { enqueued = true }); err != nil {

@@ -42,17 +42,25 @@ type BlkZone struct {
 
 // ReportZones fills an OpReportZones request's buffer with zones and
 // completes it. Fewer zones than NrZones end the report.
+//
+// Deprecated: use RequestHandle.ReportZones for generation validation.
 func (r *Request) ReportZones(zones []BlkZone) {
 	if r.Op != OpReportZones {
 		r.Complete(fmt.Errorf("ReportZones on a %s request: %w", r.Op, syscall.EINVAL))
 		return
 	}
-	max := len(r.Data) / BlkZoneSize
+	if err := r.Handle().ReportZones(zones); err != nil {
+		panic(err)
+	}
+}
+
+func fillZones(data []byte, zones []BlkZone) {
+	max := len(data) / BlkZoneSize
 	if len(zones) > max {
 		zones = zones[:max]
 	}
 	for i, z := range zones {
-		b := r.Data[i*BlkZoneSize : (i+1)*BlkZoneSize]
+		b := data[i*BlkZoneSize : (i+1)*BlkZoneSize]
 		clear(b)
 		capacity := z.Capacity
 		if capacity == 0 {
@@ -71,5 +79,4 @@ func (r *Request) ReportZones(zones []BlkZone) {
 		}
 		binary.LittleEndian.PutUint64(b[32:], uint64(capacity>>9))
 	}
-	r.Complete(nil)
 }

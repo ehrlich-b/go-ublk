@@ -71,6 +71,9 @@ func TestCompletionOwnershipDuplicatePreservesAppendLBA(t *testing.T) {
 	e := newEngine(engineConfig{tagHi: 1})
 	r := &e.reqs[0]
 	r.Op, r.Length = OpZoneAppend, 512
+	if err := r.state.Begin(); err != nil {
+		t.Fatal(err)
+	}
 	r.state.Store(reqDispatching)
 	r.CompleteZoneAppend(42, nil)
 	if completionPanic(func() { r.CompleteZoneAppend(99, nil) }) == nil || r.lba != 42 || r.result != 512 {

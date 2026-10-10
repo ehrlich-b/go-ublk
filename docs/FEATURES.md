@@ -77,13 +77,13 @@ tests use the [fake kernel](../internal/queue/fakekernel_test.go#L23).
 
 | Feature/mode | Tier | Implementation and scope | Unit/model tests; recorded kernel passes |
 |---|---|---|---|
-| Raw asynchronous Handler | E | [request.go:22](../request.go#L22), [engine.go:689](../internal/queue/engine.go#L689); exactly one completion, fields/buffers valid until completion; queue faults surface through [Done/Err:900](../backend.go#L900). | [TestEngineAsyncOutOfOrderStress:142](../internal/queue/engine_test.go#L142), [NoLostWakeup:387](../internal/queue/engine_test.go#L387), [UnexpectedCompletionIsFatal:351](../internal/queue/engine_test.go#L351); B: `features/handler-async`. Device-level failure/timeout injection remains a gap. |
+| Raw asynchronous Handler | E | [request.go:22](../request.go#L22), [engine.go:689](../internal/queue/engine.go#L689); exactly one completion, prefer RequestHandlerFunc/RequestHandle for generation checks; legacy fields/buffers valid until completion; queue faults surface through [Done/Err:900](../backend.go#L900). | [TestEngineAsyncOutOfOrderStress:142](../internal/queue/engine_test.go#L142), [NoLostWakeup:387](../internal/queue/engine_test.go#L387), [UnexpectedCompletionIsFatal:351](../internal/queue/engine_test.go#L351); B: `features/handler-async`. Device-level failure/timeout injection remains a gap. |
 | User copy | E | [engine.go:781](../internal/queue/engine.go#L781), [copyIn/Out:802](../internal/queue/engine.go#L802); char-device pread/pwrite, not zero copy. | [TestEngineRoundTripUserCopyInline/Goroutine:134](../internal/queue/engine_test.go#L134); R: `features/integrity-user-copy` (byte-integrity test, not PI metadata). |
 | NEED_GET_DATA | E | [engine.go:641](../internal/queue/engine.go#L641); extra write-buffer round trip; incompatible with user copy, zero copy and batch. | [TestEngineNeedGetData:229](../internal/queue/engine_test.go#L229); R: `features/integrity-need-get-data`. |
 | Manual fixed-buffer zero copy | E | [engine setup:223](../internal/queue/engine.go#L223), [register/file I/O:1013](../internal/queue/engine.go#L1013), [unregister before commit:929](../internal/queue/engine.go#L929); ZeroCopyBackend file/base mapping, no Go payload or backend callbacks. | [TestEngineZeroCopyManual:486](../internal/queue/engine_test.go#L486), [ShortReadFails:490](../internal/queue/engine_test.go#L490); `mainline-6.15.11`: `features/{zero-copy,zero-copy-close-under-load}`. |
 | AUTO_BUF_REG zero copy and manual fallback | E | [automatic negotiation:620](../backend.go#L620), [engine.go:983](../internal/queue/engine.go#L983), [NEED_REG_BUF:1019](../internal/queue/engine.go#L1019); enabled opportunistically when advertised. | [TestEngineZeroCopyAuto/AutoFallback:484](../internal/queue/engine_test.go#L484); T: `features/{zero-copy,zero-copy-close-under-load}`. Accepted feature identifies auto configuration; VM tests do not force/count fallback. |
 | Ublk BatchIO with copy/user copy | E | [engine.go:264](../internal/queue/engine.go#L264), [partial commits:463](../internal/queue/engine.go#L463); PREP, multishot FETCH, tag buffers and COMMIT arrays. One engine per queue; rejects NEED_GET_DATA and ThreadsPerQueue > 1. | [TestEngineBatchCopy/CopyInline/UserCopy/PartialCommits:556](../internal/queue/engine_test.go#L556); N: `features/integrity-batch-io`, `features/integrity-batch-io-user-copy`, `features/batch-io-close-under-load`. |
-| BatchIO with zero copy | E | [batchFlags:264](../internal/queue/engine.go#L264), [commit:908](../internal/queue/engine.go#L908); requires AUTO_BUF_REG; supports manual fallback. | Separate batch and ZC model tests above; no combined batch-ZC model test. N: `features/batch-io-zero-copy`. |
+| BatchIO with zero copy | E | [batchFlags:264](../internal/queue/engine.go#L264), [commit:908](../internal/queue/engine.go#L908); requires AUTO_BUF_REG; supports manual fallback. | [Generation/reuse model](../internal/queue/handle_test.go) includes batch auto/fallback ZC; broader combined-mode lifetime coverage remains pending. N: `features/batch-io-zero-copy`. |
 | Unprivileged devices | E | [Create udev wait:633](../backend.go#L633), [dev-path probe:39](../internal/ctrl/commands.go#L39), [rules/helper](../examples/ublk-chown/); kernel forbids user copy, zero copy and recovery. Root may have the unprivileged bit cleared. | [TestDevPathLayout:212](../internal/ctrl/commands_test.go#L212), [TestAddDevUnprivilegedRequestAsRoot:209](../internal/ctrl/features_test.go#L209); R: `features/unprivileged` ([test:1408](../test/suite/tests_v1.go#L1408)); root emulates udev, nobody serves, root issues block I/O. |
 | RecoveryReissue and RecoveryQueue | E | [modes:254](../backend.go#L254), [Recover:282](../recover.go#L282); respectively reissue or fail outstanding requests; both hold new I/O while server absent. | [fake control lifecycle:38](../internal/ctrl/commands_test.go#L38); R: `recovery/kill-and-recover`, `recovery/queue-mode` ([tests:534](../test/suite/tests_v1.go#L534)). No public recovery failure-state model. |
 | RecoveryFailIO | E | [backend.go:270](../backend.go#L270), [Recover:282](../recover.go#L282); absent-server outstanding/new I/O fails until takeover. | Control flag/model tests; F: `recovery/fail-io-mode` ([test:701](../test/suite/tests_v1.go#L701)), idle-server crash. |
@@ -188,7 +188,7 @@ test exercises public startup paths. Advanced-mode skips retain their reasons.
 
 These bounds checks cover mapping geometry and request arithmetic. The
 completion follow-up below adds batch CQE and pending-STOP checks; shared-region
-address decoding, registration/loan lifetime, stale backend completions,
+address decoding, registration/loan lifetime, legacy pointer migration,
 recovery reply arithmetic and resize transition ordering still need work.
 No advanced mode is promoted by portable tests or cross-compilation alone.
 
@@ -247,41 +247,130 @@ Inline handler while another goroutine stages completion transfers publication
 to the async path; the engine cannot commit half-staged bytes. Portable race
 tests check the poisoned buffer, result and enqueue count; Linux
 [regressions](../internal/queue/completion_ownership_test.go) check user-copy
-and append side effects and retain the stale-pointer witness.
+and append side effects. The legacy pointer witness remains as a migration
+regression: the old API still requires callers to stop using it at completion.
 
-**Still open:** a retained public `*Request` aliases the tag's next request.
-An old caller can successfully complete that newer request and commit its
-poisoned read bytes. A generation field inside the recycled object cannot
-authenticate which delivery the caller owns. Recommend an immutable completion
-handle containing device epoch, queue, tag and generation, with the generation
-validated before any result/copy/enqueue effect. Legacy pointer-only Complete
-methods must be retired or backed by a distinct Request object per delivery;
-keeping them unrestricted would bypass the handle. This public API migration
-(or an allocation/lifetime change to the preallocated request path) is not
-implemented here. Batch command generations do not fix backend pointer reuse.
+**Generation-bound requests (2026-10-10).** Every dispatch, including user copy,
+batch and file-backed zero copy, advances a per-tag generation. The
+[ownership word](../internal/completion/ownership.go) packs a 60-bit generation
+with the phase in one atomic uint64. Completion claims both together before
+reading recycled fields, writing the result/LBA, copying data/metadata or
+publishing a completion. Generations never wrap: exhaustion faults the queue.
+A retained handle keeps the original request slot alive, so another engine or
+device cannot reuse its identity. Handler panic recovery also uses its original
+generation, even if the handler completed before panicking.
 
-Local gates use Go 1.26.2, Darwin arm64 and Linux amd64 cross-compilation:
-portable completion/validation/UAPI/logging tests with race and checkptr;
-Linux build/vet and all-package normal/checkptr test compilation. No Linux
-binary is executed locally. The final two-worker fuzz runs passed:
-`FuzzCompletionSchedule` **1,191,083** executions / 60 s,
-`FuzzRequestRange` **1,187,155** / 30 s, and
-`FuzzRingLayout` **1,127,630** / 30 s. These are smoke budgets, not the larger
-assurance campaigns. Logs and compiled artifacts are retained in `.scratch/`.
+The additive [RequestHandle API](../internal/queue/handle.go) returns
+`ErrStaleRequest` after reuse, `ErrRequestCompleted` after a completion claim,
+and `ErrRequestBusy` while buffers are borrowed. `WithBuffers` claims the same
+generation, calls the callback only when valid, and prevents completion/reuse
+until it returns, including panic unwinding. It exposes payload, integrity and
+read-only descriptor-extension slices together. Complete after the callback;
+retry a busy completion when the callback has returned. Metadata fields are
+value snapshots; mutating the snapshot cannot change transport results.
 
-`bin/ublk-suite` is rebuilt, as are checkptr binaries for the four internal
-packages (queue, ctrl, uring, uapi) and the public package (`ublk.test`) so the
-new high-level STOP model is included. From this clone in the disposable VM:
+Use `DeviceParams.Handler: RequestHandlerFunc(func(h RequestHandle) { ... })`,
+or capture `h := r.Handle()` during the original `HandleRequest` invocation:
 
-```sh
-for p in ublk queue ctrl uring uapi; do
-  sudo .scratch/vm-bin/$p.test -test.v -test.timeout=5m || exit 1
-done
-sudo ./bin/ublk-suite
+```go
+Handler: ublk.RequestHandlerFunc(func(h ublk.RequestHandle) {
+    err := h.WithBuffers(func(data, integrity, descriptorExtra []byte) error {
+        // Fill/store these buffers synchronously; do not retain the slices.
+        return nil
+    })
+    if completionErr := h.Complete(err); completionErr != nil {
+        // Report the rejected completion to the application's supervisor.
+    }
+}),
 ```
 
-VM runtime/checkptr and real-kernel suite results on this candidate are pending;
-no lifecycle or advanced-mode support tier changes follow from these gates.
+**Compatibility limit:** `Request`, its pointer-only completion methods,
+`HandlerFunc` and its exported buffer slices remain source-compatible and are
+deprecated. A generation inside a recycled pointer cannot identify which
+invocation retained it, and Go cannot intercept indexing an exported `[]byte`.
+Distinct immutable pointer objects would require per-delivery allocation (or
+unbounded storage for arbitrarily retained pointers). The value handle API is
+therefore necessary to meet the allocation constraint. Capturing a handle from
+an already stale pointer, or retaining a slice after `WithBuffers` returns,
+still violates the API contract. Migrating raw handlers is required for stale
+call rejection; the synchronous Backend adapter already uses the checked API.
+
+[Portable regressions](../internal/completion/generation_test.go) check poisoned
+buffers, duplicate/stale calls, concurrent reuse, borrow/completion exclusion,
+inline-to-async handoff, panic release and generation exhaustion. The extended
+`FuzzCompletionSchedule` retains raw stale generations and independently checks
+result, payload/metadata, copy and enqueue effects; all prior seed replays remain.
+[Fake-kernel regressions](../internal/queue/handle_test.go) cover copy and user
+copy (inline/goroutine), batch copy/user copy, integrity, shared regions and
+manual/automatic/fallback zero copy, including batch zero copy. They validate
+all completion variants, zone-report writes, descriptor canaries and the
+per-generation commit ledger. The batch fake peer now models automatic
+registration and commit release instead of trying to copy a zero-copy payload.
+Those Linux regressions are compiled locally; their runtime gate is pending the
+coordinator's VM run. No support-tier promotion follows from compilation.
+
+Local validation uses Go 1.26.2, Darwin arm64 and Linux amd64 compilation.
+Portable completion/validation/UAPI/logging tests pass normally and with race
+plus checkptr. Linux build, vet and all-package normal/checkptr compilation
+pass. Native fuzz smoke budgets passed: `FuzzCompletionSchedule` **815,750 / 60 s**,
+`FuzzRingLayout` **763,316 / 30 s**, `FuzzRequestRange` **1,186,119 / 30 s**,
+`FuzzFixedUAPI` **856,049 / 30 s**, `FuzzParamsUAPI` **800,609 / 30 s**, and
+`FuzzUAPIEncodings` **963,576 / 30 s**. Linux-only `FuzzEngine`/`FuzzCtrlDecoders` require the VM.
+A local QEMU run was prepared, but the network proxy rejected the kernel download (HTTP 403);
+no Linux binary was executed locally.
+These budgets check functional correctness of completion handling and do not
+replace the larger assurance campaigns.
+
+The completion benchmark was added before changing ownership and run against
+`8d14671`'s code, then rerun after the change. It measures dispatch, completion
+claim and inline publication without kernel setup. Existing portable UAPI
+microbenchmarks were also run before/after. There is no new mutex or per-request
+allocation; the allocation gates include generation advance, buffer callback,
+handle dispatch and completion. Linux io_uring benchmarks cannot run on Darwin.
+
+Median completion dispatch/claim/inline-return time (seven samples) changed
+from **10.39 to 20.06 ns/op**, **+9.67 ns / +93.1%**, with **0 B/op and
+0 allocations/op** before and after. This includes generation advance and the
+legacy completion entrypoint; it is not end-to-end kernel latency. The following
+existing portable UAPI benchmarks used five samples, `GOMAXPROCS=2`, `-p 2`,
+`taskpolicy -b nice -n 15`. Their source is unchanged; these timing differences
+show run-to-run/environmental variation, not an identified serializer change.
+
+| Existing benchmark | Before ns/op | After ns/op | Delta |
+|---|---:|---:|---:|
+| `BenchmarkMarshalCtrlCmd` | 48.9 | 61.98 | +26.7% |
+| `BenchmarkMarshalIOCmd` | 41.41 | 52.6 | +27.0% |
+| `BenchmarkMarshalCtrlDevInfo` | 63.1 | 65.78 | +4.2% |
+| `BenchmarkMarshalParams` | 145.3 | 163.5 | +12.5% |
+| `BenchmarkMarshalIODescFallback` | 63.8 | 60.59 | -5.0% |
+| `BenchmarkMarshalIntoCtrlCmd` | 10.19 | 11.15 | +9.4% |
+| `BenchmarkMarshalIntoIOCmd` | 6.62 | 8.159 | +23.2% |
+| `BenchmarkMarshalIntoCtrlDevInfo` | 14.93 | 14.59 | -2.3% |
+| `BenchmarkMarshalIntoParams` | 75.07 | 86.52 | +15.3% |
+| `BenchmarkMarshalIntoIODescFallback` | 22.34 | 25.89 | +15.9% |
+
+All allocation counts stayed unchanged; all `MarshalInto` paths stayed at zero.
+Logs, native baseline negative controls and build receipts are in `.scratch/`.
+The baseline controls use `8d14671`'s exact completion code and raw slices: both
+fail the stale-rejection oracle. The new generation regressions pass natively.
+
+`bin/ublk-suite` and `.scratch/vm-bin/*.test` are rebuilt for Linux amd64. The
+manifest uses paths relative to the destination directory: copy `ublk-suite`
+and the test files beside `SHA256SUMS`/`REVISION`. On the coordinator's disposable
+VM, from that directory:
+
+```sh
+sha256sum -c SHA256SUMS
+for p in ublk queue ctrl uring uapi completion validation; do
+  sudo ./$p.test -test.v -test.timeout=5m || exit 1
+done
+sudo ./ublk-suite
+# Instrumented Linux-only fuzz binaries are included; no Go toolchain needed:
+GOMAXPROCS=2 ./queue-fuzz.test -test.run='^$' -test.parallel=2 -test.fuzz='^FuzzEngine$' -test.fuzztime=30s -test.fuzzcachedir=/tmp/go-ublk-queue-fuzz
+GOMAXPROCS=2 ./ctrl-fuzz.test -test.run='^$' -test.parallel=2 -test.fuzz='^FuzzCtrlDecoders$' -test.fuzztime=30s -test.fuzzcachedir=/tmp/go-ublk-ctrl-fuzz
+```
+
+VM runtime/checkptr and the real-kernel suite on this candidate are pending.
 
 ## Coverage limits and documentation corrections
 

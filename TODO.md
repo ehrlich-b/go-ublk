@@ -48,8 +48,13 @@ absent. No current comparative performance claim is established by this backlog.
    campaigns. Batch CQE fields/identities and consumed-prefix ownership now have
    a portable ledger, deterministic engine replays and `FuzzCompletionSchedule`.
    Duplicate backend completions now claim ownership before copy/result effects.
-   Stale public Request pointers after tag reuse remain open: an immutable
-   generation-bound completion API is needed. Linux replay gates remain pending.
+   Generation-bound RequestHandle/RequestHandlerFunc now reject stale completion
+   and buffer access through one atomic generation/phase word. WithBuffers holds
+   a borrow through the callback; panic recovery is generation-bound too.
+   The source-compatible pointer/slice API is deprecated: migrate raw handlers,
+   because stale legacy pointers/slices still bypass identity checks. Linux
+   fake-kernel reuse/poison regressions cover every dispatch mode and are compiled;
+   runtime replay and Linux-only fuzz gates remain coordinator-owned.
 7. [ ] **Fresh candidate and CI coverage.** Coordinator runs Linux tests on real VMs:
    x86_64 and arm64, feature-boundary kernels, selected full-distro shutdown/udev
    runs, race/checkptr and GC/memory-pressure stress. Persist exact revision, kernel,
@@ -127,6 +132,11 @@ permanently wedged backend remain part of the shutdown/recovery gates.
   fake-kernel schedules and portable `FuzzCompletionSchedule`. Duplicate
   Request completion claims before result/copy/append-LBA side effects, with
   Inline-to-async staging handoff (`internal/completion/ownership.go`).
+  Every delivery now has an atomic generation/phase identity; RequestHandle
+  completion and WithBuffers validate/claim it before side effects. Raw handlers
+  can use RequestHandlerFunc or capture Handle before completion. Legacy Request
+  pointers and raw slices are deprecated, with their lifetime restriction retained.
+  See FEATURES.md for migration, benchmark deltas and native/VM gate scope.
   Portable race/checkptr and fuzz smoke pass; Linux models are compiled only.
 - [x] Retain and reconcile one in-flight STOP receipt through Device.Stop/Close;
   refuse conflicting Device mutations until resolution. High-level model counts

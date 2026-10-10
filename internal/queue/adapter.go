@@ -22,63 +22,69 @@ func BackendHandler(b interfaces.Backend, obs interfaces.Observer) Handler {
 }
 
 func (h *backendHandler) HandleRequest(r *Request) {
+	handle := r.Handle()
 	var start time.Time
 	if h.obs != nil {
 		start = time.Now()
 	}
 	var err error
-	switch r.Op {
-	case OpRead:
-		n, rerr := h.b.ReadAt(r.Data, r.Offset)
-		err = readResultError(n, len(r.Data), rerr)
-		if ib, ok := h.b.(interfaces.IntegrityBackend); ok && err == nil && r.Integrity != nil {
-			err = ib.ReadIntegrity(r.Integrity, r.Offset)
+	err = handle.WithBuffers(func(data, integrity, _ []byte) error {
+		switch handle.Op {
+		case OpRead:
+			n, rerr := h.b.ReadAt(data, handle.Offset)
+			err = readResultError(n, len(data), rerr)
+			if ib, ok := h.b.(interfaces.IntegrityBackend); ok && err == nil && integrity != nil {
+				err = ib.ReadIntegrity(integrity, handle.Offset)
+			}
+			if h.obs != nil {
+				h.obs.ObserveRead(uint64(handle.Length), uint64(time.Since(start)), err == nil)
+			}
+		case OpWrite:
+			var n int
+			var werr error
+			if fua, ok := h.b.(interfaces.FUABackend); ok && handle.Flags&FlagFUA != 0 {
+				n, werr = fua.WriteAtFUA(data, handle.Offset)
+			} else {
+				n, werr = h.b.WriteAt(data, handle.Offset)
+			}
+			err = writeResultError(n, len(data), werr)
+			if ib, ok := h.b.(interfaces.IntegrityBackend); ok && err == nil && integrity != nil {
+				err = ib.WriteIntegrity(integrity, handle.Offset)
+			}
+			if h.obs != nil {
+				h.obs.ObserveWrite(uint64(handle.Length), uint64(time.Since(start)), err == nil)
+			}
+		case OpFlush:
+			err = h.b.Flush()
+			if h.obs != nil {
+				h.obs.ObserveFlush(uint64(time.Since(start)), err == nil)
+			}
+		case OpDiscard:
+			if d, ok := h.b.(interfaces.DiscardBackend); ok {
+				err = d.Discard(handle.Offset, handle.Length)
+			} else {
+				err = syscall.EOPNOTSUPP
+			}
+			if h.obs != nil {
+				h.obs.ObserveDiscard(uint64(handle.Length), uint64(time.Since(start)), err == nil)
+			}
+		case OpWriteZeroes:
+			if z, ok := h.b.(interfaces.WriteZeroesBackend); ok {
+				err = z.WriteZeroes(handle.Offset, handle.Length)
+			} else {
+				err = syscall.EOPNOTSUPP
+			}
+			if h.obs != nil {
+				h.obs.ObserveWrite(uint64(handle.Length), uint64(time.Since(start)), err == nil)
+			}
+		default:
+			err = fmt.Errorf("%s: %w", handle.Op, syscall.EOPNOTSUPP)
 		}
-		if h.obs != nil {
-			h.obs.ObserveRead(uint64(r.Length), uint64(time.Since(start)), err == nil)
-		}
-	case OpWrite:
-		var n int
-		var werr error
-		if fua, ok := h.b.(interfaces.FUABackend); ok && r.Flags&FlagFUA != 0 {
-			n, werr = fua.WriteAtFUA(r.Data, r.Offset)
-		} else {
-			n, werr = h.b.WriteAt(r.Data, r.Offset)
-		}
-		err = writeResultError(n, len(r.Data), werr)
-		if ib, ok := h.b.(interfaces.IntegrityBackend); ok && err == nil && r.Integrity != nil {
-			err = ib.WriteIntegrity(r.Integrity, r.Offset)
-		}
-		if h.obs != nil {
-			h.obs.ObserveWrite(uint64(r.Length), uint64(time.Since(start)), err == nil)
-		}
-	case OpFlush:
-		err = h.b.Flush()
-		if h.obs != nil {
-			h.obs.ObserveFlush(uint64(time.Since(start)), err == nil)
-		}
-	case OpDiscard:
-		if d, ok := h.b.(interfaces.DiscardBackend); ok {
-			err = d.Discard(r.Offset, r.Length)
-		} else {
-			err = syscall.EOPNOTSUPP
-		}
-		if h.obs != nil {
-			h.obs.ObserveDiscard(uint64(r.Length), uint64(time.Since(start)), err == nil)
-		}
-	case OpWriteZeroes:
-		if z, ok := h.b.(interfaces.WriteZeroesBackend); ok {
-			err = z.WriteZeroes(r.Offset, r.Length)
-		} else {
-			err = syscall.EOPNOTSUPP
-		}
-		if h.obs != nil {
-			h.obs.ObserveWrite(uint64(r.Length), uint64(time.Since(start)), err == nil)
-		}
-	default:
-		err = fmt.Errorf("%s: %w", r.Op, syscall.EOPNOTSUPP)
+		return err
+	})
+	if completionErr := handle.Complete(err); completionErr != nil {
+		panic(completionErr)
 	}
-	r.Complete(err)
 }
 
 func readResultError(n, length int, err error) error {

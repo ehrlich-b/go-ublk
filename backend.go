@@ -79,6 +79,7 @@ type DeviceParams struct {
 	// Handler serves raw requests instead of a Backend, with access to every
 	// operation and flag the kernel sends (zoned operations, FUA, NOUNMAP, ...)
 	// and the ability to complete asynchronously. Size must be set with it.
+	// Prefer RequestHandlerFunc for generation-checked completion and buffers.
 	Handler Handler
 
 	// Size is the device size in bytes. Required with Handler; with a Backend,

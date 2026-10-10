@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/ehrlich-b/go-ublk/internal/completion"
@@ -76,6 +75,8 @@ type Handler interface {
 }
 
 // HandlerFunc adapts a function to Handler.
+//
+// Deprecated: use RequestHandlerFunc for checked generation-bound values.
 type HandlerFunc func(*Request)
 
 func (f HandlerFunc) HandleRequest(r *Request) { f(r) }
@@ -83,6 +84,9 @@ func (f HandlerFunc) HandleRequest(r *Request) { f(r) }
 // Request is one block request the kernel handed to the server. Its fields are
 // valid, and Data may be used, only until a Complete method is called; the
 // engine reuses the Request and its buffer for the tag's next request.
+//
+// Deprecated: retain RequestHandle values and use WithBuffers for checked
+// access. A recycled pointer or an exported slice cannot identify its delivery.
 type Request struct {
 	Queue uint16
 	Tag   uint16
@@ -96,18 +100,21 @@ type Request struct {
 	// Data is the request's payload buffer: the bytes to write for OpWrite,
 	// where to put the bytes read for OpRead. Nil for operations without data
 	// and in zero-copy mode, where the bytes never pass through the server.
+	// Deprecated: use RequestHandle.WithBuffers; raw slices cannot be revoked.
 	Data []byte
 	// Integrity is the request's integrity metadata (FlagIntegrity, on a
 	// device with integrity parameters): what to store for a write, where to
 	// put the stored metadata for a read. MetadataSize bytes per interval.
+	// Deprecated: use RequestHandle.WithBuffers.
 	Integrity []byte
 	// DescriptorExtra is the part of the kernel's I/O descriptor beyond the
 	// standard 24 bytes, on a device created with a larger IODescSize
 	// (UBLK_F_IO_DESC_SIZE, kernel 7.3+); nil otherwise. Read-only.
+	// Deprecated: use RequestHandle.WithBuffers.
 	DescriptorExtra []byte
 
 	e          *engine
-	state      atomic.Uint32
+	state      completion.Ownership
 	result     int32
 	lba        uint64 // zone append result, in sectors
 	next       *Request
@@ -133,6 +140,8 @@ const (
 // Complete finishes the request. On success a data operation reports its full
 // Length; anything else reports zero. A non-nil err fails it with the errno
 // from Errno(err).
+//
+// Deprecated: use RequestHandle.Complete.
 func (r *Request) Complete(err error) {
 	if err != nil {
 		r.finish(-Errno(err))
@@ -152,6 +161,8 @@ func (r *Request) Complete(err error) {
 // non-negative result for it as complete success (__ublk_complete_rq) — a
 // short write, or a short read in user-copy or zero-copy mode, reported as
 // success would silently lose or invent data.
+//
+// Deprecated: use RequestHandle.CompleteN.
 func (r *Request) CompleteN(n int, err error) {
 	switch {
 	case err != nil:
@@ -168,6 +179,8 @@ func (r *Request) CompleteN(n int, err error) {
 }
 
 // CompleteZoneAppend finishes an OpZoneAppend that wrote its data at sector.
+//
+// Deprecated: use RequestHandle.CompleteZoneAppend.
 func (r *Request) CompleteZoneAppend(sector uint64, err error) {
 	if err != nil {
 		r.finish(-Errno(err))

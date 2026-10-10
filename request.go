@@ -19,7 +19,25 @@ import (
 //
 // Exactly one Complete call must be made, exactly once, from any goroutine,
 // before or after HandleRequest returns. Completing twice panics.
+//
+// Deprecated: use RequestHandle through RequestHandlerFunc, or capture Handle
+// before completion. Recycled pointers and exported slices cannot be checked
+// after tag reuse without changing the API or allocating per delivery.
 type Request = queue.Request
+
+// RequestHandle identifies one delivery by generation. Completion returns an
+// error on duplicate/stale calls; WithBuffers scopes checked buffer access.
+type RequestHandle = queue.RequestHandle
+
+// RequestHandlerFunc serves generation-bound values through DeviceParams.Handler.
+// Example: Handler: RequestHandlerFunc(func(h RequestHandle) { ... }).
+type RequestHandlerFunc = queue.RequestHandlerFunc
+
+var (
+	ErrStaleRequest     = queue.ErrStaleRequest
+	ErrRequestCompleted = queue.ErrRequestCompleted
+	ErrRequestBusy      = queue.ErrRequestBusy
+)
 
 // Handler serves raw block requests: see Request and DeviceParams.Handler.
 // Unless DeviceParams.Inline is set, every request runs on its own goroutine,
@@ -27,6 +45,8 @@ type Request = queue.Request
 type Handler = queue.Handler
 
 // HandlerFunc adapts a function to Handler.
+//
+// Deprecated: use RequestHandlerFunc for checked generation-bound values.
 type HandlerFunc = queue.HandlerFunc
 
 // Op is a block operation (Request.Op).

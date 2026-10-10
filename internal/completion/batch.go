@@ -38,7 +38,7 @@ func FetchTags(buffers []byte, count, size int, bid uint16, res int32, hasBuffer
 }
 
 // Token identifies one delivered tag generation. Tokens are internal to the
-// batch command ledger; the public Request pointer still has no generation.
+// batch command ledger, separate from the backend RequestHandle generation.
 type Token struct {
 	Tag        uint16
 	Generation uint64

@@ -123,14 +123,20 @@ func TestBatchRejectsDuplicateAndContradictoryPartialCommit(t *testing.T) {
 // tag-list buffers and records commands independently of Batch's state. There
 // are no sleeps, goroutines or input-sized allocations in schedule replay.
 type schedulePeer struct {
-	b       *Batch
-	buf     []byte
-	owner   [4]string
-	gen     [4]uint64
-	ids     [4]uint64
-	sent    [4][]Token
-	history []uint64
-	commits map[Token]int
+	b               *Batch
+	buf             []byte
+	owner           [4]string
+	gen             [4]uint64
+	ids             [4]uint64
+	sent            [4][]Token
+	history         []uint64
+	commits         map[Token]int
+	requests        [4]Ownership
+	payload         [4][16]byte
+	metadata        [4][8]byte
+	backendResults  [4]int32
+	backendCopies   [4]int
+	backendEnqueues [4]int
 }
 
 func newSchedulePeer() *schedulePeer {
@@ -143,6 +149,9 @@ func newSchedulePeer() *schedulePeer {
 
 func (p *schedulePeer) check() error {
 	for i, owner := range p.owner {
+		if p.requests[i].Generation() != p.gen[i] {
+			return fmt.Errorf("request %d lost delivery generation", i)
+		}
 		want := map[string]uint8{"kernel": returned, "backend": handling, "finished": queued}[owner]
 		if p.b.tags[i].generation != p.gen[i] || p.b.tags[i].phase != want {
 			return fmt.Errorf("tag %d: oracle owner=%s generation=%d; ledger=%+v", i, owner, p.gen[i], p.b.tags[i])
@@ -163,7 +172,9 @@ func (p *schedulePeer) check() error {
 
 // Each 12-byte event carries a kind, a raw buffer ID/slot/tag, a signed CQE
 // result, flags, and two raw uint16 tags. Hostile fields are never modulo
-// normalized. Kinds: fetch, handler completion, submit, CQE, old CQE.
+// normalized. Kinds: fetch, handler completion, submit, CQE, old CQE, retained
+// completion handle, retained buffer handle. The latter carry a raw generation
+// in bytes 8..11; invalid generations are never normalized.
 func (p *schedulePeer) step(event []byte) error {
 	kind, arg := event[0], int(event[1])
 	res := int32(binary.LittleEndian.Uint32(event[2:6]))
@@ -203,6 +214,17 @@ func (p *schedulePeer) step(event []byte) error {
 			for _, tag := range want {
 				p.gen[tag]++
 				p.owner[tag] = "backend"
+				if err := p.requests[tag].Begin(); err != nil {
+					return err
+				}
+				p.requests[tag].Store(Async)
+				for i := range p.payload[tag] {
+					p.payload[tag][i] = 0xcd
+				}
+				for i := range p.metadata[tag] {
+					p.metadata[tag][i] = 0xd7
+				}
+				p.backendResults[tag] = 0
 			}
 		}
 	case 1:
@@ -211,7 +233,17 @@ func (p *schedulePeer) step(event []byte) error {
 		if arg < 4 {
 			token.Generation = p.gen[arg]
 		}
-		err = p.b.Queue(token)
+		if arg >= 4 {
+			err = ErrStaleRequest
+		} else {
+			err = FinishGeneration(&p.requests[arg], token.Generation, func() {
+				p.backendResults[arg] = res
+				p.backendCopies[arg]++
+			}, func() { p.backendEnqueues[arg]++ })
+		}
+		if err == nil {
+			err = p.b.Queue(token)
+		}
 		if !bad {
 			p.owner[arg] = "finished"
 		}
@@ -276,6 +308,37 @@ func (p *schedulePeer) step(event []byte) error {
 			}
 			p.ids[slot], p.sent[slot] = 0, nil
 		}
+	case 5, 6: // retained completion/buffer handle: generation is raw input
+		generation := uint64(binary.LittleEndian.Uint32(event[8:12]))
+		bad = arg >= 4 || generation == 0 || generation != p.gen[arg] || p.owner[arg] != "backend"
+		if arg >= 4 {
+			err = ErrStaleRequest
+			break
+		}
+		beforePayload, beforeMetadata := p.payload[arg], p.metadata[arg]
+		beforeResult, beforeCopies, beforeEnqueues := p.backendResults[arg], p.backendCopies[arg], p.backendEnqueues[arg]
+		if kind == 5 {
+			err = FinishGeneration(&p.requests[arg], generation, func() {
+				p.backendResults[arg] = res
+				p.backendCopies[arg]++
+			}, func() { p.backendEnqueues[arg]++ })
+			if err == nil {
+				if queueErr := p.b.Queue(Token{uint16(arg), generation}); queueErr != nil {
+					return queueErr
+				}
+				p.owner[arg] = "finished"
+			}
+		} else {
+			err = Access(&p.requests[arg], generation, func() error {
+				clear(p.payload[arg][:])
+				clear(p.metadata[arg][:])
+				return nil
+			})
+		}
+		if bad && (beforePayload != p.payload[arg] || beforeMetadata != p.metadata[arg] ||
+			beforeResult != p.backendResults[arg] || beforeCopies != p.backendCopies[arg] || beforeEnqueues != p.backendEnqueues[arg]) {
+			return fmt.Errorf("rejected handle changed buffers/result/publication for tag %d", arg)
+		}
 	default:
 		return p.check() // unknown schedule instruction has no effect
 	}
@@ -305,7 +368,14 @@ func completionSeeds() [][]byte {
 	partial = append(partial, scheduleEvent(3, 0, 16, 0, 0, 0)...)
 	early := append(append([]byte(nil), valid...), scheduleEvent(0, 1, 2, 1, 0, 0)...)
 	early = append(early, scheduleEvent(3, 0, 16, 0, 0, 0)...)
-	return [][]byte{
+	stale := append(append([]byte(nil), valid...), scheduleEvent(3, 0, 32, 0, 0, 0)...)
+	stale = append(stale, scheduleEvent(0, 1, 2, 1, 0, 0)...)
+	stale = append(stale, scheduleEvent(5, 0, 512, 0, 1, 0)...)
+	stale = append(stale, scheduleEvent(6, 0, 0, 0, 1, 0)...)
+	stale = append(stale, scheduleEvent(6, 0, 0, 0, 2, 0)...)
+	stale = append(stale, scheduleEvent(5, 0, 512, 0, 2, 0)...)
+	stale = append(stale, scheduleEvent(5, 0, -28, 0, 2, 0)...)
+	return [][]byte{stale,
 		append(valid, scheduleEvent(3, 0, 32, 0, 0, 0)...), partial, early,
 		scheduleEvent(0, 16, 2, 1, 0, 0), scheduleEvent(0, 0, 3, 1, 0, 0),
 		scheduleEvent(0, 0, 258, 1, 0, 0), scheduleEvent(0, 0, 4, 1, 0, 0),

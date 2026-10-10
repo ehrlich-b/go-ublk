@@ -175,7 +175,7 @@ func (k *fakeKernel) batchCmd(sqe *uring.SQE) {
 				break
 			}
 			c := fkCommit{tag: tag, id: ts.cur.id, op: ts.cur.op, result: result, addr: addr}
-			if ts.cur.op == uapi.UBLK_IO_OP_READ && result > 0 {
+			if ts.cur.op == uapi.UBLK_IO_OP_READ && result > 0 && k.bufTable == 0 && ts.cur.shm == 0 {
 				c.data = make([]byte, result)
 				if k.ufile >= 0 {
 					_, _ = unix.Pread(k.ufile, c.data, userCopyPos(0, tag, 0))
@@ -184,6 +184,13 @@ func (k *fakeKernel) batchCmd(sqe *uring.SQE) {
 				}
 			}
 			k.commits = append(k.commits, c)
+			if k.bufTable > 0 {
+				if k.zcAuto && !k.zcFallback[int(tag)] {
+					delete(k.registered, int(tag))
+				} else if k.registered[int(tag)] {
+					k.violate("batch tag %d committed with its buffer still registered", tag)
+				}
+			}
 			ts.state, ts.addr = fkWaiting, addr
 			consumed++
 			k.deliver(int(tag))
@@ -528,7 +535,14 @@ func (k *fakeKernel) deliver(tag int) {
 		atomic.StoreUint32((*uint32)(unsafe.Add(base, 4)), r.nr)
 		atomic.StoreUint64((*uint64)(unsafe.Add(base, 8)), r.sector)
 		atomic.StoreUint64((*uint64)(unsafe.Add(base, 16)), ts.addr)
-		if r.op == uapi.UBLK_IO_OP_WRITE {
+		if k.bufTable > 0 && (r.op == uapi.UBLK_IO_OP_READ || r.op == uapi.UBLK_IO_OP_WRITE) {
+			if k.zcAuto && !k.zcFallback[tag] {
+				k.registered[tag] = true
+			} else if k.zcAuto {
+				atomic.StoreUint32((*uint32)(base), uint32(r.op)|r.flags|uint32(FlagNeedRegBuf))
+			}
+		}
+		if r.op == uapi.UBLK_IO_OP_WRITE && k.bufTable == 0 {
 			if k.ufile >= 0 {
 				_, _ = unix.Pwrite(k.ufile, r.data, userCopyPos(0, uint16(tag), 0))
 			} else {
