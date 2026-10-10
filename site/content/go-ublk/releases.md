@@ -9,92 +9,92 @@ go-ublk is pre-1.0. Releases are git tags on [GitHub](https://github.com/ehrlich
 
 ## Versioning
 
-Until 1.0 the public API can change between minor versions. Code written against the previous minor version keeps compiling where that costs little (fields that no longer do anything are kept as documented no-ops for a release); behavior that was wrong is fixed, not preserved. Each release notes what changed. Bug fixes that affect data integrity or teardown are called out explicitly, because they are the reason to upgrade.
+Before 1.0, minor releases may change the API. Previous-version code keeps compiling where practical; obsolete fields remain documented no-ops for one release. Incorrect behavior is fixed. Notes identify changes, with integrity and teardown fixes called out as upgrade reasons.
 
 ## How releases are made
 
-Every tag passes the same gates, and the evidence ships with it:
+Release gates and recorded evidence:
 
-1. **`make release-check`** — formatting, `go vet`, unit tests, the race detector, and a longer fuzzing pass over the UAPI decoders and the queue engine.
-2. **The kernel matrix** — `ublk-suite` booted under every kernel in [`test/matrix`](https://github.com/ehrlich-b/go-ublk/tree/main/test/matrix): mainline 6.0–7.3-rc and the current kernels of the major distributions. A release requires every test to pass on every kernel that has ublk, except failures traced to a documented kernel bug. The results for the tagged commit are committed as `site/data/matrix.json` and published on the [compatibility matrix](/reference/matrix/).
-3. **Recovery under systemd** — the shipped units, a mounted filesystem, a verifying writer, a crash and an upgrade handoff, zero I/O errors.
-4. The tag is cut. Pushing it runs the CI checks again on the tagged commit and publishes the GitHub release, whose body is this page's section for that version (`scripts/release-notes.sh vX.Y.Z`); a tag without a changelog section fails.
+1. `make release-check`: formatting, `go vet`, unit/race tests, and extended UAPI-decoder/queue-engine fuzzing.
+2. [`test/matrix`](https://github.com/ehrlich-b/go-ublk/tree/main/test/matrix) boots ublk-suite across mainline 6.0-7.3-rc and major distribution kernels. Tests must pass where ublk is available, except documented kernel failures. Commit-pinned results in `site/data/matrix.json` populate the [compatibility matrix](/reference/matrix/).
+3. Test shipped systemd units with a mounted filesystem, verifying writer, crash, and upgrade handoff; require zero I/O errors.
+4. Tag the release. Tag pushes rerun CI and publish the version's changelog section through `scripts/release-notes.sh vX.Y.Z`; missing sections fail.
 
-Bug fixes that affect data integrity or teardown are listed first in a release's notes.
+Release notes put integrity and teardown fixes first.
 
 ## v0.2.0 (2026-10-04)
 
-A rebuild of everything under the public API, aimed at production use: a new I/O engine, user recovery, the whole kernel control surface, and a conformance suite that runs under dozens of kernels. Code written for v0.1.0 compiles unchanged; the behavior changes below are the ones to read.
-
-**Behavior changes**
-
-- **Backends run concurrently within a queue.** Each request runs on its own goroutine, so up to `QueueDepth` calls per queue are in flight (v0.1.0 called the backend one request at a time per queue). Backends already had to be safe for concurrent use across queues; now latency-bound backends scale. `DeviceParams.Inline` restores the old inline behavior for RAM-speed backends.
-- **Cancelling the serving context stops the device gracefully** (like `Stop`). In v0.1.0 it killed the queues under in-flight I/O, which could wedge the kernel's control plane (Critical Bug #22, deterministic on Ubuntu 7.0.0-38).
-- **`Start` after `Stop` returns `ErrStopped`.** The kernel cannot reliably restart a stopped device; it oopsed Arch's 7.2.8 and wedged 6.10–6.12 in testing (#23).
-- **The library is silent by default.** With no `Options.Logger` nothing is written; v0.1.0 logged at INFO to stderr.
-- **Errnos pass through.** A backend error that is a `syscall.Errno` reaches the application as that errno (on kernels that translate them) instead of always `EIO`. A panicking backend fails the request with `EIO` instead of crashing the server.
-- **`Stop`/`Close` keep serving if `STOP_DEV` fails** and return the error (#18); the wait is `Options.StopTimeout` (default one minute) instead of a fixed 10 s.
-- **Missing kernel features fail creation** with an error listing them, instead of being silently dropped.
-- `EnableUserCopy` and `EnableZeroCopy` work (v0.1.0 accepted both but produced devices that could not serve I/O); `EnableFUA` works with a `FUABackend` or `Handler`; `EnableIoctlEncode` and `DeviceName` are documented no-ops.
-
-**New**
-
-- **User recovery**: `DeviceParams.Recovery` (`RecoveryReissue`, `RecoveryQueue`, `RecoveryFailIO`), `Device.Detach` (drains with `QUIESCE_DEV` on 6.16+, except on batch devices), `ublk.Recover`, and `DeviceParams.Tag` with `FindDevices`. `Recover` takes the device's geometry and modes from the kernel — zero copy, batch I/O, zoned parameters and the integrity format — so the new process only supplies a backend. The conformance suite SIGKILLs a server mid-write and recovers it from another process, and hands a device off live between processes, in the default, batch and integrity configurations; the writer sees no error and every block verifies. It also checks that `RecoveryQueue` holds I/O until recovery and that `RecoveryFailIO` fails it at once. Under systemd with ext4 mounted and a verifying fio running, crash and upgrade handoffs complete in about 1–2.5 s with zero I/O errors. `ublk-loop -recovery` and its shipped systemd units (`Restart=always`, SIGUSR2 upgrade, and a mount unit ordered so that the filesystem unmounts after every login session and before the server stops) demonstrate it.
-- **Zero copy** (`EnableZeroCopy` with a `ZeroCopyBackend`, kernel 6.15+): file-backed devices are served entirely in the kernel with io_uring fixed-buffer reads and writes, `fdatasync`, and `fallocate`, using automatic buffer registration on 6.16+.
-- **Shared-memory zero copy** (`SharedMemoryZeroCopy` with `RegisterSharedMemory`, kernel 7.1+) and **larger descriptors** (`IODescSize`, kernel 7.3+). With these, every feature in the 7.3-rc5 UAPI is implemented.
-- **Batch I/O** (`BatchIO`, kernel 7.0+): requests fetched up to 128 per completion through a multishot command and a provided-buffer ring, and committed many per command; works in copy, user-copy and zero-copy modes.
-- **Integrity metadata** (`DeviceParams.Integrity`, kernel 7.0+): per-block metadata with optional T10-DIF, IP or NVMe CRC64 protection that the kernel generates and verifies; served through `Request.Integrity` or an `IntegrityBackend`. The suite checks that a corrupted tuple fails exactly that block's read.
-- **Zoned devices** (`EnableZoned`, kernel 6.6+): host-managed zoned devices served by a `Handler`, with `Request.ReportZones` and `CompleteZoneAppend`.
-- **`Handler` and `Request`**: a raw request interface exposing every operation and flag, completable from any goroutine; `HandlerDiscard`/`HandlerWriteZeroes`.
-- `Device.Done`, `Err`, `Wait` and a `failed` state: a queue that hits something unexpected now fails the device visibly instead of dying silently (#20).
-- **Unprivileged devices** (`EnableUnprivileged`): the control path prefixes every command with the device's char path and waits for udev to hand the node to its owner; `examples/ublk-chown` and its udev rule are the udev side. The suite serves verified I/O as `nobody`.
-- `Device.Resize` (`UPDATE_SIZE`, 6.16+), `SafeStop` (`TRY_STOP_DEV`, 7.0+), `NoPartitionScan` (7.0+), `ThreadsPerQueue` (`PER_IO_DAEMON`, 6.16+), `NeedGetData`, geometry hints (`PhysicalBlockSize`, `IOMinSize`, `IOOptSize`, `DMAAlignment`).
-- Queue threads are pinned by default to the CPUs the kernel routes to each queue (`GET_QUEUE_AFFINITY`); `ListDevices` reads sysfs, so device IDs above 63 are found; `DeleteDeviceAsync` (`DEL_DEV_ASYNC`, 6.11+).
-- `ublk.Probe`, `GetDeviceInfo`, `Device.KernelInfo`, `Device.Features`, `ublk.Errno`, `FUABackend`.
-- **Testing and releases**: `ublk-suite` (`make suite`), a real-kernel conformance suite of about 60 tests; `test/matrix`, which boots it under mainline and distribution kernels; `make release-check`; a release workflow; and this documentation site.
-- Internally: a general allocation-free io_uring core, an I/O engine with a fake-kernel test suite (including a deterministic lost-wakeup test proven to fail without its fix), every control command of the 7.3-rc5 UAPI with C-fixture layout parity, and off-heap control buffers.
+A new I/O engine, recovery, full kernel control surface, and conformance suite across dozens of kernels. v0.1.0 code still compiles; behavior changes follow.
 
 **Fixed**
 
-- **Write-zeroes of 4 GiB or more silently zeroed only part of the range on kernels before 6.11** (#24): v0.1.0 advertised a write-zeroes limit the pre-6.11 block layer truncates to 32 bits, so `blkdiscard -z -l 5G` succeeded and left 4 GiB of old data (seen on 6.4–6.10, Ubuntu's 6.8 and openSUSE Leap 15.6). The discard and write-zeroes limits are now capped so every kernel splits the range.
-- **The ring leak (#17)**: every io_uring the library created stayed mapped until exit — four per device lifecycle, one per `ListDevices`.
-- **Use-after-unmap at teardown (#19)**: memory is freed only after every queue has exited and no backend call holds a request; otherwise it is deliberately leaked.
-- **Unpinned control buffers (#21)**: some control replies were written into goroutine stacks that could move.
-- **Discards and write-zeroes of 2 GiB or more failed with `EIO`** (#16): range operations now complete with 0.
-- The examples handle SIGHUP and ignore SIGPIPE (the likely trigger of the shutdown wedge in #15).
+- Pre-6.11 write-zeroes limits truncated lengths to 32 bits (#24): `blkdiscard -z -l 5G` left 4 GiB unchanged on 6.4-6.10, Ubuntu 6.8, and openSUSE Leap 15.6. Capped discard/zeroes limits now force splitting.
+- Ring mappings leaked until exit (#17): four per device lifecycle, one per ListDevices.
+- Teardown frees mappings only after queues and backend calls finish; otherwise memory stays allocated (#19).
+- Control replies no longer target movable goroutine stacks (#21).
+- Discards/zeroes at least 2 GiB returned EIO (#16); range operations now complete with 0.
+- Examples handle SIGHUP and ignore SIGPIPE, the suspected shutdown-wedge trigger (#15).
+
+**Behavior changes**
+
+- Requests now run on separate goroutines, up to `QueueDepth` calls per queue. v0.1.0 serialized within queues; backends already needed cross-queue concurrency safety. `DeviceParams.Inline` restores serialization for RAM-speed backends.
+- Context cancellation gracefully stops the device. v0.1.0 killed queues beneath I/O, wedging the control plane (Critical Bug #22, deterministic on Ubuntu 7.0.0-38).
+- Start after Stop returns ErrStopped: restart oopsed Arch 7.2.8 and wedged 6.10-6.12 (#23).
+- No Options.Logger means no output; v0.1.0 logged INFO to stderr.
+- Backend syscall.Errno passes through on translating kernels instead of always becoming EIO. Panics fail that request with EIO while the server continues.
+- Failed STOP_DEV leaves Stop/Close serving and returns an error (#18). Options.StopTimeout defaults to one minute, replacing 10 s.
+- Missing features fail creation with their names instead of being silently dropped.
+- EnableUserCopy/EnableZeroCopy now serve I/O; v0.1.0 accepted them but could not. EnableFUA works with FUABackend/Handler. EnableIoctlEncode and DeviceName are documented no-ops.
+
+**New**
+
+- Recovery: DeviceParams.Recovery (RecoveryReissue/RecoveryQueue/RecoveryFailIO), Device.Detach, ublk.Recover, and Tag/FindDevices. Detach drains with QUIESCE_DEV on 6.16+, except batch devices. Recover reads geometry and zero-copy/batch/zoned/integrity modes; supply the backend. Default/batch/integrity SIGKILL and live-handoff tests verify every block without writer errors; Queue holds I/O and FailIO fails immediately. Under systemd/ext4, verified fio handoffs take about 1-2.5 s with zero errors. `ublk-loop -recovery` ships Restart=always, SIGUSR2 upgrades, and mount ordering after login-session shutdown but before server stop.
+- Zero copy: EnableZeroCopy with ZeroCopyBackend (6.15+), using kernel fixed-buffer file I/O, fdatasync, and fallocate; automatic registration on 6.16+.
+- SharedMemoryZeroCopy/RegisterSharedMemory (7.1+) and IODescSize (7.3+) complete feature coverage of the 7.3-rc5 UAPI.
+- BatchIO (7.0+): up to 128 requests per multishot completion via provided-buffer rings, bulk commits, and copy/user-copy/zero-copy support.
+- DeviceParams.Integrity (7.0+): metadata with optional T10-DIF, IP, or NVMe CRC64 generated/verified by the kernel, exposed through Request.Integrity or IntegrityBackend. Corrupted-tuple tests fail exactly that block.
+- EnableZoned (6.6+): host-managed devices through Handler, Request.ReportZones, and CompleteZoneAppend.
+- Handler/Request expose all operations/flags with completion from any goroutine; HandlerDiscard/HandlerWriteZeroes advertise optional operations.
+- Device.Done/Err/Wait and state failed expose unexpected queue failures (#20).
+- EnableUnprivileged prefixes device-control payloads with the char path and waits for ownership via udev. `examples/ublk-chown` supplies the helper/rule; tests verify I/O as nobody.
+- Device.Resize (UPDATE_SIZE, 6.16+), SafeStop (TRY_STOP_DEV, 7.0+), NoPartitionScan (7.0+), ThreadsPerQueue (PER_IO_DAEMON, 6.16+), NeedGetData, and PhysicalBlockSize/IOMinSize/IOOptSize/DMAAlignment hints.
+- GET_QUEUE_AFFINITY pins threads to routing CPUs by default. ListDevices uses sysfs, finding IDs above 63. DeleteDeviceAsync uses DEL_DEV_ASYNC (6.9+).
+- ublk.Probe/GetDeviceInfo/Errno, Device.KernelInfo/Features, and FUABackend.
+- About 60 conformance tests in ublk-suite (`make suite`), test/matrix for mainline/distribution kernels, make release-check, release workflow, and this site.
+- Internals: allocation-free io_uring core, fake-kernel engine tests including a falsified-without-fix lost-wakeup test, 7.3-rc5 control commands with C-fixture layout parity, and off-heap control buffers.
 
 **Verification**
 
-- **Kernel matrix**: on the release candidate (`4d9712f`; later commits change only documentation and CI), the unit tests, the large-I/O test, the integrity sweep and the full conformance suite passed on all 47 kernels in the [compatibility matrix](/reference/matrix/) that ship `ublk_drv`: mainline 6.4 through 7.3-rc3; Ubuntu 22.04 HWE, 24.04 (GA, HWE 6.11, 6.14, 6.17 and 7.0, plus the AWS, Azure and GCP 7.0 kernels), 25.04, 25.10 and 26.04; Debian 12 backports and 13; Fedora 42, 43 and 44; Arch and Arch LTS; openSUSE Tumbleweed and Leap 15.6; Oracle UEK8; and CentOS Stream, AlmaLinux and Rocky 10 with io_uring enabled. There were no product failures. The only kernel-log findings are [known kernel bugs](/guide/kernel-bugs/).
-- **`make release-check`**: formatting, `go vet`, unit and race tests, and 60 seconds of each fuzz target.
-- **Recovery under systemd**: the shipped units with ext4 mounted and a verifying fio running; crash and upgrade handoffs recovered in 1–2 s with zero I/O errors.
-- **Reboots under load**: eight reboots with the shipped units, ext4 mounted and about 300 MB of dirty data: no I/O errors, clean `e2fsck` each time. (The same test found the mount unit's missing `Before=user.slice`, which lost writeback in 3 of 5 reboots.)
-- **Soak**: four hours through the shipped units on Ubuntu 7.0.0-38: 23 crash and upgrade handoffs, every block verified, no memory or file-descriptor growth, clean `e2fsck`.
+- Release candidate `4d9712f` has 47 passing [matrix rows](/reference/matrix/), covering unit/large-I/O tests, integrity sweep, and applicable conformance tests. Later release commits change documentation/CI only. Kernels include mainline 6.4-7.3-rc3; Ubuntu 22.04 HWE, 24.04 GA/HWE 6.11/6.14/6.17/7.0 and AWS/Azure/GCP 7.0, 25.04/25.10/26.04; Debian 12 backports/13; Fedora 42/43/44; Arch/LTS; openSUSE Tumbleweed/Leap 15.6; Oracle UEK8; CentOS Stream/AlmaLinux/Rocky 10 with io_uring enabled. Default-disabled io_uring rows and the broken Ubuntu 6.17.0-40 control fail as documented; findings are [kernel bugs](/guide/kernel-bugs/), with no recorded product failures.
+- `make release-check`: formatting, go vet, unit/race tests, 60 s per fuzz target.
+- Systemd/ext4 recovery with verified fio: crash/upgrade handoffs in 1-2 s, zero I/O errors.
+- Eight loaded reboots with shipped units, ext4, and about 300 MB dirty data: no errors, clean e2fsck. Before adding Before=user.slice, 3/5 reboots lost writeback.
+- Four-hour Ubuntu 7.0.0-38 soak: 23 crash/upgrade handoffs, every block verified, no memory/fd growth, clean e2fsck.
 
 ## v0.1.0 (2026-09-30)
 
-The first tag. Highlights, roughly in the order they landed:
+Initial release:
 
 **Correctness**
 
-- Multi-queue devices map each queue's descriptor array at the kernel's fixed stride. Before this, every queue after the first read queue 0's descriptors, causing silent data corruption and unkillable hangs on multi-queue devices.
-- Sectors are counted in 512-byte units everywhere, so devices with 4096-byte logical blocks report the right capacity and do I/O at the right offsets. Block sizes from 512 bytes to the page size are accepted and validated against the kernel's rules.
-- A discard larger than the request buffer no longer panics the server; only reads and writes use request buffers.
-- Device attributes (`ReadOnly`, `Rotational`, `VolatileCache`) and discard limits are actually sent to the kernel; before, flush and discard were unreachable.
-- `VolatileCache` defaults to true, the fail-safe choice for durability.
-- Backend transfer results are honored: short reads and writes fail the request.
-- Per-tag request buffers are sized from the negotiated `MaxIOSize` (default 1 MiB), so full-size requests work.
+- Correct fixed-stride descriptor mappings; later queues previously read queue 0, corrupting data and hanging unkillably.
+- Use 512-byte sectors throughout, fixing capacity/offsets for 4096-byte logical blocks. Validate block sizes from 512 bytes through page size.
+- Discards larger than request buffers no longer panic; only reads/writes use buffers.
+- Send ReadOnly/Rotational/VolatileCache and discard limits, making flush/discard reachable.
+- Default VolatileCache to true for durability.
+- Honor backend results; fail short reads/writes.
+- Size per-tag buffers from negotiated MaxIOSize (default 1 MiB), supporting full-size requests.
 
 **Lifecycle**
 
-- Graceful stop of a busy device: `STOP_DEV` runs while the queues still serve, and the control-plane wait is bounded and robust to signal interruptions. 50+ teardown-under-load cycles without a hang or leak.
-- `DEL_DEV` no longer hangs: queue goroutines are joined and every char-device reference released before deletion.
-- Failed startup tears down cleanly instead of wedging the process; the queue count the kernel returns is honored.
-- `ListDevices` and `DeleteDevice` in the public API for reaping leaked devices.
-- `WriteZeroesBackend` wired to `UBLK_IO_OP_WRITE_ZEROES`; the unused `SyncBackend`, `StatBackend` and `ResizeBackend` interfaces removed.
-- `Options.Logger` receives the library's internal diagnostics; `Options.Debug` added.
+- STOP_DEV drains busy devices through serving queues with bounded, signal-tolerant control waits; 50+ loaded teardowns had no hangs/leaks.
+- Join queues and release char-device references before DEL_DEV.
+- Unwind failed startup and honor negotiated queue counts.
+- Add public ListDevices/DeleteDevice for orphan cleanup.
+- Wire WriteZeroesBackend to UBLK_IO_OP_WRITE_ZEROES; remove unused SyncBackend/StatBackend/ResizeBackend.
+- Route diagnostics to Options.Logger; add Options.Debug.
 
 **Examples and testing**
 
-- `ublk-loop`, a losetup-style file exporter, and a compressed mode for `ublk-mem`, both on the public API only.
-- Integrity sweep, teardown churn, crash and power-fail oracles, the shutdown-storm test, and verified runs on arm64 and x86_64 with kernels 6.17 and 7.0. See [Testing and compatibility](/go-ublk/testing/).
+- `ublk-loop` exports files like losetup; `ublk-mem` adds compression. Both use only the public API.
+- Integrity sweep, churn, crash/power-fail oracles, shutdown storm, and arm64/x86_64 verification on 6.17/7.0. See [testing](/go-ublk/testing/).
