@@ -1,0 +1,12 @@
+{{- $m := site.Data.matrix.lib_ublk -}}
+<p class="matrix-source">Device-stage results recorded <a href="{{ $m.evidence | relURL }}">{{ $m.validated }}</a>. <a href="{{ $m.evidence | relURL }}">Validation evidence and scope</a>.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="lib-ublk kernel results, scrolls horizontally">
+<table>
+<thead><tr><th scope="col">Kernel family</th><th scope="col">Kernel</th><th scope="col">M0/M1a device stages</th></tr></thead>
+<tbody>
+{{- range $m.runs }}
+<tr><td>{{ .distro }}</td><td><a href="{{ $m.evidence | relURL }}">{{ .kernel }}</a></td><td>{{ partial "status-badge.html" .status }}</td></tr>
+{{- end }}
+</tbody>
+</table>
+</div>

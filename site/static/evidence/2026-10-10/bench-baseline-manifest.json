@@ -1,0 +1,259 @@
+{
+  "config": {
+    "aa_control": "go-ublk",
+    "cpu_count": 4,
+    "cpus": "0,1,2,3",
+    "depth": 64,
+    "implementations": [
+      "go-ublk",
+      "lib-ublk",
+      "ublksrv-loop",
+      "libublk-rs",
+      "null-blk",
+      "brd"
+    ],
+    "queues": [
+      2
+    ],
+    "quiet_window_confirmed": false,
+    "quiet_window_note": "",
+    "rounds": 3,
+    "runtime_seconds": 15,
+    "seed": 20261010,
+    "size_bytes": 536870912,
+    "warmup_seconds": 3,
+    "workloads": [
+      {
+        "bs": "4k",
+        "iodepth": 32,
+        "name": "4k-randread",
+        "numjobs": 2,
+        "rw": "randread"
+      },
+      {
+        "bs": "4k",
+        "iodepth": 32,
+        "name": "4k-randwrite",
+        "numjobs": 2,
+        "rw": "randwrite"
+      },
+      {
+        "bs": "4k",
+        "iodepth": 32,
+        "name": "4k-randrw-70r30w",
+        "numjobs": 2,
+        "rw": "randrw",
+        "rwmixread": 70
+      },
+      {
+        "bs": "4k",
+        "iodepth": 1,
+        "name": "4k-randread-qd1",
+        "numjobs": 1,
+        "rw": "randread"
+      },
+      {
+        "bs": "128k",
+        "iodepth": 8,
+        "name": "128k-read",
+        "numjobs": 1,
+        "rw": "read"
+      },
+      {
+        "bs": "128k",
+        "iodepth": 8,
+        "name": "128k-write",
+        "numjobs": 1,
+        "rw": "write"
+      }
+    ]
+  },
+  "schedule": [
+    {
+      "implementation": "go-ublk",
+      "phase": "calibration",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 0,
+      "sequence": 1
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "calibration",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 0,
+      "sequence": 2
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 3
+    },
+    {
+      "implementation": "lib-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 4
+    },
+    {
+      "implementation": "ublksrv-loop",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 5
+    },
+    {
+      "implementation": "libublk-rs",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 6
+    },
+    {
+      "implementation": "null-blk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 7
+    },
+    {
+      "implementation": "brd",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 8
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "measured",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 1,
+      "sequence": 9
+    },
+    {
+      "implementation": "lib-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 10
+    },
+    {
+      "implementation": "ublksrv-loop",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 11
+    },
+    {
+      "implementation": "libublk-rs",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 12
+    },
+    {
+      "implementation": "null-blk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 13
+    },
+    {
+      "implementation": "brd",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 14
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 15
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "measured",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 2,
+      "sequence": 16
+    },
+    {
+      "implementation": "ublksrv-loop",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 17
+    },
+    {
+      "implementation": "libublk-rs",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 18
+    },
+    {
+      "implementation": "null-blk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 19
+    },
+    {
+      "implementation": "brd",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 20
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 21
+    },
+    {
+      "implementation": "lib-ublk",
+      "phase": "measured",
+      "repeat": "primary",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 22
+    },
+    {
+      "implementation": "go-ublk",
+      "phase": "measured",
+      "repeat": "control",
+      "requested_queues": 2,
+      "round": 3,
+      "sequence": 23
+    }
+  ],
+  "schema": 1,
+  "status": "complete"
+}

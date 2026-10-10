@@ -1,30 +1,36 @@
 ---
 title: "ublk"
-description: "How Linux ublk userspace block devices work, from the control plane to zero copy, and the documentation for go-ublk, a pure-Go ublk library."
-heroTitle: "Userspace block devices, explained and implemented in Go"
-heroLede: "**ublk** is the Linux framework for serving a block device from a userspace process: think *FUSE for block devices*, built on io_uring and in mainline since Linux 6.0. This site is a guide to how it works, for anyone writing a ublk server in any language, and the home of **go-ublk**, a ublk library in pure Go with no cgo and no liburing."
+description: "The Linux ublk guide, go-ublk's pure-Go engine, lib-ublk's Zig core and language bindings, and comparative benchmarks with evidence."
+heroTitle: "Userspace block devices, with Go and Zig libraries"
+heroLede: "**ublk** serves Linux block devices from a userspace process through io_uring. This site explains the kernel protocol and documents **go-ublk**, a pure-Go library, and **lib-ublk**, a Zig core with a C ABI and language bindings. The benchmarks report measured RAM workloads with their evidence. lib-ublk's source release is pending."
 heroLinks:
   - label: "Learn how ublk works"
     url: "/guide/"
     primary: true
   - label: "Get started with go-ublk"
     url: "/go-ublk/getting-started/"
-  - label: "UAPI reference"
-    url: "/reference/uapi/"
+  - label: "Explore lib-ublk"
+    url: "/lib-ublk/"
+  - label: "Read the benchmarks"
+    url: "/reference/benchmarks/"
 ---
 
 <div class="cards">
 <a class="card" href="/guide/">
 <p class="card-title">The ublk guide</p>
-<p>Architecture, every control command, the FETCH and COMMIT data plane, copy modes and zero copy, batch I/O, user recovery, and which kernel added what. Language-agnostic.</p>
+<p>The kernel protocol, from control commands to request delivery, copy modes, recovery, and feature availability. For server authors working in any language.</p>
 </a>
 <a class="card" href="/go-ublk/">
 <p class="card-title">go-ublk</p>
-<p>Implement a small <code>Backend</code> interface shaped like <code>io.ReaderAt</code> and <code>io.WriterAt</code> — or a raw request <code>Handler</code> — and get a <code>/dev/ublkbN</code>. The library handles io_uring, the kernel protocol, recovery and the device lifecycle.</p>
+<p>A pure-Go engine with a <code>Backend</code> or raw request <code>Handler</code> interface. No cgo or liburing. The library handles io_uring, feature negotiation, and the device lifecycle.</p>
 </a>
-<a class="card" href="/reference/">
-<p class="card-title">Reference</p>
-<p>The full kernel UAPI surface with the release that introduced each item and its go-ublk status, plus a compatibility matrix of test runs per kernel.</p>
+<a class="card" href="/lib-ublk/">
+<p class="card-title">lib-ublk</p>
+<p>A Zig core with a C ABI and caller-owned step/poll queues. Bindings for C, C++, Rust, Go, Python, Zig, and lang. Source release pending.</p>
+</a>
+<a class="card" href="/reference/benchmarks/">
+<p class="card-title">Comparative benchmarks</p>
+<p>RAM-backed kernel devices and userspace servers on a shared CPU budget. Throughput, latency, and the cost of a userspace round trip, with evidence and qualification limits.</p>
 </a>
 </div>
 
@@ -32,7 +38,7 @@ heroLinks:
 
 ## How it fits together
 
-An application reads and writes `/dev/ublkbN` like any disk. The kernel's `ublk_drv` turns each block request into a small descriptor and completes an io_uring command that your server left waiting. Your server does the I/O however it likes (a file, a network protocol, compressed RAM, an object store), then commits the result with the next io_uring command, which also re-arms the slot. There is no socket protocol, no SCSI emulation, and no context switch per request beyond io_uring's own batching. The [architecture chapter](/guide/architecture/) walks one request through the whole path.
+An application reads and writes `/dev/ublkbN` like any disk. The kernel's `ublk_drv` turns each block request into a descriptor and completes an io_uring command that your server left waiting. The server handles the request against its backend, then commits the result and re-arms the slot. The [architecture chapter](/guide/architecture/) walks a request through the path. The [UAPI reference](/reference/uapi/) lists the kernel commands and features.
 
 ## Quick start with go-ublk
 
@@ -78,15 +84,12 @@ sudo mkfs.ext4 /dev/ublkb0 && sudo mount /dev/ublkb0 /mnt
 
 [Getting started](/go-ublk/getting-started/) covers requirements, the two example servers, and how to clean up a device left behind by a killed process.
 
-## Status
+## Library status and testing
 
-**go-ublk v0.2.0 implements the whole kernel interface as of Linux 7.3-rc5** — every control command, feature and parameter block, from user recovery and zero copy to batch I/O, zoned devices and integrity metadata — and is tested on real kernels:
+[go-ublk v0.2.0](https://github.com/ehrlich-b/go-ublk/commit/e4e39b07522919fbe2ba11bb594c9c05e998ae24) implements the kernel interface through [Linux 7.3-rc5](https://github.com/ehrlich-b/go-ublk/blob/e4e39b07522919fbe2ba11bb594c9c05e998ae24/backend.go), including recovery and zero copy. Its API can change between minor releases. [Releases](/go-ublk/releases/) and [testing](/go-ublk/testing/) describe its current scope.
 
-- A real-kernel conformance suite (data integrity across queue and block-size combinations, filesystems, every feature, crash recovery, live upgrade handoffs, teardown under load, chaos) runs under dozens of mainline and distribution kernels; see the [compatibility matrix](/reference/matrix/).
-- The queue engine is unit-tested and fuzzed against a model of the kernel driver.
-- User recovery keeps a device — and the filesystem mounted on it — across a server crash or upgrade, verified under systemd with a verifying writer and zero I/O errors.
-- Kernel bugs found along the way, and the ones that bite ublk servers in general, are tracked in [known kernel bugs](/guide/kernel-bugs/).
+lib-ublk's RAM and multi-queue device stages passed on [six kernels](/evidence/2026-10-10/lib-ublk-validation.md). Its bindings passed RAM data-integrity stages on [Linux 6.12](/evidence/2026-10-10/lib-ublk-validation.md), and the property campaign passed [200,000 cases per property](/evidence/2026-10-10/lib-ublk-property-tests.md). Its [source release is pending](/lib-ublk/status/), and a license hasn't been selected.
 
-It is pre-1.0: the API can still change between minor releases. See [Releases](/go-ublk/releases/) and the [roadmap](/go-ublk/roadmap/).
+The [compatibility matrix](/reference/matrix/) keeps the libraries' test scopes separate. [Known kernel bugs](/guide/kernel-bugs/) includes the zero-copy UBSAN finding and the source analysis behind it.
 
 </div>

@@ -7048,7 +7048,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  243.290044] UBSAN: array-index-out-of-bounds in /home/kernel/COD/linux/io_uring/rsrc.c:989:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  243.290044] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:989:12"
     }
    ],
    "summary": {
@@ -7556,7 +7556,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  237.860356] UBSAN: array-index-out-of-bounds in /home/kernel/COD/linux/io_uring/rsrc.c:979:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  237.860356] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:979:12"
     }
    ],
    "summary": {
@@ -8035,7 +8035,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  243.045688] UBSAN: array-index-out-of-bounds in /home/kernel/COD/linux/io_uring/rsrc.c:992:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  243.045688] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:992:12"
     }
    ],
    "summary": {
@@ -8514,7 +8514,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  243.235424] UBSAN: array-index-out-of-bounds in /home/kernel/COD/linux/io_uring/rsrc.c:980:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  243.235424] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:980:12"
     }
    ],
    "summary": {
@@ -8993,7 +8993,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  320.397991] UBSAN: array-index-out-of-bounds in /home/kernel/COD/linux/io_uring/rsrc.c:983:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  320.397991] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:983:12"
     }
    ],
    "summary": {
@@ -9472,7 +9472,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  250.114962] UBSAN: array-index-out-of-bounds in /home/kernel/COD/linux/io_uring/rsrc.c:1070:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  250.114962] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12"
     }
    ],
    "summary": {
@@ -12666,7 +12666,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  253.347226] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:992:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  253.347226] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:992:12"
     }
    ],
    "summary": {
@@ -13145,7 +13145,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  260.774796] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  260.774796] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12"
     }
    ],
    "summary": {
@@ -13624,7 +13624,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  257.079700] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  257.079700] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12"
     }
    ],
    "summary": {
@@ -22521,7 +22521,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  230.726315] UBSAN: array-index-out-of-bounds in /build/linux-AIgBZW/linux-6.17.0/io_uring/rsrc.c:989:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  230.726315] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:989:12"
     }
    ],
    "summary": {
@@ -25365,7 +25365,7 @@
      "test": "kernel-log/io_uring-counted_by-ubsan",
      "status": "skip",
      "duration_s": 0.0,
-     "detail": "known kernel bug, not a product failure: UBSAN __counted_by false positive in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  221.700620] UBSAN: array-index-out-of-bounds in /build/linux-N3259W/linux-7.0.0/io_uring/rsrc.c:980:12"
+     "detail": "UBSAN report, likely a __counted_by ordering issue in io_uring io_buffer_register_bvec under ublk zero copy (site/content/guide/kernel-bugs.md#found-by-go-ublks-kernel-matrix); 2 line(s), first: [  221.700620] UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:980:12"
     }
    ],
    "summary": {
@@ -25375,5 +25375,58 @@
     "error": 0
    }
   }
- ]
+ ],
+ "lib_ublk": {
+  "validated": "2026-10-10",
+  "scope": "M0/M1a null and RAM device stages; copy mode",
+  "evidence": "/evidence/2026-10-10/lib-ublk-validation.md",
+  "queue_counts": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "binding_kernel": "6.12",
+  "bindings": [
+   "C",
+   "C++",
+   "Rust",
+   "Go",
+   "Python",
+   "Zig",
+   "lang"
+  ],
+  "runs": [
+   {
+    "distro": "Ubuntu",
+    "kernel": "6.8",
+    "status": "pass"
+   },
+   {
+    "distro": "Debian",
+    "kernel": "6.12",
+    "status": "pass"
+   },
+   {
+    "distro": "Ubuntu",
+    "kernel": "7.0",
+    "status": "pass"
+   },
+   {
+    "distro": "Mainline",
+    "kernel": "7.2.6",
+    "status": "pass"
+   },
+   {
+    "distro": "Fedora",
+    "kernel": "7.2.9",
+    "status": "pass"
+   },
+   {
+    "distro": "Mainline",
+    "kernel": "7.3-rc3",
+    "status": "pass"
+   }
+  ]
+ }
 }

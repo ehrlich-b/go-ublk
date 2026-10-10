@@ -87,14 +87,18 @@ Running one conformance suite under dozens of kernels turned up these. They affe
 
 **Provided-buffer rings cannot be registered on Ubuntu's 6.8 kernels.** On Ubuntu 6.8.0-146 (24.04 GA) and 6.8.0-138 (22.04 HWE), `IORING_REGISTER_PBUF_RING` fails with `-EINVAL` for every valid registration: user memory or `IOU_PBUF_RING_MMAP`, any ring size. A registration with a non-zero reserved field, which the kernel must reject, is accepted instead. The changelog for 6.8.0-146 includes a backport of "io_uring/kbuf: use mem_is_zero()", which replaced the reserved-field check, and the backported check is inverted. Mainline 6.8.12, 6.9, Ubuntu's 6.11 and 7.0 are not affected. ublk itself uses provided-buffer rings only for batch I/O, which needs 7.0, but a server whose backend uses them for its own io_uring I/O (liburing's `io_uring_setup_buf_ring`, for example) fails on these kernels.
 
-**UBSAN `array-index-out-of-bounds` in `io_buffer_register_bvec`.** Zero copy, through `UBLK_U_IO_REGISTER_IO_BUF` or automatic buffer registration, logs this on Fedora 42 (6.19.14) and Fedora 43 and 44 (7.2.8):
+**UBSAN `array-index-out-of-bounds` in `io_buffer_register_bvec`.** New zero-copy runs logged this on [Ubuntu 7.0.0-38, mainline 7.2.6, and Fedora 7.2.9](/evidence/2026-10-10/kernel-zero-copy-ubsan.md). The feature test still passed, with no oops or data mismatch observed:
 
 ```text
 UBSAN: array-index-out-of-bounds in io_uring/rsrc.c:1070:12
 index 0 is out of range for type 'bio_vec [*]'
 ```
 
-It is a false positive in io_uring, still present in 7.3-rc5. `struct io_mapped_ubuf` declares `bvec[] __counted_by(nr_bvecs)`, `io_alloc_imu` does not initialize `nr_bvecs`, and `io_buffer_register_bvec` fills `bvec[]` before it sets the count. With a compiler that understands `__counted_by` and `CONFIG_UBSAN_BOUNDS`, as on Fedora, every registration of a request that carries data is flagged. The array is allocated for `blk_rq_nr_phys_segments(rq)` entries, so nothing is written out of bounds. The only practical risk is a machine booted with `panic_on_warn`, where UBSAN reports panic. There, avoid zero copy until the kernel sets `nr_bvecs` before the loop.
+**Likely cause.** In [7.2.6](/evidence/2026-10-10/kernel-zero-copy-ubsan.md), `struct io_mapped_ubuf` declares `bvec[] __counted_by(nr_bvecs)`, and `io_buffer_register_bvec` fills the array before assigning its count. A zero count can make UBSAN reject the first indexed write. The [7.3-rc3 source refactor](/evidence/2026-10-10/kernel-zero-copy-ubsan.md) initializes the count before filling the entries, which matches the clean observed run: [62/62 tests, zero warnings](/evidence/2026-10-10/kernel-zero-copy-ubsan.md). The allocation-bound assumption and exact upstream fixing commit still need verification, so this remains a likely annotation-ordering issue.
+
+**Reproduction.** On a freshly booted kernel with bounds-sanitizer instrumentation, create a zero-copy ublk device, use automatic buffer registration, and issue data I/O. go-ublk's `ublk-suite -run '^features/zero-copy$'` reproduced it on [mainline 7.2.6](/evidence/2026-10-10/kernel-zero-copy-ubsan.md), including the older base revision. UBSAN reports once per boot per site, so repeat observations need fresh boots. [6.8 and 6.12](/evidence/2026-10-10/kernel-zero-copy-ubsan.md) lack the zero-copy feature used here.
+
+**Workaround.** Use the copy data path when this report prevents a usable zero-copy run. The clean [7.3-rc3](/evidence/2026-10-10/kernel-zero-copy-ubsan.md) result doesn't establish that every later distribution build carries the same change. The [hosted evidence](/evidence/2026-10-10/kernel-zero-copy-ubsan.md) includes the signature, kernel versions, trigger, and source analysis.
 
 ## Smaller fixes worth having
 

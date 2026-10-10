@@ -10,8 +10,8 @@ timeout = "60s"
   min = "0.134.0"
 
 [params]
-  tagline = "The ublk guide and go-ublk"
-  description = "How Linux ublk userspace block devices work, from the control plane to zero copy, and the documentation for go-ublk, a pure-Go ublk library."
+  tagline = "The ublk guide, go-ublk, and lib-ublk"
+  description = "A guide to Linux userspace block devices, documentation for go-ublk and lib-ublk, and comparative benchmarks with measurement evidence."
   author = "Bryan Ehrlich"
   authorURL = "https://github.com/ehrlich-b"
   repo = "https://github.com/ehrlich-b/go-ublk"

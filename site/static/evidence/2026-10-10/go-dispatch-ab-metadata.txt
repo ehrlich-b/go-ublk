@@ -1,0 +1,13 @@
+# Public extract: machine name and local executable paths omitted.
+Sat Oct 10 13:50:33 UTC 2026
+Linux 6.12.111+deb13-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.111-1 (2026-09-28) x86_64 GNU/Linux
+faa2fce0084d0be5291fef712e8c1076c19000e44e3badeba0ee9e6005dd9897  ublk-mem
+binary=ublk-mem
+rounds=3
+size=512M queues=2 depth=64 runtime=10s
+set=0 flags=-backend ram
+set=1 flags=-backend ram -dispatch pool
+set=2 flags=-backend ram -inline
+set=3 flags=-backend null
+set=4 flags=-backend null -dispatch pool
+set=5 flags=-backend null -inline

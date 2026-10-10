@@ -571,12 +571,13 @@ h2 .badge, h3 .badge { margin-left: 0.5rem; }
 .button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--bg); }
 .home-body.prose { max-width: none; }
 .home-body .prose-narrow { max-width: 46rem; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr)); gap: 1rem; margin: 0 0 2.5rem; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 0 0 2.5rem; }
 .card { display: block; padding: 1.2rem 1.3rem; border: 1px solid var(--border-soft); border-radius: 10px; color: var(--fg); background: var(--bg-raised); }
 .card:hover { border-color: var(--accent); text-decoration: none; color: var(--fg); }
 .card .card-title { margin: 0 0 0.4rem; font-size: 1.1rem; font-weight: 650; color: var(--accent); }
 .card p:not(.card-title) { margin: 0; color: var(--fg-muted); font-size: 0.95rem; }
 @media (max-width: 40rem) {
+  .cards { grid-template-columns: 1fr; }
   .home-main { padding: 2rem 1rem 3rem; }
   .hero h1 { font-size: 2rem; }
   .hero-lede { font-size: 1.05rem; }
