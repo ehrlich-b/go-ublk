@@ -1,8 +1,8 @@
 ---
 title: "ublk"
 description: "How Linux ublk userspace block devices work, from the control plane to zero copy, and the documentation for go-ublk, a pure-Go ublk library."
-heroTitle: "Userspace block devices, explained and implemented in Go"
-heroLede: "**ublk** is the Linux framework for serving a block device from a userspace process: think *FUSE for block devices*, built on io_uring and in mainline since Linux 6.0. This site is a guide to how it works, for anyone writing a ublk server in any language, and the home of **go-ublk**, a ublk library in pure Go with no cgo and no liburing."
+heroTitle: "Linux block devices in pure Go"
+heroLede: "The pre-v0.2.0 inline engine reached **1.37M 4 KiB random-read IOPS** on a four-vCPU Apple M4 VM with a RAM backend. No cgo or liburing. [Measurements and conditions](/go-ublk/performance/); benchmarks of the current default engine are pending."
 heroLinks:
   - label: "Learn how ublk works"
     url: "/guide/"
@@ -16,15 +16,15 @@ heroLinks:
 <div class="cards">
 <a class="card" href="/guide/">
 <p class="card-title">The ublk guide</p>
-<p>Architecture, every control command, the FETCH and COMMIT data plane, copy modes and zero copy, batch I/O, user recovery, and which kernel added what. Language-agnostic.</p>
+<p>Language-agnostic: architecture, control commands, FETCH/COMMIT, copy modes, batch I/O, recovery, and kernel versions.</p>
 </a>
 <a class="card" href="/go-ublk/">
 <p class="card-title">go-ublk</p>
-<p>Implement a small <code>Backend</code> interface shaped like <code>io.ReaderAt</code> and <code>io.WriterAt</code> — or a raw request <code>Handler</code> — and get a <code>/dev/ublkbN</code>. The library handles io_uring, the kernel protocol, recovery and the device lifecycle.</p>
+<p>Implement a <code>Backend</code> with <code>io.ReaderAt</code>-style methods or a raw request <code>Handler</code>. The library handles io_uring, the kernel protocol, recovery, and device lifecycle.</p>
 </a>
 <a class="card" href="/reference/">
 <p class="card-title">Reference</p>
-<p>The full kernel UAPI surface with the release that introduced each item and its go-ublk status, plus a compatibility matrix of test runs per kernel.</p>
+<p>Kernel UAPI, introducing releases, go-ublk support, and test results per kernel.</p>
 </a>
 </div>
 
@@ -32,11 +32,11 @@ heroLinks:
 
 ## How it fits together
 
-An application reads and writes `/dev/ublkbN` like any disk. The kernel's `ublk_drv` turns each block request into a small descriptor and completes an io_uring command that your server left waiting. Your server does the I/O however it likes (a file, a network protocol, compressed RAM, an object store), then commits the result with the next io_uring command, which also re-arms the slot. There is no socket protocol, no SCSI emulation, and no context switch per request beyond io_uring's own batching. The [architecture chapter](/guide/architecture/) walks one request through the whole path.
+ublk has served userspace block devices through io_uring since Linux 6.0. Applications use `/dev/ublkbN` like any disk: `ublk_drv` delivers request descriptors to the server, which handles storage in files, network services, compressed RAM, or object stores. Committing a result re-arms the slot. No socket protocol or SCSI emulation is required. Follow a request through the [architecture](/guide/architecture/).
 
 ## Quick start with go-ublk
 
-A complete block device that discards writes and reads zeros. Implement five methods and hand the backend to `CreateAndServe`:
+This null device discards writes and reads zeros. Pass its five-method backend to `CreateAndServe`; use the RAM or file example below for a filesystem.
 
 ```go
 package main
@@ -73,20 +73,20 @@ func main() {
 ```sh
 sudo modprobe ublk_drv
 go build -o nulldisk . && sudo ./nulldisk &
-sudo mkfs.ext4 /dev/ublkb0 && sudo mount /dev/ublkb0 /mnt
+sudo dd if=/dev/ublkb0 of=/dev/null bs=4K count=1 iflag=direct
 ```
 
-[Getting started](/go-ublk/getting-started/) covers requirements, the two example servers, and how to clean up a device left behind by a killed process.
+[Getting started](/go-ublk/getting-started/): requirements, RAM and file servers, and cleanup after a killed process.
 
 ## Status
 
-**go-ublk v0.2.0 implements the whole kernel interface as of Linux 7.3-rc5** — every control command, feature and parameter block, from user recovery and zero copy to batch I/O, zoned devices and integrity metadata — and is tested on real kernels:
+go-ublk v0.2.0 implements the Linux 7.3-rc5 control commands, features, and parameters, including recovery, zero copy, batch I/O, zoned devices, and integrity metadata.
 
-- A real-kernel conformance suite (data integrity across queue and block-size combinations, filesystems, every feature, crash recovery, live upgrade handoffs, teardown under load, chaos) runs under dozens of mainline and distribution kernels; see the [compatibility matrix](/reference/matrix/).
-- The queue engine is unit-tested and fuzzed against a model of the kernel driver.
-- User recovery keeps a device — and the filesystem mounted on it — across a server crash or upgrade, verified under systemd with a verifying writer and zero I/O errors.
-- Kernel bugs found along the way, and the ones that bite ublk servers in general, are tracked in [known kernel bugs](/guide/kernel-bugs/).
+- The [compatibility matrix](/reference/matrix/) records integrity, queue/block-size combinations, filesystems, supported features, crash recovery, upgrade handoffs, teardown, and chaos tests across dozens of kernels.
+- The queue engine is unit-tested and fuzzed against a driver model.
+- Recovery preserves devices and mounted filesystems across crashes and upgrades, tested under systemd with verified writes and zero I/O errors.
+- [Known kernel bugs](/guide/kernel-bugs/) records failures affecting ublk servers.
 
-It is pre-1.0: the API can still change between minor releases. See [Releases](/go-ublk/releases/) and the [roadmap](/go-ublk/roadmap/).
+The pre-1.0 API may change between minor releases. See [releases](/go-ublk/releases/) and [roadmap](/go-ublk/roadmap/).
 
 </div>
