@@ -8,7 +8,7 @@ weight: 60
 The pre-v0.2.0 inline engine reached 1.37M 4 KiB random-read IOPS with a RAM backend on a four-vCPU VM. The current default engine has not been remeasured.
 
 > [!NOTE]
-> These measurements used inline backend calls, equivalent to today's DeviceParams.Inline. v0.2.0 defaults to a goroutine per request, adding handoff but permitting concurrent calls within a queue. Native-hardware comparisons of both modes, zero copy, and batch I/O remain pending; this release's emulated-CPU rig cannot supply useful performance measurements.
+> These measurements used inline backend calls, equivalent to today's `DeviceParams.Inline`. v0.2.0 defaults to a goroutine per request, adding handoff but permitting concurrent calls within a queue. Native-hardware comparisons of both modes, zero copy, and batch I/O remain pending; this release's emulated-CPU rig cannot supply useful performance measurements.
 
 ## Measurements
 
@@ -25,7 +25,7 @@ Four queues improved reads about 1.7x and writes 1.2x. These results include req
 
 ### Against the kernel loop driver
 
-Reported historical run: Ubuntu 24.04.5, kernel 7.0.0-34, four vCPUs/4 GiB RAM, go-ublk Q4/depth64. fio used 4 KiB direct I/O, libaio, QD64 per job, 10 s per workload. Both devices held 256 MiB in RAM; loop used a tmpfs file.
+Reported historical run: Ubuntu 24.04.5, kernel 7.0.0-34, four vCPUs, 4 GiB RAM, four go-ublk queues of depth 64. fio used 4 KiB direct I/O, libaio, queue depth 64 per job, 10 s per workload. Both devices held 256 MiB in RAM; loop used a tmpfs file.
 
 | Workload | go-ublk | loop (RAM) | go-ublk / loop |
 |---|---|---|---|
@@ -40,11 +40,11 @@ Workloads ran sequentially on a shared host before the large-I/O buffer change. 
 
 ## What bounds throughput
 
-By default, each queue permits up to QueueDepth concurrent backend calls; 2 ms calls need not cap it at 500 IOPS. Inline serializes calls at at most `1 / (backend latency + overhead)` per queue; reserve it for microsecond backends.
+By default, each queue permits up to `QueueDepth` concurrent backend calls; 2 ms calls need not cap it at 500 IOPS. `Inline` serializes calls at at most `1 / (backend latency + overhead)` per queue; reserve it for microsecond backends.
 
 Default copy mode performs one kernel memcpy per payload: before WRITE delivery or at READ commit. Large sequential I/O can become copy-bound. File backends can use [zero copy](/go-ublk/backends/#zero-copy); cooperating applications can use shared-memory zero copy.
 
-Queue threads reap available completions and submit commits together through io_uring_enter, amortizing syscall cost. BatchIO (7.0+) fetches up to 128 requests per completion and commits a round together.
+Queue threads reap available completions and submit commits together through `io_uring_enter`, amortizing syscall cost. `BatchIO` (7.0+) fetches up to 128 requests per completion and commits a round together.
 
 The default metrics observer reads the clock twice per request; include that cost when profiling.
 

@@ -55,7 +55,7 @@ The kernel derives the queue as `off / stride`. Writable mappings return `EPERM`
 > [!CAUTION]
 > Using `q * round_up(queue_depth * 24, page)` can put offsets below the fixed stride, mapping other queues onto queue 0. They read wrong descriptors, access wrong offsets, and commit unowned tags: silent corruption and uninterruptible hangs, affecting (N-1)/N of evenly distributed I/O on N queues. A multi-queue integrity sweep found this bug in go-ublk.
 
-With `UBLK_F_IO_DESC_SIZE` (7.3), ADD_DEV's `ublksrv_ctrl_dev_info.io_desc_size` selects 24-256 bytes in multiples of 8. Tag *t* is at `t * io_desc_size`; mapping length is `round_up(queue_depth * io_desc_size, page)`; stride is `round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, page)`. Default: 24. Only those first 24 bytes are written in 7.3. Padding, e.g. to a 64-byte cache line, avoids false sharing across threads and reserves future fields. Servers hard-coding 24 must not request this flag.
+With `UBLK_F_IO_DESC_SIZE` (7.3), `ADD_DEV`'s `ublksrv_ctrl_dev_info.io_desc_size` selects 24-256 bytes in multiples of 8. Tag *t* is at `t * io_desc_size`; mapping length is `round_up(queue_depth * io_desc_size, page)`; stride is `round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, page)`. Default: 24. Only those first 24 bytes are written in 7.3. Padding, e.g. to a 64-byte cache line, avoids false sharing across threads and reserves future fields. Servers hard-coding 24 must not request this flag.
 
 Read descriptors after reaping the CQE, with acquire loads or an equivalent barrier on weak memory models. They remain valid until commit. Bounds-check fields; a kernel-supplied range beyond capacity should fail the request, not crash the server.
 
@@ -153,13 +153,13 @@ Commit results:
 
 - READ/WRITE: full `nr_sectors << 9` bytes or a negative errno. A zero-byte READ becomes `-EIO`. In 6.17, short reads/writes requeued the remainder. In 7.3-rc5, only copy-mode reads complete partially; short writes and non-negative user-copy/zero-copy results report full success. Fail incomplete transfers.
 - FLUSH/DISCARD/WRITE_ZEROES: any non-negative value succeeds. Use 0: range lengths overflow signed 32-bit results at 2 GiB and become errors.
-- Errors: negative errnos map through block status to application errors, including EIO, ENOSPC, and EOPNOTSUPP.
+- Errors: negative errnos map through block status to application errors, including `-EIO` (I/O error), `-ENOSPC` (no space), and `-EOPNOTSUPP` (unsupported operation).
 
 [I/O operations and flags](/guide/io-operations/) covers each operation and the durability rules.
 
 ## Shutdown and failure
 
-Stop completes armed tags with `UBLK_IO_RES_ABORT`. Commit server-owned requests first, since STOP_DEV waits for them; exit the queue thread after all tags abort.
+Stop completes armed tags with `UBLK_IO_RES_ABORT`. Commit server-owned requests first, since `STOP_DEV` waits for them; exit the queue thread after all tags abort.
 
 Process death tears down rings and cancels commands. On the last `/dev/ublkcN` reference, the driver either stops the disk and fails uncommitted requests, or retains it for [recovery](/guide/recovery/), failing, requeueing, or holding I/O according to flags. Both leave the device registered until `DEL_DEV`.
 

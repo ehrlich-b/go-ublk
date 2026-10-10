@@ -22,9 +22,9 @@ Creation/startup requirements:
 | `basic.chunk_sectors` set to the zone size, a power of two | `SET_PARAMS` | `-EINVAL` |
 | `zoned.max_zone_append_sectors` non-zero | `SET_PARAMS` | `-EINVAL` |
 
-Zone append returns its sector in ublksrv_io_cmd.zone_append_lba, sharing the addr union needed by copy mode's next buffer. Use USER_COPY or SUPPORT_ZERO_COPY; automatic registration alone is insufficient.
+Zone append returns its sector in `ublksrv_io_cmd.zone_append_lba`, sharing the addr union needed by copy mode's next buffer. Use USER_COPY or SUPPORT_ZERO_COPY; automatic registration alone is insufficient.
 
-6.17 requires non-zero chunk_sectors; 7.3-rc5 requires a power of two. All versions count zones as `dev_sectors >> log2(chunk_sectors)`, omitting partial trailing zones. Align capacity to whole zones.
+6.17 requires non-zero `chunk_sectors`; 7.3-rc5 requires a power of two. All versions count zones as `dev_sectors >> log2(chunk_sectors)`, omitting partial trailing zones. Align capacity to whole zones.
 
 ## Zoned parameters
 
@@ -39,13 +39,13 @@ struct ublk_param_zoned {
 };
 ```
 
-ublk_param_basic.chunk_sectors gives zone size in 512-byte sectors.
+`ublk_param_basic.chunk_sectors` gives zone size in 512-byte sectors.
 
 ## Starting a zoned device
 
-Before exposing a zoned disk, START_DEV applies limits and revalidates layout through REPORT_ZONES. Failed reports fail startup.
+Before exposing a zoned disk, `START_DEV` applies limits and revalidates layout through `REPORT_ZONES`. Failed reports fail startup.
 
-Serve queues while START_DEV waits on the control ring. A single thread waiting synchronously before processing completions deadlocks.
+Serve queues while `START_DEV` waits on the control ring. A single thread waiting synchronously before processing completions deadlocks.
 
 ## Operations
 
@@ -61,11 +61,11 @@ Serve queues while START_DEV waits on the control ring. A single thread waiting 
 
 READ/WRITE/FLUSH work normally. The block layer orders sequential-zone writes, but the server must track write pointers and reject misplaced writes.
 
-Without UBLK_F_ZONED, the kernel rejects zone operations before delivery.
+Without `UBLK_F_ZONED`, the kernel rejects zone operations before delivery.
 
 ### Zone append
 
-Append targets the zone named by start_sector, writes at its current pointer, advances it, and returns the landing sector. Read payload as for WRITE (pread on `/dev/ublkcN` in user-copy mode); commit byte count and LBA:
+Append targets the zone named by `start_sector`, writes at its current pointer, advances it, and returns the landing sector. Read payload as for WRITE (pread on `/dev/ublkcN` in user-copy mode); commit byte count and LBA:
 
 ```c
 struct ublksrv_io_cmd *cmd = sqe_cmd(sqe);
@@ -76,16 +76,16 @@ cmd->zone_append_lba = landed_sector;  /* absolute, 512-byte sectors */
 submit(UBLK_U_IO_COMMIT_AND_FETCH_REQ);
 ```
 
-The kernel copies zone_append_lba into the completed request's sector. This is user-copy commit's exception to addr = 0. [Batch I/O](/guide/batch-io/) carries the LBA in zone_lba with UBLK_BATCH_F_HAS_ZONE_LBA.
+The kernel copies `zone_append_lba` into the completed request's sector. This is user-copy commit's exception to addr = 0. [Batch I/O](/guide/batch-io/) carries the LBA in `zone_lba` with `UBLK_BATCH_F_HAS_ZONE_LBA`.
 
 ### REPORT_ZONES
 
-The driver creates REPORT_ZONES for BLKREPORTZONE, filesystem mounts, and START_DEV revalidation, rather than application I/O. It allocates a zeroed buffer and supplies:
+The driver creates `REPORT_ZONES` for `BLKREPORTZONE`, filesystem mounts, and `START_DEV` revalidation, rather than application I/O. It allocates a zeroed buffer and supplies:
 
 - `start_sector`: the first sector of the first zone to report;
 - `nr_zones` (the union member that is `nr_sectors` for other ops): the most zones to report.
 
-Fill `struct blk_zone` entries from `<linux/blkzoned.h>` (64 bytes each), starting at start_sector, and pwrite them at byte offset 0 of the tag's user-copy position. End short reports with a zeroed entry; len = 0 terminates parsing. Large reports split across requests with advancing start_sector.
+Fill `struct blk_zone` entries from `<linux/blkzoned.h>` (64 bytes each), starting at `start_sector`, and pwrite them at byte offset 0 of the tag's user-copy position. End short reports with a zeroed entry; len = 0 terminates parsing. Large reports split across requests with advancing `start_sector`.
 
 ```c
 struct blk_zone z[nr_zones];
@@ -102,7 +102,7 @@ ssize_t n = pwrite(ublkc_fd, z, sizeof(z), ublk_user_copy_pos(q_id, tag, 0));
 commit(q_id, tag, n < 0 ? -EIO : (int)n);
 ```
 
-Commit bytes written, normally `nr_zones × 64` (rublk uses pwrite's result), or negative errno. Before 7.3, blk_update_request re-dispatches a zero result indefinitely and re-dispatches the remainder after a short result. From 7.3, any non-negative result completes the report.
+Commit bytes written, normally `nr_zones × 64` (rublk uses pwrite's result), or negative errno. Before 7.3, `blk_update_request` re-dispatches a zero result indefinitely and re-dispatches the remainder after a short result. From 7.3, any non-negative result completes the report.
 
 ## A minimal zone model
 
@@ -118,10 +118,10 @@ Track each sequential zone's write pointer and condition:
 | ZONE_RESET | `wp` = zone start, `EMPTY`; the zone's data may be discarded |
 | ZONE_RESET_ALL | reset every sequential zone |
 
-Enforce advertised max_open_zones/max_active_zones. Conventional zones (BLK_ZONE_TYPE_CONVENTIONAL, BLK_ZONE_COND_NOT_WP) accept arbitrary writes and ignore zone operations.
+Enforce advertised `max_open_zones`/`max_active_zones`. Conventional zones (`BLK_ZONE_TYPE_CONVENTIONAL`, `BLK_ZONE_COND_NOT_WP`) accept arbitrary writes and ignore zone operations.
 
 The kernel selftest server lacks a zoned target; Rust rublk provides `rublk add zoned` as a reference.
 
 ## go-ublk
 
-Set DeviceParams.EnableZoned and Zoned (size, open/active limits, maximum append size) for host-managed zones (6.6+). go-ublk enables user copy to return append LBAs. A Handler receives OpZoneOpen/Close/Finish/Reset/ResetAll, OpZoneAppend (complete with `Request.CompleteZoneAppend(lba, err)`), and OpReportZones (`Request.ReportZones`). The suite uses in-memory zoned storage. go-ublk zoned devices exclude zero copy and unprivileged mode.
+Set `DeviceParams.EnableZoned` and `DeviceParams.Zoned` (zone size, open/active limits, maximum append size) for host-managed zones (6.6+). go-ublk enables user copy to return append LBAs. A `Handler` receives `OpZoneOpen`, `OpZoneClose`, `OpZoneFinish`, `OpZoneReset`, `OpZoneResetAll`, and `OpZoneAppend` (complete with `Request.CompleteZoneAppend(lba, err)`); it receives `OpReportZones` (`Request.ReportZones`). The suite uses in-memory zoned storage. go-ublk zoned devices exclude zero copy and unprivileged mode.

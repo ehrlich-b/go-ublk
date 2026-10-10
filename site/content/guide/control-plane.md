@@ -21,7 +21,7 @@ Open `/dev/ublk-control` read-write and create an io_uring with `IORING_SETUP_SQ
 
 CQE `res` is 0 on success or a negative errno, except `UBLK_U_CMD_REG_BUF` can return a positive buffer index.
 
-`START_DEV` and `END_USER_RECOVERY` wait for every tag's fetch; `DEL_DEV` waits for the last device reference; `QUIESCE_DEV` waits up to its timeout. The driver returns `-EAGAIN` on non-blocking issue, moving these commands to io_uring workers. Submission returns, but the CQE waits for the condition. Use timeouts and handle `EINTR`-style interruptions. Never wait on the thread needed to satisfy the condition: `START_DEV` cannot finish before that thread submits the fetches.
+`START_DEV` and `END_USER_RECOVERY` wait for every tag's fetch; `DEL_DEV` waits for the last device reference; `QUIESCE_DEV` waits up to its timeout. The driver returns `-EAGAIN` on non-blocking issue, moving these commands to io_uring workers. The submitting `io_uring_enter` returns, but the CQE waits for the condition. Use timeouts and handle `EINTR`-style interruptions. Never wait on the thread needed to satisfy the condition: `START_DEV` cannot finish before that thread submits the fetches.
 
 ### struct ublksrv_ctrl_cmd
 
@@ -69,7 +69,7 @@ Commands in the 7.3-rc5 header; "Blocks" identifies what delays the CQE.
 | `UBLK_U_CMD_REG_BUF` | `0xc0207518` | 7.1 | `addr` → `ublk_shmem_buf_reg` | |
 | `UBLK_U_CMD_UNREG_BUF` | `0xc0207519` | 7.1 | `data[0]` = buffer index | |
 
-Legacy commands use the low byte: 0x01/0x02 for affinity/info, 0x04-0x09 for ADD/DEL/START/STOP/SET/GET_PARAMS, 0x10/0x11 for recovery, and 0x12 for `GET_DEV_INFO2`.
+Legacy opcodes are the low byte: `GET_QUEUE_AFFINITY` 0x01, `GET_DEV_INFO` 0x02, `ADD_DEV` 0x04, `DEL_DEV` 0x05, `START_DEV` 0x06, `STOP_DEV` 0x07, `SET_PARAMS` 0x08, `GET_PARAMS` 0x09, recovery 0x10/0x11, and `GET_DEV_INFO2` 0x12.
 
 ### ADD_DEV
 
@@ -114,7 +114,7 @@ Partition scanning is suppressed for queues served by unprivileged tasks, or wit
 
 ### STOP_DEV
 
-Removes `/dev/ublkbN` and returns to `UBLK_S_DEV_DEAD`. `del_gendisk` flushes mounted-filesystem data and drains in-flight I/O, so **keep serving queues until STOP_DEV returns**. The driver then completes pending fetches with `UBLK_IO_RES_ABORT` (`-ENODEV`), telling queue threads to exit. The command returns 0.
+Removes `/dev/ublkbN` and returns to `UBLK_S_DEV_DEAD`. `del_gendisk` flushes mounted-filesystem data and drains in-flight I/O, so **keep serving queues until `STOP_DEV` returns**. The driver then completes pending fetches with `UBLK_IO_RES_ABORT` (`-ENODEV`), telling queue threads to exit. The command returns 0.
 
 Shutdown order:
 

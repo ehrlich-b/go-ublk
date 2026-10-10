@@ -32,7 +32,7 @@ unsigned flags = desc->op_flags >> 8;     /* ublksrv_get_flags() returns them sh
 | `UBLK_IO_OP_ZONE_RESET` | 15 | 6.6 | Zoned devices | None |
 | `UBLK_IO_OP_REPORT_ZONES` | 18 | 6.6 | Zoned devices, from the driver itself | Server writes `struct blk_zone` entries; `nr_zones` replaces `nr_sectors` |
 
-The UAPI retains WRITE_SAME, although the block layer removed it in 5.18, before ublk's 6.0 merge. The driver maps nothing to it. Untranslated operations, such as secure erase, fail before reaching the server.
+The UAPI retains `WRITE_SAME`, although the block layer removed it in 5.18, before ublk's 6.0 merge. The driver maps nothing to it. Untranslated operations, such as secure erase, fail before reaching the server.
 
 ### READ and WRITE
 
@@ -50,11 +50,11 @@ Flushes arrive only with a volatile cache: advertise one when completed writes c
 
 DISCARD marks unneeded data. Punch holes, issue TRIM, drop blocks, or ignore it; later reads may return old data, zeros, or anything else.
 
-Ranges can exceed max_io_buf_bytes, up to max_discard_sectors; allocate no data buffer. Only single-range discards arrive (`max_discard_segments = 1`).
+Ranges can exceed `max_io_buf_bytes`, up to `max_discard_sectors`; allocate no data buffer. Only single-range discards arrive (`max_discard_segments = 1`).
 
 ### WRITE_ZEROES
 
-WRITE_ZEROES must leave zeros. With `UBLK_IO_F_NOUNMAP`, retain allocation through writes or a zeroing primitive; otherwise hole punching is allowed if reads return zeros.
+`WRITE_ZEROES` must leave zeros. With `UBLK_IO_F_NOUNMAP`, retain allocation through writes or a zeroing primitive; otherwise hole punching is allowed if reads return zeros.
 
 Like discard, this is a potentially multi-gigabyte range.
 
@@ -104,11 +104,11 @@ Errnos map through block status to application errors:
 | `-EREMOTEIO` | `BLK_STS_TARGET` | a critical target error |
 | `-EINVAL` | `BLK_STS_INVAL` | 6.11 and later; `BLK_STS_IOERR` before |
 
-Since 6.0, `errno_to_blk_status` maps negative results; unrecognized errnos become BLK_STS_IOERR.
+`errno_to_blk_status` maps negative results; unrecognized errnos become `BLK_STS_IOERR`.
 
 ## The durability contract
 
-SET_PARAMS attributes define completed-write durability and delivery of flush/FUA:
+`SET_PARAMS` attributes define completed-write durability and delivery of flush/FUA:
 
 | Device advertises | Flushes | FUA writes | The server promises |
 |---|---|---|---|
@@ -120,4 +120,4 @@ SET_PARAMS attributes define completed-write durability and delivery of flush/FU
 
 An unnecessary cache flag costs no-op flushes. A missing required flag loses acknowledged writes on power failure: filesystems treat cached journal commits as durable. When unsure, advertise the cache and implement flush.
 
-Honor `UBLK_IO_F_FUA` on every flagged write. Advertise it when making one write durable, e.g. O_DSYNC or a network sync flag, is cheaper than full flush. Otherwise let the block layer emulate it correctly with flushes.
+Honor `UBLK_IO_F_FUA` on every flagged write. Advertise it when making one write durable, e.g. `O_DSYNC` or a network sync flag, is cheaper than full flush. Otherwise let the block layer emulate it correctly with flushes.

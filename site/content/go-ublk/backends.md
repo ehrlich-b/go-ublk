@@ -46,13 +46,13 @@ All offsets and lengths are in bytes.
 
 These follow `io.ReaderAt`/`io.WriterAt`, except short transfers fail:
 
-- The kernel supplies block-aligned `off`/`len(p)`, length at most `MaxIOSize` (default 1 MiB), and a range within `[0, Size())`. Backends may validate too.
+- The kernel aligns `off` and `len(p)` to `LogicalBlockSize`, limits length to `MaxIOSize` (default 1 MiB), and keeps `[off, off+len(p))` within `[0, Size())`. Backends may validate too.
 - Success requires `n == len(p)` and nil error; a full READ with `io.EOF` also succeeds. Other errors or short counts fail, even with nil error.
 - Fill every READ byte. Unwritten space, missing objects, or storage shorter than the device must return zeros for the remainder and count `len(p)`.
 
 The per-request buffer `p` comes from a per-queue mapping used for kernel copies. It expires when the method returns, then the next request reuses the slot. Copy bytes you need to retain; never keep the slice, pass it to work outliving the call, or modify it after returning.
 
-Wrap `*os.File` to zero-fill short EOF reads and provide Size, Flush, and Close, as below.
+Wrap `*os.File` to zero-fill short EOF reads and provide `Size`, `Flush`, and `Close`, as below.
 
 ## Size
 
@@ -74,17 +74,24 @@ At creation, `Size` validates parameters and sets exported capacity; it must be 
 
 The default `true` may cost a no-op flush. Incorrectly choosing `false` suppresses required flushes, letting filesystems acknowledge journal commits that a power failure can erase without errors.
 
-FUA (Force Unit Access) defaults off; the block layer emulates it with write-then-flush. To make single writes durable more cheaply, implement `FUABackend.WriteAtFUA` and set `DeviceParams.EnableFUA`. O_DSYNC writes and journal commits then use WriteAtFUA without flushing the entire device.
+FUA (Force Unit Access) defaults off; the block layer emulates it with write-then-flush. To make single writes durable more cheaply, implement `FUABackend.WriteAtFUA` and set `DeviceParams.EnableFUA`. `O_DSYNC` writes and journal commits then use `WriteAtFUA` without flushing the entire device.
 
 ## Close
 
 The program owns the backend; go-ublk never calls its `Close`. Close it after `Device.Close` succeeds and callbacks have stopped. If device closure fails, keep the backend available for serving and retry teardown.
 
 ```go
-defer backend.Close()          // runs second
 device, err := ublk.CreateAndServe(ctx, ublk.DefaultParams(backend), nil)
+if err != nil {
+    backend.Close()
+    return err
+}
 // ...
-device.Close()                 // runs first: no backend calls after this returns
+if err := device.Close(); err != nil {
+    // Keep the backend open; retry device.Close before closing it.
+    return err
+}
+return backend.Close()         // device teardown succeeded; callbacks have stopped
 ```
 
 For a buffered file backend, `Close` is the last chance to `Sync`.
@@ -113,19 +120,19 @@ A 1 ms backend call therefore need not limit a queue to 1,000 IOPS or block late
 
 Overlapping writes can run concurrently and leave either result. Protect backend structures; compressed/copy-on-write chunks need locks covering each rewritten chunk.
 
-Bound calls with timeouts, especially over networks. A hung call cannot be cancelled: STOP_DEV waits until `Options.StopTimeout`, and Close fails while retaining memory the call could access. Never call `Device.Close` inside a backend method; it waits for that method too.
+Bound calls with timeouts, especially over networks. A hung call cannot be cancelled: `STOP_DEV` waits until `Options.StopTimeout`, and `Close` fails while retaining memory the call could access. Never call `Device.Close` inside a backend method; it waits for that method too.
 
 ## Errors
 
 Errors complete requests as follows:
 
-- Wrapped or direct `syscall.Errno` passes through, e.g. `ENOSPC` for exhausted thin provisioning. Drivers using `errno_to_blk_status` preserve common ENOSPC/ETIMEDOUT/EOPNOTSUPP errors; older kernels return EIO for all failures.
-- `context.DeadlineExceeded`/`os.ErrDeadlineExceeded` map to ETIMEDOUT; `errors.ErrUnsupported` to EOPNOTSUPP.
-- Other errors and short counts map to EIO. Inspect with `ublk.Errno(err)`.
+- Wrapped or direct `syscall.Errno` passes through, e.g. `syscall.ENOSPC` for exhausted thin provisioning. The kernel maps errnos through `errno_to_blk_status`: common `ENOSPC`/`ETIMEDOUT`/`EOPNOTSUPP` errors survive; unrecognized errors become `EIO`.
+- `context.DeadlineExceeded`/`os.ErrDeadlineExceeded` map to `ETIMEDOUT`; `errors.ErrUnsupported` to `EOPNOTSUPP`.
+- Other errors and short counts map to `EIO`. Inspect with `ublk.Errno(err)`.
 
 The library does not retry; an error fails that request while the queue keeps serving.
 
-Recovered backend panics produce EIO and a log entry if a logger is configured. The server continues, but backend state may be damaged; fix the panic.
+Recovered backend panics produce `EIO` and a log entry if a logger is configured. The server continues, but backend state may be damaged; fix the panic.
 
 Failed operations are counted in [metrics](/go-ublk/lifecycle/#metrics) and reported to an `Observer` with `success == false`.
 
@@ -138,7 +145,7 @@ func (b *store) WriteIntegrity(meta []byte, off int64) error // metadata for the
 func (b *store) ReadIntegrity(meta []byte, off int64) error  // return what was stored
 ```
 
-ReadAt/WriteAt move data; these methods move matching metadata. With a checksum type, the kernel generates protection information on writes and verifies reads, returning `EILSEQ` for wrong tuples. Unwritten blocks need all `0xff` metadata (T10 escape), or reads, including partition scans, fail verification. Handlers receive `Request.Integrity`.
+`ReadAt`/`WriteAt` move data; these methods move matching metadata. With a checksum type, the kernel generates protection information on writes and verifies reads, returning `EILSEQ` for wrong tuples. Unwritten blocks need all `0xff` metadata (T10 escape), or reads, including partition scans, fail verification. Handlers receive `Request.Integrity`.
 
 ## Zero copy
 
@@ -148,13 +155,13 @@ For linear file/block-device storage without copying, implement `ZeroCopyBackend
 func (b *fileBackend) ZeroCopyFile() (fd int, base int64) { return int(b.f.Fd()), 0 }
 ```
 
-Set `DeviceParams.EnableZeroCopy` (6.15+). The kernel registers request pages in the queue's buffer table; go-ublk submits fixed-buffer I/O at `base + offset` on that ring. No ReadAt/WriteAt/Flush calls occur and bytes never enter Go memory. Flush uses `fdatasync`, discard `fallocate(PUNCH_HOLE)`, zeroes `fallocate(ZERO_RANGE)`, and FUA `RWF_DSYNC`, honoring EnableFUA. Asynchronous file operations can fill the queue depth.
+Set `DeviceParams.EnableZeroCopy` (6.15+). The kernel registers request pages in the queue's buffer table; go-ublk submits fixed-buffer I/O at `base + offset` on that ring. No `ReadAt`/`WriteAt`/`Flush` calls occur and bytes never enter Go memory. `Flush` uses `fdatasync`, discard `fallocate(PUNCH_HOLE)`, zeroes `fallocate(ZERO_RANGE)`, and FUA `RWF_DSYNC`, honoring `EnableFUA`. Asynchronous file operations can fill the queue depth.
 
-Creation requires file length at least `base + Size()`. Zero copy excludes user copy, NeedGetData, and unprivileged devices. `ublk-loop -zero-copy` enables it.
+Creation requires file length at least `base + Size()`. Zero copy excludes user copy, `NeedGetData`, and unprivileged devices. `ublk-loop -zero-copy` enables it.
 
 ## The Handler interface
 
-For raw requests and asynchronous completion, set `DeviceParams.Handler` instead of Backend:
+For raw requests and asynchronous completion, set `DeviceParams.Handler` instead of `Backend`:
 
 ```go
 h := ublk.HandlerFunc(func(r *ublk.Request) {
@@ -176,17 +183,17 @@ h := ublk.HandlerFunc(func(r *ublk.Request) {
 params := ublk.DeviceParams{Handler: h, Size: store.Size(), /* ... */}
 ```
 
-`Request` carries OpRead/OpWrite/OpFlush/OpDiscard/OpWriteZeroes or zoned operations; FlagFUA/FlagNoUnmap, fail-fast, and swap hints; byte offset/length; and `Data` for data operations.
+`Request` carries `OpRead`/`OpWrite`/`OpFlush`/`OpDiscard`/`OpWriteZeroes` or zoned operations; `FlagFUA`/`FlagNoUnmap`, fail-fast, and swap hints; byte offset/length; and `Data` for data operations.
 
-- Call Complete(err), CompleteN(n, err), or CompleteZoneAppend(sector, err) once. Double completion panics; omission leaves the request in flight until teardown.
-- Request and Data expire at completion and are reused by the tag.
-- Only copy-mode READs support partial completion and resubmission. Short WRITEs and user-copy/zero-copy READs must fail: the kernel treats non-negative results as full success. CompleteN enforces this.
-- Set HandlerDiscard/HandlerWriteZeroes to receive those operations and EnableFUA for FUA.
-- EnableZoned adds zone operations. Answer OpReportZones with `r.ReportZones(zones)` (a short list ends it), and OpZoneAppend with `r.CompleteZoneAppend(sector, err)`, identifying the written sector. `zonedMem` in `test/suite/tests_v1.go` is an approximately eighty-line host-managed example.
+- Call `Complete(err)`, `CompleteN(n, err)`, or `CompleteZoneAppend(sector, err)` once. Double completion panics; omission leaves the request in flight until teardown.
+- `Request` and `Data` expire at completion and are reused by the tag.
+- Only copy-mode READs support partial completion and resubmission. Short WRITEs and user-copy/zero-copy READs must fail: the kernel treats non-negative results as full success. `CompleteN` enforces this.
+- Set `HandlerDiscard`/`HandlerWriteZeroes` to receive those operations and `EnableFUA` for FUA.
+- `EnableZoned` adds zone operations. Answer `OpReportZones` with `r.ReportZones(zones)` (a short list ends it), and `OpZoneAppend` with `r.CompleteZoneAppend(sector, err)`, identifying the written sector. `zonedMem` in `test/suite/tests_v1.go` is an approximately eighty-line host-managed example.
 
 ## Memory
 
-Each queue maps `QueueDepth × MaxIOSize` anonymous bytes: 128 MiB by default. Only touched pages become resident; small requests leave much of the mapping untouched. Reduce QueueDepth or MaxIOSize to save memory; the kernel splits larger requests.
+Each queue maps `QueueDepth × MaxIOSize` anonymous bytes: 128 MiB by default. Only touched pages become resident; small requests leave much of the mapping untouched. Reduce `QueueDepth` or `MaxIOSize` to save memory; the kernel splits larger requests.
 
 ## Example: a file backend
 
@@ -229,7 +236,7 @@ func (b *fileBackend) Discard(off, length int64) error {
 }
 ```
 
-`os.File.ReadAt`/`WriteAt` use pread/pwrite offsets, permitting concurrent queues without locks. Buffered writes require `VolatileCache = true` so kernel Flush becomes fsync. The full example also handles write-zeroes, read-only mode, O_DSYNC write-through, and filesystems without hole punching.
+`os.File.ReadAt`/`WriteAt` use pread/pwrite offsets, permitting concurrent queues without locks. Buffered writes require `VolatileCache = true` so kernel `Flush` becomes fsync. The full example also handles write-zeroes, read-only mode, `O_DSYNC` write-through, and filesystems without hole punching.
 
 ## Testing a backend
 

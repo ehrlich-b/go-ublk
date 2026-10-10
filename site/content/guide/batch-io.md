@@ -5,7 +5,7 @@ description: "UBLK_F_BATCH_IO: per-queue PREP, COMMIT and multishot FETCH comman
 weight: 80
 ---
 
-In the classic [data plane](/guide/data-plane/), each tag holds a FETCH_REQ or COMMIT_AND_FETCH_REQ owned by one task. {{< uapi "UBLK_F_BATCH_IO" >}} (7.0) replaces per-request commands/completions with three per-queue array commands:
+In the classic [data plane](/guide/data-plane/), each tag holds a `FETCH_REQ` or `COMMIT_AND_FETCH_REQ` owned by one task. {{< uapi "UBLK_F_BATCH_IO" >}} (7.0) replaces per-request commands/completions with three per-queue array commands:
 
 | Command | Encoded opcode | Replaces | Shape |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Batch mode reduces commands and CQEs and lets any server task handle any tag, ba
 
 ## Enabling batch mode
 
-{{< since "7.0" >}} Request `UBLK_F_BATCH_IO` at ADD_DEV and check the reply. The kernel clears `UBLK_F_PER_IO_DAEMON` and `UBLK_F_NEED_GET_DATA`: batch mode has neither per-tag daemons nor get-data.
+{{< since "7.0" >}} Request `UBLK_F_BATCH_IO` at `ADD_DEV` and check the reply. The kernel clears `UBLK_F_PER_IO_DAEMON` and `UBLK_F_NEED_GET_DATA`: batch mode has neither per-tag daemons nor get-data.
 
 Per-tag `UBLK_U_IO_FETCH_REQ`, `UBLK_U_IO_COMMIT_AND_FETCH_REQ`, and `UBLK_U_IO_NEED_GET_DATA` return `-EOPNOTSUPP`. REGISTER_IO_BUF/UNREGISTER_IO_BUF still work. Batch supports [copy, user copy, zero copy, and automatic registration](/guide/data-copy/).
 
@@ -38,7 +38,7 @@ struct ublk_batch_io {
 };
 ```
 
-For PREP_IO_CMDS/COMMIT_IO_CMDS, `sqe->addr` addresses `nr_elem * elem_bytes`. Invalid queue/tag returns `-EINVAL`; `nr_elem > queue_depth` returns `-E2BIG`.
+For `PREP_IO_CMDS`/`COMMIT_IO_CMDS`, `sqe->addr` addresses `nr_elem * elem_bytes`. Invalid queue/tag returns `-EINVAL`; `nr_elem > queue_depth` returns `-E2BIG`.
 
 ## Elements
 
@@ -66,7 +66,7 @@ Unknown or inapplicable flags return `-EINVAL`. Copy-mode `buf_addr` names the n
 
 ## PREP_IO_CMDS: startup
 
-Before START_DEV, prepare every queue/tag with one or more PREP_IO_CMDS. Each element records a copy buffer address or registration index and marks its tag ready, as FETCH_REQ does. Startup waits for all tags.
+Before `START_DEV`, prepare every queue/tag with one or more `PREP_IO_CMDS`. Each element records a copy buffer address or registration index and marks its tag ready, as `FETCH_REQ` does. Startup waits for all tags.
 
 PREP is atomic: failure reverts previously prepared elements and returns the error; success returns 0. Tags can be prepared only once, so retry the entire failed set.
 
@@ -84,7 +84,7 @@ submit(UBLK_U_IO_PREP_IO_CMDS);                     /* res == 0 or -errno */
 
 ## FETCH_IO_CMDS: receiving requests
 
-FETCH_IO_CMDS is multishot with an io_uring provided-buffer ring. Required fields:
+`FETCH_IO_CMDS` is multishot with an io_uring provided-buffer ring. Required fields:
 
 - `IORING_URING_CMD_MULTISHOT` in the SQE's `uring_cmd_flags` (`-EINVAL` otherwise);
 - `flags == 0` and `elem_bytes == sizeof(__u16)` in the header;
@@ -107,7 +107,7 @@ if (!(cqe->flags & IORING_CQE_F_MORE))
 Fetch rules:
 
 - Multiple tasks/rings may post fetches per queue. One is active, drains the backlog, then hands off to the next; buffer sizes control batch sizes.
-- Missing buffers or failed CQE posting requeue undelivered tags and end the command, usually with `-ENOBUFS`, without IORING_CQE_F_MORE. Stock buffers and re-arm when MORE disappears. Stop/quiesce aborts waiting fetches with `UBLK_IO_RES_ABORT` (`-ENODEV`).
+- Missing buffers or failed CQE posting requeue undelivered tags and end the command, usually with `-ENOBUFS`, without `IORING_CQE_F_MORE`. Stock buffers and re-arm when MORE disappears. Stop/quiesce aborts waiting fetches with `UBLK_IO_RES_ABORT` (`-ENODEV`).
 - If preparation fails or requeues every selected tag, the CQE returns the buffer with `res == 0`.
 - Size the CQ for multishot traffic; the kernel selftest server adds `2 × queue_depth` entries per thread.
 
@@ -115,7 +115,7 @@ Fetch rules:
 
 Commit completed I/O in arrays: tag, `result`, and flag-selected next buffer or zone-append LBA. [Results](/guide/io-operations/) are READ/WRITE byte counts, 0 for other successful operations, or negative errno.
 
-Each element completes its request, copying READ data in copy mode, and returns the tag to FETCH_IO_CMDS. No per-tag re-arm is needed.
+Each element completes its request, copying READ data in copy mode, and returns the tag to `FETCH_IO_CMDS`. No per-tag re-arm is needed.
 
 The result counts processed element bytes. Processing stops at the first failure:
 
@@ -142,4 +142,4 @@ Automatic registration installs buffers on the delivering fetch's ring; commit m
 
 `DeviceParams.BatchIO` (7.0+) sends PREP once, maintains one multishot FETCH into 16 buffers of 128 tags, and sends one COMMIT per loop round, with up to four commit buffers in flight. Submission returns tag ownership to the kernel: FETCH may redeliver a tag before its commit CQE arrives.
 
-Copy-mode elements use `UBLK_BATCH_F_HAS_BUF_ADDR`; zero-copy elements use tag as `buf_index` with `UBLK_BATCH_F_AUTO_BUF_REG_FALLBACK`. User copy also works. NeedGetData and ThreadsPerQueue above 1 are forbidden. See [configuration](/go-ublk/configuration/).
+Copy-mode elements use `UBLK_BATCH_F_HAS_BUF_ADDR`; zero-copy elements use tag as `buf_index` with `UBLK_BATCH_F_AUTO_BUF_REG_FALLBACK`. User copy also works. `NeedGetData` and `ThreadsPerQueue` above 1 are forbidden. See [configuration](/go-ublk/configuration/).

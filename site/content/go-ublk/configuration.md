@@ -5,7 +5,7 @@ description: "Every field of DeviceParams and Options: defaults, valid ranges, w
 weight: 30
 ---
 
-Start with `DefaultParams(backend)`, adjust `DeviceParams`, and optionally supply `*Options`. Create, CreateAndServe, or Recover reads them at setup.
+Start with `DefaultParams(backend)`, adjust `DeviceParams`, and optionally supply `*Options`. `Create`, `CreateAndServe`, or `Recover` reads them at setup.
 
 ```go
 params := ublk.DefaultParams(backend)
@@ -17,7 +17,7 @@ params.Recovery = ublk.RecoveryReissue
 device, err := ublk.CreateAndServe(ctx, params, &ublk.Options{Logger: myLogger})
 ```
 
-Invalid fields fail validation before kernel calls. Missing features return named errors matching `syscall.EOPNOTSUPP`: checked before creation where GET_FEATURES exists, then against ADD_DEV's reply. Privileged callers may have UNPRIVILEGED_DEV cleared. Probe support with `ublk.Probe()`.
+Invalid fields fail validation before kernel calls. Missing features return named errors matching `syscall.EOPNOTSUPP`: checked before creation where GET_FEATURES exists, then against `ADD_DEV`'s reply. Privileged callers may have UNPRIVILEGED_DEV cleared. Probe support with `ublk.Probe()`.
 
 ## DeviceParams
 
@@ -55,7 +55,7 @@ Invalid fields fail validation before kernel calls. Missing features return name
 
 ### Discard and write-zeroes
 
-Requires DiscardBackend/WriteZeroesBackend, or HandlerDiscard/HandlerWriteZeroes with a Handler.
+Requires `DiscardBackend`/`WriteZeroesBackend`, or `HandlerDiscard`/`HandlerWriteZeroes` with a `Handler`.
 
 | Field | Default | Effect |
 |---|---|---|
@@ -92,7 +92,7 @@ Default copy uses per-tag buffers. The kernel protocol dates to 6.0; go-ublk req
 | `EnableIoctlEncode` | | Deprecated, no effect: ioctl-encoded commands are always used |
 | `DeviceName` | | Deprecated, no effect: ublk devices have no name |
 
-When supported, go-ublk also requests UPDATE_SIZE for Resize, QUIESCE for recoverable-device handoff, and AUTO_BUF_REG for zero copy (all 6.16+).
+When supported, go-ublk also requests `UPDATE_SIZE` for Resize, `QUIESCE` for recoverable-device handoff, and `AUTO_BUF_REG` for zero copy (all 6.16+).
 
 ## What reaches the kernel
 

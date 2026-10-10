@@ -23,7 +23,7 @@ Hold tested kernels (`apt-mark hold` on Ubuntu). Installing a newer kernel can c
 
 ## ADD_DEV NULL dereference on Ubuntu 6.17
 
-The first `ADD_DEV` hangs with a NULL dereference at address 0 in `ublk_init_queues` (`+0x4e` x86_64, `+0x84` arm64), called from `ublk_ctrl_add_dev` in an `iou-wrk` worker. Reproductions include one queue at depth one, the kernel selftest server, and ublksrv. CPU topology matters: the matrix uses `possible_cpus=8` to expose the -40 failure. The worker dies holding the global control mutex, blocking later ADD_DEV/DEL_DEV calls until reboot.
+The first `ADD_DEV` hangs with a NULL dereference at address 0 in `ublk_init_queues` (`+0x4e` x86_64, `+0x84` arm64), called from `ublk_ctrl_add_dev` in an `iou-wrk` worker. Reproductions include one queue at depth one, the kernel selftest server, and ublksrv. CPU topology matters: the matrix uses `possible_cpus=8` to expose the -40 failure. The worker dies holding the global control mutex, blocking later `ADD_DEV`/`DEL_DEV` calls until reboot.
 
 Ubuntu backported `529d4d632788` ("ublk: implement NUMA-aware memory allocation", 6.19) without `011af85ccd87` ("ublk: reorder tag_set initialization before queue allocation"). Queue initialization consults the tag set's CPU map before it exists. Stable 6.18.4/6.18.5 made the same split. Mainline releases before 6.19 have neither commit; 6.19 has both.
 
@@ -83,7 +83,7 @@ These matrix findings concern the kernel paths used by ublk servers:
 
 **Delete stopped devices; add new ones.** Restarting via [START_DEV after STOP_DEV](/guide/control-plane/) returns `EBUSY` on Fedora 6.19/7.2.8 and mainline 7.0.14, hangs the control plane on 6.10-6.12, or crashes. Arch 7.2.8-arch1-2 NULL-dereferenced in `ublk_queue_rq` from `ublk_partition_scan_work`: a partition read reached a queue with missing per-I/O state.
 
-**Batch handoff before 7.3-rc3 can fail I/O.** `QUIESCE_DEV` leaves `force_abort` set on `UBLK_F_BATCH_IO` queues. On Ubuntu 7.0.0-38, a concurrent writer received `EIO` every attempt. Fix: "ublk: clear force_abort in ublk_queue_reset_io_flags()" (`8a14be55bdc6`, 7.3-rc3, stable 7.2.7). Earlier kernels require handoff without QUIESCE_DEV: release the device and let `UBLK_F_USER_RECOVERY_REISSUE` requeue outstanding I/O.
+**Batch handoff before 7.3-rc3 can fail I/O.** `QUIESCE_DEV` leaves `force_abort` set on `UBLK_F_BATCH_IO` queues. On Ubuntu 7.0.0-38, a concurrent writer received `EIO` every attempt. Fix: "ublk: clear `force_abort` in ublk_queue_reset_io_flags()" (`8a14be55bdc6`, 7.3-rc3, stable 7.2.7). Earlier kernels require handoff without `QUIESCE_DEV`: release the device and let `UBLK_F_USER_RECOVERY_REISSUE` requeue outstanding I/O.
 
 **Provided-buffer registration fails on Ubuntu 6.8.** On 6.8.0-146 (24.04 GA) and 6.8.0-138 (22.04 HWE), valid `IORING_REGISTER_PBUF_RING` calls return `-EINVAL` for any size, with user memory or `IOU_PBUF_RING_MMAP`. Invalid non-zero reserved fields are accepted instead. Ubuntu's 6.8.0-146 backport of "io_uring/kbuf: use mem_is_zero()" inverted the check. Mainline 6.8.12/6.9 and Ubuntu 6.11/7.0 are unaffected. ublk batch I/O needs these rings only on 7.0+, but backends using them, e.g. through liburing's `io_uring_setup_buf_ring`, fail on these builds.
 
@@ -132,13 +132,13 @@ Violating these protocol rules can hang a host:
 
 **Close char-device references before DEL_DEV.** Its interruptible wait includes the original fd, every `dup`, and io_uring fixed-file registrations. Use `DEL_DEV_ASYNC` (6.9) to avoid waiting. See [control plane](/guide/control-plane/).
 
-**Keep serving during STOP_DEV.** `del_gendisk` waits for in-flight requests, which only the queue threads can finish. Stop, drain, then shut queues and delete. Cancelling queues first can hang STOP_DEV indefinitely.
+**Keep serving during STOP_DEV.** `del_gendisk` waits for in-flight requests, which only the queue threads can finish. Stop, drain, then shut queues and delete. Cancelling queues first can hang `STOP_DEV` indefinitely.
 
 **Use the fixed descriptor stride.** With default-size descriptors, queue `q` starts at `q * round_up(UBLK_MAX_QUEUE_DEPTH * sizeof(struct ublksrv_io_desc), PAGE_SIZE)`: 98304 bytes on 4 KiB pages, 131072 on 64 KiB pages, regardless of depth. Using actual queue depth can map other queues onto queue 0, causing corruption and unkillable hangs as queue count rises. See [data plane](/guide/data-plane/).
 
 **Sectors are 512 bytes.** `start_sector`, `nr_sectors`, `dev_sectors` and `max_sectors` are in 512-byte units on every device, including 4Kn devices.
 
-**FLUSH, DISCARD, and WRITE_ZEROES complete with 0.** The kernel only checks for negative results. Byte counts at 2 GiB overflow the signed 32-bit result into `EIO`; `mkfs` whole-device discard exposes this above 2 GiB. See [I/O operations](/guide/io-operations/).
+**`FLUSH`, `DISCARD`, and `WRITE_ZEROES` complete with 0.** The kernel only checks for negative results. Byte counts at 2 GiB overflow the signed 32-bit result into `EIO`; `mkfs` whole-device discard exposes this above 2 GiB. See [I/O operations](/guide/io-operations/).
 
 **One opener.** `/dev/ublkcN` admits one open file at a time; a second `open` fails with `-EBUSY`, and the process that opened it is the only valid PID for `START_DEV` and `END_USER_RECOVERY`.
 

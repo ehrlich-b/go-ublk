@@ -31,14 +31,14 @@ For a new server, read kublk's protocol implementation, then libublk-rs or ublks
 
 Server authors need raw-ring semantics:
 
-- [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html) and [io_uring_enter(2)](https://man7.org/linux/man-pages/man2/io_uring_enter.2.html): flags, mmap offsets, SQE128 for control, EXT_ARG for bounded waits.
+- [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html) and [io_uring_enter(2)](https://man7.org/linux/man-pages/man2/io_uring_enter.2.html): flags, mmap offsets, `IORING_SETUP_SQE128` for control, `IORING_ENTER_EXT_ARG` for bounded waits.
 - [liburing](https://github.com/axboe/liburing): reference SQ/CQ memory ordering, even without linking it.
 - Jens Axboe's [Efficient IO with io_uring](https://kernel.dk/io_uring.pdf): design paper.
 - [Lord of the io_uring](https://unixism.net/loti/): liburing tutorial.
 
 ## Reading the driver
 
-Entry points in the few-thousand-line ublk_drv.c, named as in 6.17 and mostly stable since:
+Entry points in the few-thousand-line `ublk_drv.c`, named as in 6.17 and mostly stable since:
 
 | Function | What it does |
 |---|---|

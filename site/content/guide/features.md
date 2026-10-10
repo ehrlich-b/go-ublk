@@ -86,7 +86,7 @@ Before 6.5, the unknown opcode usually returns `-ENODEV`: the driver looks up `d
 
 Choose default copy, `NEED_GET_DATA`, `USER_COPY`, or zero copy (`SUPPORT_ZERO_COPY` and/or `AUTO_BUF_REG`); `SHMEM_ZC` adds a fast path. See [data copy modes](/guide/data-copy/).
 
-- {{< uapi "UBLK_F_SUPPORT_ZERO_COPY" >}} installs request pages in an io_uring sparse buffer table for `*_FIXED` operations. The server cannot touch the bytes. FETCH/COMMIT require `addr = 0`; otherwise `-EINVAL`. Reserved in 6.0, it became functional with REGISTER/UNREGISTER_IO_BUF in 6.15.
+- {{< uapi "UBLK_F_SUPPORT_ZERO_COPY" >}} installs request pages in an io_uring sparse buffer table for `*_FIXED` operations. The server cannot touch the bytes. FETCH/COMMIT require `addr = 0`; otherwise `-EINVAL`. Reserved in 6.0, it became functional with REGISTER/`UNREGISTER_IO_BUF` in 6.15.
 - {{< uapi "UBLK_F_NEED_GET_DATA" >}} delivers a WRITE as `UBLK_IO_RES_NEED_GET_DATA` (1); answer with `UBLK_U_IO_NEED_GET_DATA` and a buffer address to receive data. It adds one round trip. Retained for servers without pre-allocated buffers; avoid in new servers.
 - {{< uapi "UBLK_F_USER_COPY" >}} uses `pread()` for WRITE data and `pwrite()` for READ data on `/dev/ublkcN`, with queue/tag/byte offset encoded in the position. FETCH/COMMIT use `addr = 0` and perform no copy.
 - {{< uapi "UBLK_F_AUTO_BUF_REG" >}} registers before delivery and unregisters at commit, saving two commands. Fetch/commit SQE `addr` carries `struct ublk_auto_buf_reg` with the buffer index.
@@ -97,7 +97,7 @@ Choose default copy, `NEED_GET_DATA`, `USER_COPY`, or zero copy (`SUPPORT_ZERO_C
 
 On server exit, the [recovery flags](/guide/recovery/) determine device and request survival:
 
-- {{< uapi "UBLK_F_USER_RECOVERY" >}} keeps the device in `UBLK_S_DEV_QUIESCED`, queues new I/O, and fails delivered requests. A replacement uses START/END_USER_RECOVERY. Without recovery, the device disappears and pending requests fail.
+- {{< uapi "UBLK_F_USER_RECOVERY" >}} keeps the device in `UBLK_S_DEV_QUIESCED`, queues new I/O, and fails delivered requests. A replacement uses START/`END_USER_RECOVERY`. Without recovery, the device disappears and pending requests fail.
 - {{< uapi "UBLK_F_USER_RECOVERY_REISSUE" >}} also requeues delivered requests. Writes may execute twice; the backend must tolerate replay.
 - {{< uapi "UBLK_F_USER_RECOVERY_FAIL_IO" >}} (6.13) keeps the device in `UBLK_S_DEV_FAIL_IO` but fails old and new I/O until recovery.
 - {{< uapi "UBLK_F_QUIESCE" >}} (6.16) enables planned handover through `UBLK_U_CMD_QUIESCE_DEV`. `data[0]` is a timeout in milliseconds; 0 waits forever. If any queue has no idle tag before timeout, return `-EBUSY`. Requires `USER_RECOVERY`.
@@ -107,25 +107,25 @@ Unprivileged devices lose `USER_RECOVERY`/`REISSUE` silently at `ADD_DEV`; inspe
 ## Protocol and threading flags
 
 - {{< uapi "UBLK_F_URING_CMD_COMP_IN_TASK" >}} originally selected `io_uring_cmd_complete_in_task` over `task_work_add` for daemon-context completion, mainly for benchmarking. The latter path disappeared in 6.5; the bit is now forced. Modular builds already forced it in 6.1-6.4.
-- {{< uapi "UBLK_F_CMD_IOCTL_ENCODE" >}} reports ioctl-encoded `UBLK_U_CMD_*`/`UBLK_U_IO_*` support, e.g. `_IOWR('u', 0x04, struct ublksrv_ctrl_cmd) = 0xc0207504` for ADD_DEV. Forced since 6.4. Legacy ADD_DEV is 0x04; legacy acceptance depends on `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES`. Use encoded commands; post-6.4 additions such as GET_FEATURES have no legacy form.
+- {{< uapi "UBLK_F_CMD_IOCTL_ENCODE" >}} reports ioctl-encoded `UBLK_U_CMD_*`/`UBLK_U_IO_*` support, e.g. `_IOWR('u', 0x04, struct ublksrv_ctrl_cmd) = 0xc0207504` for `ADD_DEV`. Forced since 6.4. Legacy `ADD_DEV` is 0x04; legacy acceptance depends on `CONFIG_BLKDEV_UBLK_LEGACY_OPCODES`. Use encoded commands; post-6.4 additions such as `GET_FEATURES` have no legacy form.
 - {{< uapi "UBLK_F_PER_IO_DAEMON" >}} (6.16) lets threads split a queue's tags. The task issuing a tag's FETCH owns subsequent commands; older kernels require one task per queue. Forced except with batch I/O.
-- {{< uapi "UBLK_F_BATCH_IO" >}} (7.0) replaces per-tag FETCH/COMMIT/NEED_GET_DATA with PREP_IO_CMDS, COMMIT_IO_CMDS, and multishot FETCH_IO_CMDS. Any task may handle any tag; see [batch I/O](/guide/batch-io/).
+- {{< uapi "UBLK_F_BATCH_IO" >}} (7.0) replaces per-tag FETCH/COMMIT/`NEED_GET_DATA` with `PREP_IO_CMDS`, `COMMIT_IO_CMDS`, and multishot `FETCH_IO_CMDS`. Any task may handle any tag; see [batch I/O](/guide/batch-io/).
 
 ## Device feature flags
 
-- {{< uapi "UBLK_F_UNPRIVILEGED_DEV" >}} (6.3) permits creation without `CAP_SYS_ADMIN`. Device control commands after ADD_DEV carry `/dev/ublkcN` for permission checks. It excludes user copy, fixed-buffer zero copy, and recovery; unprivileged queue tasks suppress partition scanning. See [unprivileged devices](/guide/unprivileged/).
-- {{< uapi "UBLK_F_ZONED" >}} (6.6) delivers zone open/close/finish/reset/reset-all, append, and REPORT_ZONES. Requires `UBLK_PARAM_TYPE_ZONED`, non-zero `chunk_sectors`, and USER_COPY or SUPPORT_ZERO_COPY. See [zoned devices](/guide/zoned/).
-- {{< uapi "UBLK_F_UPDATE_SIZE" >}} (6.16) advertises UPDATE_SIZE: resize a started device to `data[0]` 512-byte sectors and emit a uevent. Neither 6.17 nor 7.3-rc5 checks the flag; request it anyway. 7.3-rc5 returns `-ENODEV` before startup.
-- {{< uapi "UBLK_F_INTEGRITY" >}} (7.0) delivers protection information with `UBLK_IO_F_INTEGRITY`. Copy it through `pread`/`pwrite` with `UBLKSRV_IO_INTEGRITY_FLAG` in the offset. Requires USER_COPY and `UBLK_PARAM_TYPE_INTEGRITY`; see [integrity](/guide/integrity/).
-- {{< uapi "UBLK_F_SAFE_STOP_DEV" >}} (7.0) advertises TRY_STOP_DEV (`0xc0207517`): return `-EBUSY` with disk openers or `-ENODEV` before startup; otherwise block opens and perform STOP_DEV. 7.3-rc5 forces the bit without checking it at dispatch.
-- {{< uapi "UBLK_F_NO_AUTO_PART_SCAN" >}} (7.0) skips startup's partition scan while permitting manual `partprobe`/`BLKRRPART`. Before 6.19, scanning ran inside `add_disk` and required serving READs before START_DEV returned. From 6.19, trusted servers scan asynchronously to avoid deadlock on mid-scan failure. Scanning stays permanently disabled if any queue task lacks `CAP_SYS_ADMIN` (since 7.0-rc4).
+- {{< uapi "UBLK_F_UNPRIVILEGED_DEV" >}} (6.3) permits creation without `CAP_SYS_ADMIN`. Device control commands after `ADD_DEV` carry `/dev/ublkcN` for permission checks. It excludes user copy, fixed-buffer zero copy, and recovery; unprivileged queue tasks suppress partition scanning. See [unprivileged devices](/guide/unprivileged/).
+- {{< uapi "UBLK_F_ZONED" >}} (6.6) delivers zone open/close/finish/reset/reset-all, append, and `REPORT_ZONES`. Requires `UBLK_PARAM_TYPE_ZONED`, non-zero `chunk_sectors`, and `USER_COPY` or `SUPPORT_ZERO_COPY`. See [zoned devices](/guide/zoned/).
+- {{< uapi "UBLK_F_UPDATE_SIZE" >}} (6.16) advertises `UPDATE_SIZE`: resize a started device to `data[0]` 512-byte sectors and emit a uevent. Neither 6.17 nor 7.3-rc5 checks the flag; request it anyway. 7.3-rc5 returns `-ENODEV` before startup.
+- {{< uapi "UBLK_F_INTEGRITY" >}} (7.0) delivers protection information with `UBLK_IO_F_INTEGRITY`. Copy it through `pread`/`pwrite` with `UBLKSRV_IO_INTEGRITY_FLAG` in the offset. Requires `USER_COPY` and `UBLK_PARAM_TYPE_INTEGRITY`; see [integrity](/guide/integrity/).
+- {{< uapi "UBLK_F_SAFE_STOP_DEV" >}} (7.0) advertises TRY_STOP_DEV (`0xc0207517`): return `-EBUSY` with disk openers or `-ENODEV` before startup; otherwise block opens and perform `STOP_DEV`. 7.3-rc5 forces the bit without checking it at dispatch.
+- {{< uapi "UBLK_F_NO_AUTO_PART_SCAN" >}} (7.0) skips startup's partition scan while permitting manual `partprobe`/`BLKRRPART`. Before 6.19, scanning ran inside `add_disk` and required serving READs before `START_DEV` returned. From 6.19, trusted servers scan asynchronously to avoid deadlock on mid-scan failure. Scanning stays permanently disabled if any queue task lacks `CAP_SYS_ADMIN` (since 7.0-rc4).
 - {{< uapi "UBLK_F_IO_DESC_SIZE" >}} (7.3) sets the slot size through the 16-bit `io_desc_size` at offset 6 (formerly `pad0`): 24-256 bytes, multiple of 8; default 24. Tag *t* is at `t * io_desc_size`. Queue mmap length is `round_up(queue_depth * io_desc_size, PAGE_SIZE)`; stride is `round_up(UBLK_MAX_QUEUE_DEPTH * io_desc_size, PAGE_SIZE)`. Only the 24-byte `ublksrv_io_desc` is filled; padding permits future fields and avoids false sharing across threads.
 
 ## go-ublk
 
 go-ublk checks requested features against `GET_FEATURES` before `ADD_DEV`. Missing flags fail `Create` with a named error wrapping `syscall.EOPNOTSUPP`. It also checks the returned flags, except that privileged callers may have `UNPRIVILEGED_DEV` cleared. Before 6.5, only this post-creation check is available.
 
-`DeviceParams` maps options to flags: `Recovery` selects the USER_RECOVERY family; other options are `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (PER_IO_DAEMON), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan`, and `IODescSize`. When supported, go-ublk also requests UPDATE_SIZE for `Device.Resize`, QUIESCE for recoverable devices' `Device.Detach`, and AUTO_BUF_REG for zero copy. These add no protocol cost. It uses ioctl-encoded commands and adds CMD_IOCTL_ENCODE during negotiation; it does not request URING_CMD_COMP_IN_TASK.
+`DeviceParams` maps options to flags: `Recovery` selects the `USER_RECOVERY` family; other options are `EnableZeroCopy`, `EnableUserCopy`, `EnableUnprivileged`, `EnableZoned`, `Integrity`, `NeedGetData`, `BatchIO`, `ThreadsPerQueue` (`PER_IO_DAEMON`), `SharedMemoryZeroCopy`, `SafeStop`, `NoPartitionScan`, and `IODescSize`. When supported, go-ublk also requests `UPDATE_SIZE` for `Device.Resize`, `QUIESCE` for recoverable devices' `Device.Detach`, and `AUTO_BUF_REG` for zero copy. These add no protocol cost. It uses ioctl-encoded commands and adds `CMD_IOCTL_ENCODE` during negotiation; it does not request `URING_CMD_COMP_IN_TASK`.
 
 `ublk.Probe()` reports what the running kernel supports, and `Device.Features()` what a device was granted.
 

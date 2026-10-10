@@ -76,7 +76,7 @@ Unit settings:
 - `DefaultDependencies=no` plus Conflicts=/Before=umount.target keeps the server out of early shutdown until unmount.
 - `Type=notify` waits for READY=1 after `/dev/ublkbN` serves, preventing mount races. ublk-loop sends it over `$NOTIFY_SOCKET` in about twelve dependency-free Go lines.
 - `After=local-fs.target` waits for local backing storage. For other storage, use its dependency, e.g. `RequiresMountsFor=/var/lib/ublk`. Putting the ublk mount in local-fs.target via plain fstab creates a cycle with a server ordered after that target.
-- `KillMode=mixed` sends SIGTERM only to the main process, then SIGKILL to all after TimeoutStopSec.
+- `KillMode=mixed` sends SIGTERM only to the main process, then SIGKILL to all after `TimeoutStopSec`.
 - `-id=%i` (`DeviceParams.DeviceID`) gives the mount a stable `/dev/ublkbN`.
 - `-recovery` with Restart=always enables the handoffs below. Explicit shutdown or `systemctl stop` never restarts the service.
 
@@ -86,8 +86,8 @@ For `/etc/fstab`, `x-systemd.requires=ublk-loop@0.service,x-systemd.before=user.
 
 [RecoveryReissue](/go-ublk/lifecycle/#detach-and-recover), enabled by `ublk-loop -recovery`, preserves the device and mount:
 
-- On crash, the kernel holds new I/O and requeues outstanding requests. Restart=always launches a replacement, which finds the device through GetDeviceInfo or tagged FindDevices and calls Recover. Applications pause while I/O resumes.
-- To upgrade, install the binary and run `systemctl kill -s SIGUSR2 ublk-loop@0`. The server Detaches, draining with QUIESCE_DEV on 6.16+ except batch devices, then exits; systemd starts the replacement for recovery.
+- On crash, the kernel holds new I/O and requeues outstanding requests. Restart=always launches a replacement, which finds the device through `GetDeviceInfo` or tagged `FindDevices` and calls `Recover`. Applications pause while I/O resumes.
+- To upgrade, install the binary and run `systemctl kill -s SIGUSR2 ublk-loop@0`. The server Detaches, draining with `QUIESCE_DEV` on 6.16+ except batch devices, then exits; systemd starts the replacement for recovery.
 
 On Ubuntu 24.04/7.0.0-38, emulated x86_64 with ext4 and `fio --verify=crc32c`: two upgrades took 2.2/2.4 s including 200 ms restart delay; one SIGKILL recovery took 1.1 s. This run had zero I/O errors, clean verification, and no unmount.
 
@@ -106,19 +106,19 @@ default: // leftover from a server without recovery: cannot be taken over
 }
 ```
 
-Recover waits up to 30 seconds for previous-process release, so it can run immediately on restart. Replay may write twice; backends must tolerate that.
+`Recover` waits up to 30 seconds for previous-process release, so it can run immediately on restart. Replay may write twice; backends must tolerate that.
 
 ## Signal handling in the server
 
-On systemd SIGTERM, cancel a `signal.NotifyContext` passed to CreateAndServe for graceful Stop, then Close; alternatively call `device.Close()` from the handler. After successful device closure, close the backend (final fsync for buffered files) and exit.
+On systemd SIGTERM, cancel a `signal.NotifyContext` passed to `CreateAndServe` for graceful `Stop`, then `Close`; alternatively call `device.Close()` from the handler. After successful device closure, close the backend (final fsync for buffered files) and exit.
 
-Handle SIGINT, SIGTERM, and SIGHUP. logind sends SIGHUP when sessions close; without a handler it kills Go servers, potentially stranding STOP_DEV drains. Ignore SIGPIPE so a lost log pipe cannot kill the server. The examples handle these signals.
+Handle SIGINT, SIGTERM, and SIGHUP. logind sends SIGHUP when sessions close; without a handler it kills Go servers, potentially stranding `STOP_DEV` drains. Ignore SIGPIPE so a lost log pipe cannot kill the server. The examples handle these signals.
 
-Options.StopTimeout defaults to one minute. STOP failure leaves serving resources intact; DEL timeout occurs after stop, waiting for references. Handle errors by retrying or exiting for recovery/orphan cleanup as appropriate.
+`Options.StopTimeout` defaults to one minute. STOP failure leaves serving resources intact; DEL timeout occurs after stop, waiting for references. Handle errors by retrying or exiting for recovery/orphan cleanup as appropriate.
 
 ## Restarts without recovery
 
-Without recovery, death fails I/O, damages the mounted filesystem's state, and removes `/dev/ublkbN`. Registration remains: fixed-ID startup gets EEXIST until cleanup, as in the example's default branch. Use Restart=no; automatic restart would put a fresh device beneath an already-failed mount.
+Without recovery, death fails I/O, damages the mounted filesystem's state, and removes `/dev/ublkbN`. Registration remains: fixed-ID startup gets `EEXIST` until cleanup, as in the example's default branch. Use Restart=no; automatic restart would put a fresh device beneath an already-failed mount.
 
 ## Choosing a kernel
 
@@ -137,11 +137,11 @@ Without recovery, death fails I/O, damages the mounted filesystem's state, and r
 
 - [ ] Service-backed mounts have Requires=/After= on the server and Before=user.slice.
 - [ ] Consumer services have RequiresMountsFor= on the mount point.
-- [ ] Fixed DeviceID; startup handles orphaned IDs.
-- [ ] VolatileCache is true unless completed writes are durable.
+- [ ] Fixed `DeviceID`; startup handles orphaned IDs.
+- [ ] `VolatileCache` is true unless completed writes are durable.
 - [ ] SIGINT/SIGTERM/SIGHUP close the device successfully before closing the backend.
-- [ ] ublk_drv loads at boot; the kernel is not a known-bad build.
-- [ ] Options.Debug is off.
+- [ ] `ublk_drv` loads at boot; the kernel is not a known-bad build.
+- [ ] `Options.Debug` is off.
 - [ ] Budget `NumQueues × QueueDepth × MaxIOSize` buffer address space, resident as touched.
 
 ## What has not been tested

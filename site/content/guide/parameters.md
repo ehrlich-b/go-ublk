@@ -5,7 +5,7 @@ description: "struct ublk_params field by field: basic limits, discard, devt, zo
 weight: 50
 ---
 
-`UBLK_U_CMD_SET_PARAMS` supplies START_DEV capacity, block/request sizes, attributes, and discard/zoned/DMA/segment/integrity limits. These become queue_limits exposed at `/sys/block/ublkbN/queue/`.
+`UBLK_U_CMD_SET_PARAMS` supplies `START_DEV` capacity, block/request sizes, attributes, and discard/zoned/DMA/segment/integrity limits. These become `queue_limits` exposed at `/sys/block/ublkbN/queue/`.
 
 ## Layout and versioning
 
@@ -33,9 +33,9 @@ struct ublk_params {
 | `UBLK_PARAM_TYPE_SEGMENT` (1 << 5) | `seg` | 6.15 | yes |
 | `UBLK_PARAM_TYPE_INTEGRITY` (1 << 6) | `integrity` | 7.0 | yes, with `UBLK_F_INTEGRITY` |
 
-The structure grows at its end, permitting older callers' smaller len. Older kernels copy only their sizeof(ublk_params) and silently mask unknown types: 6.14 accepts UBLK_PARAM_TYPE_SEGMENT without its limits. Verify required blocks through GET_PARAMS.
+The structure grows at its end, permitting older callers' smaller len. Older kernels copy only their sizeof(ublk_params) and silently mask unknown types: 6.14 accepts `UBLK_PARAM_TYPE_SEGMENT` without its limits. Verify required blocks through `GET_PARAMS`.
 
-Require non-zero len/types, with len no greater than the control header's. SET_PARAMS after START_DEV returns EACCES. Invalid parameters return EINVAL and clear every block.
+Require non-zero len/types, with len no greater than the control header's. `SET_PARAMS` after `START_DEV` returns `EACCES`. Invalid parameters return `EINVAL` and clear every block.
 
 ## basic
 
@@ -64,7 +64,7 @@ struct ublk_param_basic {
 | `virt_boundary_mask` | requests' scatter-gather segments must not cross this boundary (NVMe-style PRP constraints); 0 for none | |
 | `attrs` | `UBLK_ATTR_*`, below | |
 
-dev_sectors/max_sectors always count 512-byte sectors. A 1 GiB, 4096-byte-block device uses dev_sectors = 2097152 and logical_bs_shift = 12.
+`dev_sectors`/`max_sectors` always count 512-byte sectors. A 1 GiB, 4096-byte-block device uses `dev_sectors` = 2097152 and `logical_bs_shift` = 12.
 
 ### Attributes
 
@@ -75,7 +75,7 @@ dev_sectors/max_sectors always count 512-byte sectors. A 1 GiB, 4096-byte-block 
 | `UBLK_ATTR_VOLATILE_CACHE` (1 << 2) | The device has a write-back cache: the kernel will send `FLUSH` |
 | `UBLK_ATTR_FUA` (1 << 3) | The device honors per-write FUA. Ignored without `UBLK_ATTR_VOLATILE_CACHE` |
 
-For [durability](/guide/io-operations/), set UBLK_ATTR_VOLATILE_CACHE and implement flush whenever power loss could erase completed writes.
+For [durability](/guide/io-operations/), set `UBLK_ATTR_VOLATILE_CACHE` and implement flush whenever power loss could erase completed writes.
 
 ## discard
 
@@ -90,7 +90,7 @@ struct ublk_param_discard {
 };
 ```
 
-Non-zero max_discard_sectors enables UBLK_IO_OP_DISCARD; non-zero max_write_zeroes_sectors enables UBLK_IO_OP_WRITE_ZEROES. Without the block or with both zero, neither is advertised; blkdiscard returns "operation not supported".
+Non-zero `max_discard_sectors` enables `UBLK_IO_OP_DISCARD`; non-zero `max_write_zeroes_sectors` enables `UBLK_IO_OP_WRITE_ZEROES`. Without the block or with both zero, neither is advertised; blkdiscard returns "operation not supported".
 
 | Field | Meaning | Rule |
 |---|---|---|
@@ -111,7 +111,7 @@ struct ublk_param_devt {
 };
 ```
 
-SET_PARAMS with UBLK_PARAM_TYPE_DEVT returns EINVAL; GET_PARAMS always fills it. Use the numbers to find nodes in containers or without udev.
+`SET_PARAMS` with `UBLK_PARAM_TYPE_DEVT` returns `EINVAL`; `GET_PARAMS` always fills it. Use the numbers to find nodes in containers or without udev.
 
 ## zoned
 
@@ -124,7 +124,7 @@ struct ublk_param_zoned {
 };
 ```
 
-Required with UBLK_F_ZONED and invalid otherwise. max_zone_append_sectors must be non-zero; open/active limits cannot exceed capacity / basic.chunk_sectors. See [zoned devices](/guide/zoned/).
+Required with `UBLK_F_ZONED` and invalid otherwise. `max_zone_append_sectors` must be non-zero; open/active limits cannot exceed capacity / `basic.chunk_sectors`. See [zoned devices](/guide/zoned/).
 
 ## dma_align
 
@@ -135,7 +135,7 @@ struct ublk_param_dma_align {
 };
 ```
 
-Request-buffer alignment mask: alignment + 1 must be a power of two, alignment below page size. Default mask 3 means 4 bytes. For [zero copy](/guide/data-copy/), match the backend: O_DIRECT files typically need 512-byte alignment (mask 511).
+Request-buffer alignment mask: alignment + 1 must be a power of two, alignment below page size. Default mask 3 means 4 bytes. For [zero copy](/guide/data-copy/), match the backend: `O_DIRECT` files typically need 512-byte alignment (mask 511).
 
 ## segment
 
@@ -148,7 +148,7 @@ struct ublk_param_segment {
 };
 ```
 
-These scatter-gather limits avoid re-splitting zero-copy requests. seg_boundary_mask + 1 must be a power of two >= 4096 (UBLK_MIN_SEGMENT_SIZE); max_segment_size >= 4096. Zero for any field is undefined. Without this block, defaults allow 65535 unlimited-size segments.
+These scatter-gather limits avoid re-splitting zero-copy requests. seg_boundary_mask + 1 must be a power of two >= 4096 (`UBLK_MIN_SEGMENT_SIZE`); `max_segment_size` >= 4096. Zero for any field is undefined. Without this block, defaults allow 65535 unlimited-size segments.
 
 ## integrity
 
@@ -165,7 +165,7 @@ struct ublk_param_integrity {
 };
 ```
 
-Per-block protection metadata for UBLK_F_INTEGRITY (7.0); see [integrity](/guide/integrity/).
+Per-block protection metadata for `UBLK_F_INTEGRITY` (7.0); see [integrity](/guide/integrity/).
 
 ## A worked example
 
@@ -193,4 +193,4 @@ struct ublk_params p = {
 };
 ```
 
-Compute max_sectors from ADD_DEV's returned max_io_buf_bytes, not the requested size.
+Compute `max_sectors` from `ADD_DEV`'s returned `max_io_buf_bytes`, not the requested size.

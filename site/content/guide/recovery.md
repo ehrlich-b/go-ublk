@@ -67,10 +67,10 @@ Then `ublk_ch_release_work_fn` runs on a workqueue: wait for zero-copy reference
 
 The replacement needs the device ID. Omit `ADD_DEV` and `SET_PARAMS`; the device and parameters already exist.
 
-1. Read `UBLK_U_CMD_GET_DEV_INFO`. Require `UBLK_F_USER_RECOVERY` and state QUIESCED or FAIL_IO. Use its `nr_hw_queues`, `queue_depth`, and `max_io_buf_bytes`, fixed at creation; query `UBLK_U_CMD_GET_PARAMS` for capacity/block sizes.
-2. Send {{< uapi "UBLK_U_CMD_START_USER_RECOVERY" >}}. Missing USER_RECOVERY returns `-EINVAL`; an open old char device or nonrecoverable state returns `-EBUSY`. Release is asynchronous: retry with short backoff immediately after a crash. Persistent EBUSY means the old process or another reference still holds `/dev/ublkcN`.
+1. Read `UBLK_U_CMD_GET_DEV_INFO`. Require `UBLK_F_USER_RECOVERY` and state `QUIESCED` or `FAIL_IO`. Use its `nr_hw_queues`, `queue_depth`, and `max_io_buf_bytes`, fixed at creation; query `UBLK_U_CMD_GET_PARAMS` for capacity/block sizes.
+2. Send {{< uapi "UBLK_U_CMD_START_USER_RECOVERY" >}}. Missing `USER_RECOVERY` returns `-EINVAL`; an open old char device or nonrecoverable state returns `-EBUSY`. Release is asynchronous: retry with short backoff immediately after a crash. Persistent EBUSY means the old process or another reference still holds `/dev/ublkcN`.
 3. Open `/dev/ublkcN`, becoming its server; another open returns `-EBUSY`. Map descriptors, create queue rings, and issue `UBLK_U_IO_FETCH_REQ` for every tag as at [startup](/guide/data-plane/).
-4. Send {{< uapi "UBLK_U_CMD_END_USER_RECOVERY" >}} with `data[0]` equal to the opener's PID (thread-group ID), or receive `-EINVAL`. Wait from a control thread while queues prime, or issue it after they have. A signal returns `-EINTR`; success returns 0, marks LIVE, and delivers queued/reissued requests through the new fetches.
+4. Send {{< uapi "UBLK_U_CMD_END_USER_RECOVERY" >}} with `data[0]` equal to the opener's PID (thread-group ID), or receive `-EINVAL`. Like `START_DEV`, it waits for every tag to be fetched; use a control thread while queues prime, or issue it afterward. A signal returns `-EINTR`; success returns 0, marks `LIVE`, and delivers queued/reissued requests through the new fetches.
 
 ```c
 /* new server, recovering device `id` */
@@ -97,7 +97,7 @@ ctrl_cmd(UBLK_U_CMD_END_USER_RECOVERY, id, .data = getpid());  /* blocks until a
 
 ### What survives and what does not
 
-The kernel retains the ID, gendisk, open `/dev/ublkbN` fds, parameters, flags, queue count/depth/buffer size, and uninterpreted `ublksrv_flags` returned by GET_DEV_INFO. `SET_PARAMS` returns `-EACCES` after disk creation; resize with `UBLK_U_CMD_UPDATE_SIZE` ({{< since "6.16" >}}) after recovery.
+The kernel retains the ID, gendisk, open `/dev/ublkbN` fds, parameters, flags, queue count/depth/buffer size, and uninterpreted `ublksrv_flags` returned by `GET_DEV_INFO`. `SET_PARAMS` returns `-EACCES` after disk creation; resize with `UBLK_U_CMD_UPDATE_SIZE` ({{< since "6.16" >}}) after recovery.
 
 Recreate descriptor mappings, rings, per-tag buffers/daemons, backend connections, open files, and caches. Without a volatile-cache flag, every acknowledged write must already be durable. With it, acknowledged but unflushed writes may be lost, as with a physical disk's cache; filesystem flushes supply durability.
 
@@ -105,41 +105,41 @@ Persist the device ID and backend identity for the replacement. The kernel has n
 
 ## Planned upgrades: QUIESCE_DEV
 
-{{< since "6.16" >}} {{< uapi "UBLK_U_CMD_QUIESCE_DEV" >}} lets a server drain before replacement, avoiding failed or replayed in-flight requests. It requires `UBLK_F_QUIESCE` and `UBLK_F_USER_RECOVERY`. The kernel selftest server requests QUIESCE whenever recovery and kernel support permit.
+{{< since "6.16" >}} {{< uapi "UBLK_U_CMD_QUIESCE_DEV" >}} lets a server drain before replacement, avoiding failed or replayed in-flight requests. It requires `UBLK_F_QUIESCE` and `UBLK_F_USER_RECOVERY`. The kernel selftest server requests `QUIESCE` whenever recovery and kernel support permit.
 
 | Field | Value |
 |---|---|
 | `data[0]` | timeout in milliseconds; 0 waits forever |
 | result | 0 on success; `-EOPNOTSUPP` without `UBLK_F_QUIESCE`; `-ENODEV` if the device has no disk or is `DEAD`; `-EBUSY` on timeout; `-EINTR` on a signal |
 
-On LIVE devices, mark queues canceling and poll every 3 ms for at least one idle tag per queue. Its waiting fetch is the channel for notifying the server. Once every queue has one, cancel waiting fetches with `UBLK_IO_RES_ABORT`. Already QUIESCED/FAIL_IO devices return 0 immediately.
+On `LIVE` devices, mark queues canceling and poll every 3 ms for at least one idle tag per queue. Its waiting fetch is the channel for notifying the server. Once every queue has one, cancel waiting fetches with `UBLK_IO_RES_ABORT`. Already `QUIESCED`/`FAIL_IO` devices return 0 immediately.
 
 The old server must:
 
 - Retire tags receiving `UBLK_IO_RES_ABORT`; do not fetch them again.
 - Commit owned requests. Their re-armed fetches receive no new requests, which are requeued; only ring teardown or device stop completes those fetches with ABORT.
-- After committing owned tags and aborting others, close `/dev/ublkcN` and exit. Waiting for re-armed fetches stalls handoff until timeout, a former go-ublk Detach bug.
+- After committing owned tags and aborting others, close `/dev/ublkcN` and exit. Waiting for re-armed fetches stalls handoff until timeout, a former go-ublk `Detach` bug.
 
-Release moves the device to QUIESCED/FAIL_IO with nothing in flight; the replacement recovers it. Applications pause without I/O errors. Any authorized control caller can issue QUIESCE_DEV: the new binary, old server responding to a signal, or an admin tool.
+Release moves the device to `QUIESCED`/`FAIL_IO` with nothing in flight; the replacement recovers it. Applications pause without I/O errors. Any authorized control caller can issue `QUIESCE_DEV`: the new binary, old server responding to a signal, or an admin tool.
 
-Before 6.16, handoff requires abrupt release and recovery. Use REISSUE to avoid failing in-flight requests.
+Before 6.16, handoff requires abrupt release and recovery. Use `REISSUE` to avoid failing in-flight requests.
 
 ## Choosing a mode
 
 - `USER_RECOVERY | USER_RECOVERY_REISSUE` preserves mounted filesystems by replaying outstanding requests. Repeated overwrites are harmless for file/block backends; zone append, append-only logs, and write-counting backends may duplicate side effects. Kernel documentation suggests read-only filesystems and VM backends.
-- `USER_RECOVERY` alone fails in-flight requests. Metadata/journal EIO can abort a journal or remount read-only; use it for drained QUIESCE_DEV handovers or raw consumers that retry.
+- `USER_RECOVERY` alone fails in-flight requests. Metadata/journal `EIO` can abort a journal or remount read-only; use it for drained `QUIESCE_DEV` handovers or raw consumers that retry.
 - `USER_RECOVERY | USER_RECOVERY_FAIL_IO` suits RAID, multipath, or applications that act on errors and cannot wait indefinitely for a server.
 - No flag couples device lifetime to server lifetime.
 
 ## Pitfalls
 
-**Quiesced I/O can wait forever.** Without a successful restart, USER_RECOVERY/REISSUE leave processes in uninterruptible sleep. `UBLK_U_CMD_STOP_DEV` accepts QUIESCED/FAIL_IO, aborts waiting requests, and removes the disk; DEL_DEV frees the ID. See [control plane](/guide/control-plane/).
+**Quiesced I/O can wait forever.** Without a successful restart, `USER_RECOVERY`/`REISSUE` leave processes in uninterruptible sleep. `UBLK_U_CMD_STOP_DEV` accepts `QUIESCED`/`FAIL_IO`, aborts waiting requests, and removes the disk; `DEL_DEV` frees the ID. See [control plane](/guide/control-plane/).
 
 **A replacement can die mid-recovery.** Fetching only part of a queue before death can leave uncancellable commands without `0842186d2c4e` ("ublk: reset per-IO canceled flag on each fetch", CVE-2026-53124). Fixed in 7.1, stable 7.0.10, and Ubuntu `linux-hwe-7.0` from 7.0.0-28.
 
-**Test the recovery reset path.** `f7700a4415af` ("ublk: fix use-after-free in `ublk_cancel_cmd()`") fixes USER_RECOVERY too. It entered v7.1-rc3 without `Cc: stable`, and is absent from 7.0.y and `linux-hwe-7.0` through 7.0.0-39. See [kernel bugs](/guide/kernel-bugs/).
+**Test the recovery reset path.** `f7700a4415af` ("ublk: fix use-after-free in `ublk_cancel_cmd()`") fixes `USER_RECOVERY` too. It entered v7.1-rc3 without `Cc: stable`, and is absent from 7.0.y and `linux-hwe-7.0` through 7.0.0-39. See [kernel bugs](/guide/kernel-bugs/).
 
-**Batch recovery has separate fixes.** 7.0 includes "ublk: fix batch I/O recovery -ENODEV error" and "ublk: fix canceling flag handling in batch I/O recovery". After QUIESCE_DEV, `UBLK_F_BATCH_IO` also needs "ublk: clear force_abort in ublk_queue_reset_io_flags()" (7.3-rc3, stable 7.2.7). See [matrix findings](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix).
+**Batch recovery has separate fixes.** 7.0 includes "ublk: fix batch I/O recovery -ENODEV error" and "ublk: fix canceling flag handling in batch I/O recovery". After `QUIESCE_DEV`, `UBLK_F_BATCH_IO` also needs "ublk: clear force_abort in ublk_queue_reset_io_flags()" (7.3-rc3, stable 7.2.7). See [matrix findings](/guide/kernel-bugs/#found-by-go-ublks-kernel-matrix).
 
 **Unprivileged devices** cannot use recovery at all; see [unprivileged devices](/guide/unprivileged/).
 
@@ -153,6 +153,6 @@ Set `DeviceParams.Recovery`:
 | `RecoveryQueue` | `USER_RECOVERY` | failed | held |
 | `RecoveryFailIO` | `USER_RECOVERY \| USER_RECOVERY_FAIL_IO` (6.13+) | failed | failed |
 
-`Device.Detach` releases without deleting, first sending QUIESCE_DEV when available (6.16+), except on batch devices. A crash leaves the same device state. `ublk.Recover(ctx, id, params, opts)` reads geometry/features, retries START_USER_RECOVERY on EBUSY for up to 30 seconds while the old char device releases, starts queues, and sends END_USER_RECOVERY. `DeviceParams.Tag` persists in `ublksrv_flags`; locate devices with `ublk.FindDevices(tag)`.
+`Device.Detach` releases without deleting, first sending `QUIESCE_DEV` when available (6.16+), except on batch devices. A crash leaves the same device state. `ublk.Recover(ctx, id, params, opts)` reads geometry/features, retries `START_USER_RECOVERY` on EBUSY for up to 30 seconds while the old char device releases, starts queues, and sends `END_USER_RECOVERY`. `DeviceParams.Tag` persists in `ublksrv_flags`; locate devices with `ublk.FindDevices(tag)`.
 
-`ublk-loop -recovery` and the [systemd units](/go-ublk/deployment/) restart after crashes and upgrade on `SIGUSR2`, preserving the mount. Recover reads zero-copy/batch modes, zoned parameters, and integrity format; supply the backend. Batch Detach skips QUIESCE_DEV to avoid the force_abort bug, letting the kernel reissue outstanding requests. The suite tests default/batch/integrity crash and live handoffs, RecoveryQueue holding I/O, and RecoveryFailIO returning `EREMOTEIO`. Shared-memory regions survive registration but cannot be served by the replacement.
+`ublk-loop -recovery` and the [systemd units](/go-ublk/deployment/) restart after crashes and upgrade on `SIGUSR2`, preserving the mount. `Recover` reads zero-copy/batch modes, zoned parameters, and integrity format; supply the backend. Batch `Detach` skips `QUIESCE_DEV` to avoid the force_abort bug, letting the kernel reissue outstanding requests. The suite tests default/batch/integrity crash and live handoffs, `RecoveryQueue` holding I/O, and `RecoveryFailIO` returning `EREMOTEIO`. Shared-memory regions survive registration but cannot be served by the replacement.

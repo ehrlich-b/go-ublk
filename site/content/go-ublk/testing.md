@@ -66,11 +66,11 @@ These manual runs complement the automated [matrix](/reference/matrix/). Linux 6
 - Host power cuts: guest resets retain the host's virtual-disk cache.
 - Soaks beyond the recorded hours, memory/GC pressure fault injection.
 - Native hardware performance: v0.2.0 matrix CPUs were emulated.
-- Zero-copy/zoned/shared-memory recovery: Recover supports the first two, but tests cover default/batch/integrity only. Recovered shared-memory registrations cannot be served.
+- Zero-copy/zoned/shared-memory recovery: `Recover` supports the first two, but tests cover default/batch/integrity only. Recovered shared-memory registrations cannot be served.
 
 ## Running the tests
 
-Unit tests need Linux; macOS uses `make vm-test-unit` to cross-compile and run in a VM. Configure VM targets through Makefile.local (VM_SSH/VM_SCP or VM_HOST/VM_USER); see Makefile.local.example and docs/VM_TESTING.md. They load modules, mutate devices, kill processes, and reboot: use a disposable VM.
+Unit tests need Linux; macOS uses `make vm-test-unit` to cross-compile and run in a VM. Configure VM targets through `Makefile.local` (`VM_SSH`/`VM_SCP` or `VM_HOST`/`VM_USER`); see `Makefile.local.example` and docs/VM_TESTING.md. They load modules, mutate devices, kill processes, and reboot: use a disposable VM.
 
 ```sh
 make test-unit          # Linux

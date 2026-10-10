@@ -116,7 +116,7 @@ sudo umount /mnt
 
 After unmounting, Ctrl-C stops the server. Two requirements:
 
-- Close before exit, or registration pins the module with no serving process. Delete the orphan, or [recover it](/go-ublk/lifecycle/#detach-and-recover) if enabled.
+- `Close` before exit, or registration pins the module with no serving process. Delete the orphan, or [recover it](/go-ublk/lifecycle/#detach-and-recover) if enabled.
 - Handle SIGHUP alongside SIGINT/SIGTERM: logind sends SIGTERM then SIGHUP on session exit, potentially killing a draining server. Use a [systemd service](/go-ublk/deployment/) for long-lived devices.
 
 Defaults: one queue per CPU (kernel-capped), depth 128, 512-byte blocks, 1 MiB requests, volatile cache. See [configuration](/go-ublk/configuration/).
@@ -149,7 +149,7 @@ Both accept -v for debug and stop on SIGINT/SIGTERM.
 
 ## Cleaning up a leaked device
 
-Without recovery, SIGKILL, crash, or exit without Close removes the block node and fails I/O, retaining the char node and ID. Both examples can delete orphans:
+Without recovery, SIGKILL, crash, or exit without `Close` removes the block node and fails I/O, retaining the char node and ID. Both examples can delete orphans:
 
 ```sh
 sudo ./bin/ublk-mem --del=all     # every registered ublk device
@@ -170,7 +170,7 @@ for _, id := range ids {
 }
 ```
 
-DeleteDevice cleans unserved devices; use Device.Close for local devices. ListDevices uses sysfs, falling back to IDs 0-63 when unavailable. See [troubleshooting](/go-ublk/troubleshooting/).
+`DeleteDevice` cleans unserved devices; use `Device.Close` for local devices. `ListDevices` uses sysfs, falling back to IDs 0-63 when unavailable. See [troubleshooting](/go-ublk/troubleshooting/).
 
 ## Next steps
 

@@ -7,13 +7,13 @@ weight: 120
 
 Block devices can store metadata per data interval: 8/16-byte protection-information tuples with checksum/reference tag (T10 DIF/DIX, NVMe), or opaque bytes. Linux attaches these separately from data as each bio's integrity payload.
 
-{{< uapi "UBLK_F_INTEGRITY" >}} (7.0) describes the format at SET_PARAMS, receives metadata with WRITEs, and supplies it with READs. Details follow the 7.3-rc5 driver/selftest server and may change.
+{{< uapi "UBLK_F_INTEGRITY" >}} (7.0) describes the format at `SET_PARAMS`, receives metadata with WRITEs, and supplies it with READs. Details follow the 7.3-rc5 driver/selftest server and may change.
 
 ## Requirements
 
-- Request UBLK_F_INTEGRITY at ADD_DEV; CONFIG_BLK_DEV_INTEGRITY is required. Check negotiated flags or GET_FEATURES.
-- Also request UBLK_F_USER_COPY, or ADD_DEV returns `-EINVAL`. Metadata requires pread/pwrite on `/dev/ublkcN`; [copy/zero-copy modes](/guide/data-copy/) cannot carry it.
-- SET_PARAMS needs UBLK_PARAM_TYPE_INTEGRITY (`1 << 6`); sending it without the feature returns `-EINVAL`.
+- Request `UBLK_F_INTEGRITY` at `ADD_DEV`; `CONFIG_BLK_DEV_INTEGRITY` is required. Check negotiated flags or `GET_FEATURES`.
+- Also request `UBLK_F_USER_COPY`, or `ADD_DEV` returns `-EINVAL`. Metadata requires pread/pwrite on `/dev/ublkcN`; [copy/zero-copy modes](/guide/data-copy/) cannot carry it.
+- `SET_PARAMS` needs `UBLK_PARAM_TYPE_INTEGRITY` (`1 << 6`); sending it without the feature returns `-EINVAL`.
 
 ## Parameters
 
@@ -30,7 +30,7 @@ Block devices can store metadata per data interval: 8/16-byte protection-informa
 | `tag_size` | `__u8` | Bytes of tag space available to applications in each tuple (the application tag, plus reference or storage-tag bytes the format does not check), reported as `integrity/tag_size` | Passed through to the block layer |
 | `pad[5]` | | | |
 
-PI tuple sizes: NONE 0, IP/CRC16 T10-DIF 8, CRC64 NVMe 16 bytes. START_DEV builds the disk profile, mapping LBMD_PI_CAP_INTEGRITY/REFTAG to device-capable/reference-tag flags.
+PI tuple sizes: `NONE` 0, IP/CRC16 T10-DIF 8, CRC64 NVMe 16 bytes. `START_DEV` builds the disk profile, mapping `LBMD_PI_CAP_INTEGRITY`/`REFTAG` to device-capable/reference-tag flags.
 
 NVMe-style T10-DIF: 8 PI bytes per 512-byte sector:
 
@@ -47,9 +47,9 @@ params.integrity = (struct ublk_param_integrity){
 
 ## Per-request metadata
 
-Check descriptor op_flags for UBLK_IO_F_INTEGRITY (`1 << 18`); some requests lack metadata.
+Check descriptor `op_flags` for `UBLK_IO_F_INTEGRITY` (`1 << 18`); some requests lack metadata.
 
-Metadata length is `(nr_sectors << 9 >> interval_exp) * metadata_size`. OR UBLKSRV_IO_INTEGRITY_FLAG (`1ULL << 62`) into the user-copy position. pread retrieves WRITE metadata; pwrite supplies READ metadata. Condensed selftest code:
+Metadata length is `(nr_sectors << 9 >> interval_exp) * metadata_size`. OR `UBLKSRV_IO_INTEGRITY_FLAG` (`1ULL << 62`) into the user-copy position. pread retrieves WRITE metadata; pwrite supplies READ metadata. Condensed selftest code:
 
 ```c
 if (desc->op_flags & UBLK_IO_F_INTEGRITY) {
@@ -63,16 +63,16 @@ if (desc->op_flags & UBLK_IO_F_INTEGRITY) {
 }
 ```
 
-Missing UBLK_F_INTEGRITY or an offset beyond metadata returns `-EINVAL`. Data and metadata copies are independent, permitting either order and partial transfers.
+Missing `UBLK_F_INTEGRITY` or an offset beyond metadata returns `-EINVAL`. Data and metadata copies are independent, permitting either order and partial transfers.
 
-Persist metadata with its interval's data and return it unchanged. The block layer or application supplies PI. With a checksum, write_generate/read_verify default to 1 under `/sys/block/ublkbN/integrity/`; bad READ PI returns EILSEQ while verification is enabled. Applications can exchange metadata through io_uring PI attributes (6.14+); FS_IOC_GETLBMD_CAP (6.17+) reports its format.
+Persist metadata with its interval's data and return it unchanged. The block layer or application supplies PI. With a checksum, `write_generate`/`read_verify` default to 1 under `/sys/block/ublkbN/integrity/`; bad READ PI returns `EILSEQ` while verification is enabled. Applications can exchange metadata through io_uring PI attributes (6.14+); `FS_IOC_GETLBMD_CAP` (6.17+) reports its format.
 
 ## Testing
 
-kublk supports integrity through user copy: --metadata_size, --pi_offset, --csum_type ip|t10dif|nvme, --tag_size, --integrity_capable (LBMD_PI_CAP_INTEGRITY), and --integrity_reftag (LBMD_PI_CAP_REFTAG). It requires user copy and --metadata_size for the other options.
+kublk supports integrity through user copy: --`metadata_size`, --`pi_offset`, --`csum_type` ip|t10dif|nvme, --`tag_size`, --integrity_capable (`LBMD_PI_CAP_INTEGRITY`), and --integrity_reftag (`LBMD_PI_CAP_REFTAG`). It requires user copy and --`metadata_size` for the other options.
 
 ## go-ublk
 
-DeviceParams.Integrity (7.0+) configures MetadataSize/IntervalSize, Checksum (IntegrityCsumIP, IntegrityCsumCRC16 T10-DIF, IntegrityCsumCRC64NVMe, or none), RefTag, PIOffset, and TagSize. User copy enables automatically. Backends implement IntegrityBackend.ReadIntegrity/WriteIntegrity; Handlers receive Request.Integrity.
+`DeviceParams.Integrity` (7.0+) configures `MetadataSize`/`IntervalSize`, `Checksum` (`IntegrityCsumIP`, `IntegrityCsumCRC16` T10-DIF, `IntegrityCsumCRC64NVMe`, or none), `RefTag`, `PIOffset`, and `TagSize`. User copy enables automatically. Backends implement IntegrityBackend.ReadIntegrity/`WriteIntegrity`; Handlers receive `Request.Integrity`.
 
 Return 0xff metadata for unwritten intervals: the all-ones T10 application tag disables checking, allowing READs before data exists. Integrity excludes zero copy and unprivileged devices.
