@@ -5,7 +5,7 @@ description: "How request data reaches the server: the default copy, NEED_GET_DA
 weight: 70
 ---
 
-A block request's data lives in pages the block layer owns: the page cache for buffered I/O, the application's own pages for O_DIRECT. A ublk server runs in a separate process, so something has to bridge the two address spaces. ublk offers five ways to do it, chosen per device at `ADD_DEV` time with [feature flags](/guide/features/):
+Block-request data lives in the page cache for buffered I/O or the application's pages for O_DIRECT. [Flags](/guide/features/) chosen at `ADD_DEV` select how the server accesses it, with six variants:
 
 | Mode | Flag | Since | How data moves |
 |---|---|---|---|
@@ -20,9 +20,9 @@ Only READ and WRITE (and, on zoned devices, zone append and zone reports) carry 
 
 ## Copy mode
 
-This is what you get with no copy flag set, and what most servers should start with.
+With no copy flag, ublk uses copy mode. Start here.
 
-The server allocates one buffer per tag, at least `max_io_buf_bytes` long. Use the value `ADD_DEV` returned, not the one you requested: the kernel rounds it down to a page multiple. The buffer's address goes in `ublksrv_io_cmd.addr` of every `FETCH_REQ` and `COMMIT_AND_FETCH_REQ`. Each command names the buffer for the *next* request on that tag, so a server may hand over a different buffer on every commit. An `addr` of 0 is `-EINVAL`.
+Allocate a buffer per tag, at least the `max_io_buf_bytes` returned by `ADD_DEV`, which rounds the requested size down to a page multiple. Put its address in `ublksrv_io_cmd.addr` on each `FETCH_REQ` and `COMMIT_AND_FETCH_REQ`; 0 is `-EINVAL`. The address applies to the next request, so each commit may change the buffer.
 
 ```text
 WRITE                                   READ
@@ -33,23 +33,23 @@ server: write buffer to the backend             COMMIT_AND_FETCH_REQ(result = by
 server: COMMIT_AND_FETCH_REQ(result)    kernel: copy result bytes buffer -> request
 ```
 
-Both copies run in the context of the tag's daemon task, the thread that issued `FETCH_REQ`, because the kernel pins the server's pages through that task's address space. The WRITE copy happens just before the command completes; the READ copy happens while the kernel processes your `COMMIT_AND_FETCH_REQ`. That is one reason a tag's commands must come from its daemon task.
+Copies run in the tag's daemon task, the thread that issued `FETCH_REQ`, because the kernel pins pages through that task's address space. WRITEs copy before command completion; READs copy during `COMMIT_AND_FETCH_REQ`. This is one reason commands must come from the tag's daemon.
 
-Details that matter:
+Copy-mode rules:
 
-- **Use `nr_sectors` from the descriptor.** If the driver can pin only part of the server buffer for a WRITE, it shrinks `nr_sectors` to what it copied; when you commit that many bytes, the rest of the request is requeued and delivered again. If it can pin nothing, the whole request is requeued and retried.
-- **READ results are byte counts.** Commit the number of bytes you placed in the buffer. In copy mode a short count completes that much of the request and requeues the remainder; a READ that commits 0 is turned into `-EIO`. The kernel never copies more than `result` bytes, so a server cannot leak stale kernel memory into a READ. That makes copy mode safe for untrusted, unprivileged servers.
-- **Do not rely on partial completion.** How a short result is treated depends on the kernel and the mode. In 6.17 a short READ or WRITE result requeued the remainder in every mode. In 7.3-rc5 only a copy-mode READ is completed partially; a short WRITE result, or any non-negative result in user copy or zero copy, completes the whole request as successful. Commit either the full byte count or a negative errno.
-- **Memory.** A queue needs `queue_depth × max_io_buf_bytes` of buffer space, 128 MiB for depth 128 at the 1 MiB default. Anonymous mappings cost nothing until touched, but a busy queue touches them all.
-- **Cost.** One `memcpy` per request inside the kernel. For 4 KiB random I/O that is noise next to the round trip; for large sequential I/O it is memory bandwidth you pay twice, once here and once in the backend.
+- Use the descriptor's `nr_sectors`. If the driver pins only part of a WRITE buffer, it reduces this count to the copied length. Committing those bytes requeues the rest; pinning nothing requeues the entire request.
+- READ results count bytes filled. A short copy-mode READ requeues the remainder; 0 becomes `-EIO`. Copying at most `result` bytes prevents exposing stale kernel memory, so unprivileged servers can use this mode.
+- Commit the full byte count or a negative errno. In 6.17, short READs and WRITEs requeued the remainder in every mode. In 7.3-rc5, only copy-mode READs complete partially: a short WRITE, or any non-negative user-copy or zero-copy result, completes the entire request successfully.
+- Buffer space is `queue_depth × max_io_buf_bytes`: 128 MiB at depth 128 and the 1 MiB default. Anonymous mappings consume physical memory when touched; busy queues touch every buffer.
+- The kernel performs one `memcpy` per request. Its cost is small beside a 4 KiB round trip; large sequential transfers consume memory bandwidth here and again in a copying backend.
 
 go-ublk uses this mode by default, with one anonymous mapping per queue sliced into per-tag buffers.
 
 ## NEED_GET_DATA
 
-{{< since "6.0" >}} {{< uapi "UBLK_F_NEED_GET_DATA" >}} lets a server avoid pre-allocating WRITE buffers. `FETCH_REQ` may pass `addr = 0`. When a WRITE arrives, the command completes with `UBLK_IO_RES_NEED_GET_DATA` (1) instead of 0, and nothing has been copied yet. The descriptor is valid, so the server knows the length and offset.
+{{< since "6.0" >}} {{< uapi "UBLK_F_NEED_GET_DATA" >}} avoids pre-allocating WRITE buffers. `FETCH_REQ` may use `addr = 0`; WRITEs arrive as `UBLK_IO_RES_NEED_GET_DATA` (1), with a valid length and offset but no data copied.
 
-The server then allocates a buffer and issues {{< uapi "UBLK_U_IO_NEED_GET_DATA" >}} (`0xc0107522`) for the same `q_id` and `tag`, with the buffer in `addr`. The kernel copies the data into it and completes that command with `UBLK_IO_RES_OK`. From there it is an ordinary WRITE, finished with `COMMIT_AND_FETCH_REQ`.
+Allocate a buffer and issue {{< uapi "UBLK_U_IO_NEED_GET_DATA" >}} (`0xc0107522`) for the same `q_id` and `tag`, with its address in `addr`. The kernel copies the data and completes with `UBLK_IO_RES_OK`; finish the WRITE with `COMMIT_AND_FETCH_REQ`.
 
 ```c
 if (cqe->res == UBLK_IO_RES_NEED_GET_DATA) {
@@ -59,13 +59,13 @@ if (cqe->res == UBLK_IO_RES_NEED_GET_DATA) {
 }
 ```
 
-Rules: issue `NEED_GET_DATA` exactly when the kernel asked for it, or the command fails with `-EINVAL`. READs still need a buffer at commit time: `COMMIT_AND_FETCH_REQ` with `addr = 0` is rejected for a READ even in this mode. The flag is cleared at `ADD_DEV` if any non-copy mode is also requested.
+Issue `NEED_GET_DATA` only when requested, or receive `-EINVAL`. READ commits still require a non-zero `addr`. `ADD_DEV` clears the flag if any non-copy mode is requested.
 
-The cost is an extra command and an extra `io_uring_enter` round trip per WRITE. The kernel documentation describes it as a compatibility path for existing servers that cannot adopt pre-allocated buffers; new servers should not use it.
+Each WRITE costs an extra command and `io_uring_enter` round trip. Kernel documentation reserves this compatibility path for servers that cannot pre-allocate buffers; new servers should avoid it.
 
 ## User copy
 
-{{< since "6.5" >}} With {{< uapi "UBLK_F_USER_COPY" >}} the kernel never copies. `FETCH_REQ` and `COMMIT_AND_FETCH_REQ` must pass `addr = 0` (zone append, which reuses the field for an LBA, is the only exception). Instead, while a request is in flight the server reads and writes its data through the character device, at an offset that names the request:
+{{< since "6.5" >}} {{< uapi "UBLK_F_USER_COPY" >}} moves copying out of FETCH/COMMIT. Both commands require `addr = 0`, except zone append uses the field for its LBA. The server accesses in-flight data through `/dev/ublkcN` at an offset identifying the request:
 
 ```c
 static inline __u64 ublk_user_copy_pos(__u16 q_id, __u16 tag, __u32 offset)
@@ -82,26 +82,26 @@ pread(ublkc_fd, buf, desc->nr_sectors << 9, ublk_user_copy_pos(q_id, tag, 0));
 pwrite(ublkc_fd, buf, len, ublk_user_copy_pos(q_id, tag, 0));
 ```
 
-The direction is from the server's point of view: `pread` copies *out of* the request and is valid for WRITE and zone append requests; `pwrite` copies *into* the request and is valid for READ and zone report requests. The wrong direction fails with `-EACCES`.
+From the server's perspective, `pread` copies out of WRITE/zone-append requests; `pwrite` copies into READ/zone-report requests. The wrong direction returns `-EACCES`.
 
-Further rules, from the 6.17 driver:
+Rules in the 6.17 driver:
 
-- The request must be in flight: delivered to the server and not yet committed. Otherwise, or if the offset is past the end of the request, the call fails with `-EINVAL`. A device in `UBLK_S_DEV_DEAD` returns `-EACCES`.
-- Partial copies are fine. The offset field addresses any byte of the request, so a server can copy in pieces or scatter into several buffers; the return value is the number of bytes copied.
-- Any thread may copy. Unlike the I/O commands there is no daemon-task check, so a worker pool can move data while the queue thread keeps fetching.
-- io_uring `IORING_OP_READ` and `IORING_OP_WRITE` on the character device work like `pread`/`pwrite`. Registered (fixed) buffers do not: the driver requires a user-backed iterator and returns `-EACCES` otherwise.
-- To reach a request's integrity buffer instead of its data, OR `UBLKSRV_IO_INTEGRITY_FLAG` (`1ULL << 62`) into the position. See [Integrity metadata](/guide/integrity/).
+- Copy after delivery and before commit. Otherwise, or past the request's end, the call returns `-EINVAL`; `UBLK_S_DEV_DEAD` returns `-EACCES`.
+- Partial copies can address any byte, split transfers, or scatter into buffers. The return value counts bytes copied.
+- Any thread may copy; there is no daemon-task check. Workers can copy while queue threads fetch.
+- io_uring `IORING_OP_READ`/`IORING_OP_WRITE` work like `pread`/`pwrite`. Fixed buffers fail with `-EACCES`: the driver requires a user-backed iterator.
+- OR `UBLKSRV_IO_INTEGRITY_FLAG` (`1ULL << 62`) into the position to access [integrity metadata](/guide/integrity/).
 
-User copy is the right choice when the server wants data to land directly in its own structures (a cache, a network send buffer, a compression input) rather than in a fixed per-tag slot, and it is a prerequisite for [zoned devices](/guide/zoned/) (or zero copy) and for [integrity](/guide/integrity/).
+Use user copy to place bytes in a cache, network send buffer, or compression input instead of a per-tag slot. It is required for [integrity](/guide/integrity/) and, unless using zero copy, [zoned devices](/guide/zoned/).
 
 > [!WARNING]
-> In user copy the kernel takes the READ result on trust. If the server commits N bytes but wrote fewer, the reader receives whatever the request pages held before. That is why user copy is refused for unprivileged devices and why the kernel documentation says a server using it must be trusted.
+> User copy trusts READ results. Committing N bytes after writing fewer exposes the request pages' previous contents. It requires a trusted server and is refused for unprivileged devices.
 
 ## Zero copy with io_uring fixed buffers
 
-{{< since "6.15" >}} {{< uapi "UBLK_F_SUPPORT_ZERO_COPY" >}} was defined in the very first UAPI header but did nothing until 6.15 added {{< uapi "UBLK_U_IO_REGISTER_IO_BUF" >}} (`0xc0107523`) and {{< uapi "UBLK_U_IO_UNREGISTER_IO_BUF" >}} (`0xc0107524`). The mechanism is io_uring's kernel-buffer support: the driver installs the request's own pages (its bio vectors) into a slot of an io_uring buffer table, and any io_uring operation that accepts a fixed buffer can then read or write them directly.
+{{< since "6.15" >}} {{< uapi "UBLK_F_SUPPORT_ZERO_COPY" >}} existed in the first UAPI header but became functional with {{< uapi "UBLK_U_IO_REGISTER_IO_BUF" >}} (`0xc0107523`) and {{< uapi "UBLK_U_IO_UNREGISTER_IO_BUF" >}} (`0xc0107524`) in 6.15. The driver installs request pages (bio vectors) in an io_uring buffer-table slot for operations accepting fixed buffers.
 
-Setup: register a sparse buffer table on the io_uring that will do the backend I/O (`io_uring_register_buffers_sparse()` in liburing), with enough slots for every request you will have in flight on that ring. `FETCH_REQ` and `COMMIT_AND_FETCH_REQ` pass `addr = 0`.
+Register a sparse buffer table on the backend's io_uring (`io_uring_register_buffers_sparse()` in liburing), with a slot per in-flight request. FETCH/COMMIT use `addr = 0`.
 
 Per request:
 
@@ -114,22 +114,22 @@ UNREGISTER_IO_BUF q_id, tag, addr = idx  slot released
 COMMIT_AND_FETCH_REQ result, addr = 0    request completes
 ```
 
-Operations can be linked with `IOSQE_IO_LINK` so the whole chain is submitted at once. Each io_uring operation that uses the buffer holds its own reference, so unregistering while a backend operation is still running is safe; the request completes only after the buffer has been unregistered from every ring that registered it **and** the server has committed.
+Link operations with `IOSQE_IO_LINK` to submit the chain together. Each buffer-using operation holds a reference, so unregistering during backend I/O is safe. Completion waits for both the server's commit and unregistration from every ring holding the buffer.
 
-What zero copy cannot do: the server never has the data in its address space. It cannot checksum, compress, encrypt, deduplicate or inspect it; it can only direct I/O at it. A server that needs the bytes should use copy mode or user copy.
+The server cannot access the bytes to checksum, compress, encrypt, deduplicate, or inspect them. Use copy mode or user copy for those operations.
 
-Threading: before 6.17 only the tag's daemon task could register or unregister. {{< uapi "UBLK_F_BUF_REG_OFF_DAEMON" >}} (6.17, always set by the kernel that has it) allows any task, and then `UNREGISTER_IO_BUF` identifies the slot by index alone, ignoring `q_id` and `tag`.
+Before 6.17, only the tag's daemon could register or unregister. {{< uapi "UBLK_F_BUF_REG_OFF_DAEMON" >}} (6.17, forced on) permits any task; `UNREGISTER_IO_BUF` then identifies the slot by index alone, ignoring `q_id` and `tag`.
 
-Alignment matters here more than anywhere else. With zero copy the request's pages go straight to the backend, so if the backend is an O_DIRECT file or a raw device with alignment requirements, advertise them: set `UBLK_PARAM_TYPE_DMA_ALIGN` to the backend's memory alignment (the kernel default is 4 bytes) and `UBLK_PARAM_TYPE_SEGMENT` limits that match the backend, or requests will fail or be split. See [Device parameters](/guide/parameters/).
+For an O_DIRECT file or raw backend, advertise its memory alignment through `UBLK_PARAM_TYPE_DMA_ALIGN` (kernel default: 4 bytes) and matching `UBLK_PARAM_TYPE_SEGMENT` limits. Otherwise requests may fail or split. See [device parameters](/guide/parameters/).
 
 > [!WARNING]
-> As with user copy, a zero-copy server must fill every byte of a READ it reports. The kernel requires `CAP_SYS_ADMIN` for these modes and rejects them for unprivileged devices.
+> Fill every byte of a READ you report. Like user copy, fixed-buffer zero copy requires `CAP_SYS_ADMIN` and is rejected for unprivileged devices.
 
 ## Automatic buffer registration
 
-{{< since "6.16" >}} {{< uapi "UBLK_F_AUTO_BUF_REG" >}} removes the two registration commands. Before delivering a request, the kernel registers its buffer into the buffer table of the io_uring that issued the tag's `FETCH_REQ` or `COMMIT_AND_FETCH_REQ`, at an index the server chose; when the next `COMMIT_AND_FETCH_REQ` for that tag arrives, it unregisters it. The server's backend I/O no longer depends on a registration command completing first, so it can be submitted immediately and concurrently.
+{{< since "6.16" >}} {{< uapi "UBLK_F_AUTO_BUF_REG" >}} removes both registration commands. Before delivery, the kernel registers the buffer at the server's chosen index on the ring that fetched the tag; the next commit unregisters it. Backend I/O can start immediately and concurrently.
 
-The index is not in `struct ublksrv_io_cmd`. It travels in the **SQE's own `addr` field** of the fetch or commit command, as a packed `struct ublk_auto_buf_reg`:
+Pack the index in the fetch/commit **SQE's `addr`**, as `struct ublk_auto_buf_reg`, rather than in `struct ublksrv_io_cmd`:
 
 ```c
 struct ublk_auto_buf_reg {
@@ -142,20 +142,20 @@ struct ublk_auto_buf_reg {
 sqe->addr = ublk_auto_buf_reg_to_sqe_addr(&(struct ublk_auto_buf_reg){ .index = slot });
 ```
 
-Non-zero reserved fields or unknown flags fail the command with `-EINVAL`. As in copy mode, the value given with a commit applies to the next request the tag receives.
+Non-zero reserved fields or unknown flags return `-EINVAL`. As in copy mode, a commit's value applies to the next request.
 
-Requirements and pitfalls:
+Registration constraints:
 
-- The sparse buffer table must live on the same io_uring (`io_ring_ctx`) that issues the tag's fetch and commit commands. If a commit arrives on a different ring, the kernel does not unregister automatically; the server must issue `UNREGISTER_IO_BUF` itself or the request never completes.
-- Registration can fail: `-EBUSY` if the slot is still occupied, `-EINVAL` if the index is beyond the ring's buffer table (or there is none), `-ENOMEM`. Without a fallback, the kernel fails the block request with an I/O error and the server never sees it. With `UBLK_AUTO_BUF_REG_FALLBACK` in `flags`, the command completes normally with `UBLK_IO_F_NEED_REG_BUF` set in the descriptor's `op_flags`, and the server must get at the data some other way: register it with `REGISTER_IO_BUF` (which requires `UBLK_F_SUPPORT_ZERO_COPY` as well; the kernel selftest server sets both for its fallback mode) or use user copy.
-- An io_uring buffer table holds at most 16K entries. One ring serving many devices with deep queues can run out.
-- Only requests with data are registered.
+- Fetch, commit, and the sparse buffer table must share an io_uring (`io_ring_ctx`). A commit on another ring requires explicit `UNREGISTER_IO_BUF`; otherwise the request never completes.
+- Registration may fail with `-EBUSY` (occupied slot), `-EINVAL` (missing table or out-of-range index), or `-ENOMEM`. Without fallback, the block request fails before delivery. With `UBLK_AUTO_BUF_REG_FALLBACK`, delivery succeeds with `UBLK_IO_F_NEED_REG_BUF` in `op_flags`. Use user copy or `REGISTER_IO_BUF`; the latter also needs `UBLK_F_SUPPORT_ZERO_COPY`, which the kernel selftest server sets for fallback.
+- A table holds at most 16K entries; one ring serving many deep queues can exhaust it.
+- Only requests carrying data are registered.
 
 ## Shared-memory zero copy
 
-{{< since "7.1" >}} {{< uapi "UBLK_F_SHMEM_ZC" >}} takes a different approach: if the application doing I/O and the server map the same physical pages, there is nothing to copy and nothing to register per request.
+{{< since "7.1" >}} {{< uapi "UBLK_F_SHMEM_ZC" >}} avoids copying and per-request registration when application and server map the same physical pages.
 
-The server maps a shared region (a memfd received from the client over a unix socket with `SCM_RIGHTS`, or a hugetlbfs file both sides open) and registers it with the control command {{< uapi "UBLK_U_CMD_REG_BUF" >}} (`0xc0207518`):
+Map a shared region, such as a client memfd received over a unix socket with `SCM_RIGHTS`, or a hugetlbfs file both processes open. Register it with {{< uapi "UBLK_U_CMD_REG_BUF" >}} (`0xc0207518`):
 
 ```c
 struct ublk_shmem_buf_reg reg = {
@@ -168,11 +168,11 @@ ctrl.len  = sizeof(reg);              /* 24 */
 int index = ctrl_cmd(ring, UBLK_U_CMD_REG_BUF, &ctrl);   /* >= 0: buffer index */
 ```
 
-The kernel pins the pages long-term and records their page frame numbers in a per-device tree. In 7.3-rc5 the command fails with `-EOPNOTSUPP` unless the device has `UBLK_F_SHMEM_ZC`, and with `-EINVAL` if `addr` or `len` is not page-aligned, `len` is 0 or above 4 GiB, `reserved` is non-zero, or `flags` has bits other than `UBLK_SHMEM_BUF_READ_ONLY`. It works before or after `START_DEV`; on a live device the kernel freezes the queue while it updates the tree. `UBLK_SHMEM_BUF_READ_ONLY` pins without write access, which works with a write-sealed memfd, and such a buffer only ever matches WRITE requests, since a READ would need the kernel side to write into it. {{< uapi "UBLK_U_CMD_UNREG_BUF" >}} (`0xc0207519`) takes the index in `data[0]`.
+The kernel pins pages long-term and records their frame numbers in a per-device tree. In 7.3-rc5, missing `UBLK_F_SHMEM_ZC` returns `-EOPNOTSUPP`; unaligned `addr`/`len`, zero length, length above 4 GiB, non-zero `reserved`, or unknown flags return `-EINVAL`. Registration works before or after `START_DEV`, freezing a live queue during tree updates. `UBLK_SHMEM_BUF_READ_ONLY` pins without write access, permits write-sealed memfds, and matches only WRITE requests: READs must write into the buffer. {{< uapi "UBLK_U_CMD_UNREG_BUF" >}} (`0xc0207519`) takes the index in `data[0]`.
 
-The registration structure is passed by pointer rather than inline so that an unprivileged device can prefix the control payload with the device path, and the kernel accepts shared-memory zero copy on unprivileged devices (upstream does not explain why). That is consistent with the trust argument above: a request only takes this path when its pages already belong to memory the server has mapped, so a READ the server fails to fill exposes nothing but the client's own shared buffer. Note that `REG_BUF` pins the region long-term (up to 4 GiB per buffer) with no memlock accounting visible in the driver.
+Passing the structure by pointer permits an unprivileged control payload's device-path prefix. The kernel accepts this mode for unprivileged devices without explaining why. One interpretation: an unfilled READ exposes only the client's already-shared buffer. `REG_BUF` pins up to 4 GiB per buffer long-term, with no memlock accounting visible in the driver.
 
-When an O_DIRECT request's data lies entirely within one registered buffer, the descriptor arrives with `UBLK_IO_F_SHMEM_ZC` (bit 19) in `op_flags`, and `addr` holds a reference instead of a server address:
+If an O_DIRECT request lies entirely within one registered buffer, its descriptor has `UBLK_IO_F_SHMEM_ZC` (bit 19) in `op_flags`, and `addr` encodes a reference:
 
 ```c
 if (ublksrv_get_flags(desc) & (UBLK_IO_F_SHMEM_ZC >> 8)) {
@@ -183,15 +183,15 @@ if (ublksrv_get_flags(desc) & (UBLK_IO_F_SHMEM_ZC >> 8)) {
 }
 ```
 
-Note the shift: `ublksrv_get_flags()` returns `op_flags >> 8`, while the `UBLK_IO_F_*` constants are defined against the full `op_flags`, so test `desc->op_flags & UBLK_IO_F_SHMEM_ZC` directly or shift as above.
+`ublksrv_get_flags()` returns `op_flags >> 8`, but `UBLK_IO_F_*` constants use the full field. Test `desc->op_flags & UBLK_IO_F_SHMEM_ZC` directly or shift as above.
 
-For a matched request the kernel copies nothing in either direction, even on a copy-mode device, and a non-zero result completes the whole request, so commit the full byte count. Requests that do not match fall back silently to the device's ordinary mode, so the server still needs a complete normal data path; shared memory is an optimization on top. It only helps cooperating clients:
+Matched requests copy nothing, even on copy-mode devices. A non-zero result completes the entire request; commit the full byte count. Unmatched requests silently use the ordinary data path, which the server must still implement. Clients must:
 
-- the client must allocate its I/O buffers from the shared region;
-- it must use O_DIRECT, since buffered I/O goes through page-cache pages that can never match;
-- each request's data must be contiguous within a single registered buffer.
+- allocate I/O buffers in the shared region;
+- use O_DIRECT, since page-cache pages cannot match;
+- keep each request contiguous within one registered buffer.
 
-The kernel's selftest server implements both setups: a listener on `/run/ublk/ublkbN.sock` that accepts memfds from clients, and a hugetlbfs file named on the command line.
+The kernel selftest server accepts memfds through `/run/ublk/ublkbN.sock` or a hugetlbfs file specified on the command line.
 
 ## Choosing a mode
 
@@ -204,7 +204,7 @@ The kernel's selftest server implements both setups: a listener on `/run/ublk/ub
 | Automatic registration | No | None | None | No | Moderate |
 | Shared-memory zero copy | Yes, in the shared mapping | None when the client cooperates | None per request | Yes | Moderate, plus client changes |
 
-Start with copy mode. Move to zero copy when the server is a pass-through to a file, block device or socket and profiling shows the copy matters. Choose user copy when you need the bytes but not in a fixed slot, or when zoned or integrity support requires it. kublk, the kernel's selftest server, refuses to combine more than one of `NEED_GET_DATA`, `USER_COPY`, `SUPPORT_ZERO_COPY` and `AUTO_BUF_REG`, except for the fallback pairing described above.
+Start with copy mode. Use zero copy for pass-through file, block-device, or socket I/O when profiling justifies it; use user copy for custom buffer placement, zoned devices, or integrity. kublk, the kernel selftest server, rejects combinations of `NEED_GET_DATA`, `USER_COPY`, `SUPPORT_ZERO_COPY`, and `AUTO_BUF_REG` except the fallback pairing above.
 
 ## go-ublk
 
