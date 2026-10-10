@@ -5,7 +5,7 @@ description: "Every field of DeviceParams and Options: defaults, valid ranges, w
 weight: 30
 ---
 
-A device is configured by a `DeviceParams` value, normally obtained from `DefaultParams(backend)` and then adjusted, and an optional `*Options`. Both are read once, at `Create` or `CreateAndServe` (or `Recover`).
+Start with `DefaultParams(backend)`, adjust `DeviceParams`, and optionally supply `*Options`. Create, CreateAndServe, or Recover reads them at setup.
 
 ```go
 params := ublk.DefaultParams(backend)
@@ -17,7 +17,7 @@ params.Recovery = ublk.RecoveryReissue
 device, err := ublk.CreateAndServe(ctx, params, &ublk.Options{Logger: myLogger})
 ```
 
-Invalid values are rejected before anything is sent to the kernel, with a plain error describing the field. Features the running kernel lacks are rejected before the device is created, with an error matching `syscall.EOPNOTSUPP` that names them; go-ublk never quietly creates a device without a feature you asked for. `ublk.Probe()` tells you up front what the kernel has.
+Invalid fields fail validation before kernel calls. Missing features return named errors matching `syscall.EOPNOTSUPP`: checked before creation where GET_FEATURES exists, then against ADD_DEV's reply. Privileged callers may have UNPRIVILEGED_DEV cleared. Probe support with `ublk.Probe()`.
 
 ## DeviceParams
 
@@ -55,7 +55,7 @@ Invalid values are rejected before anything is sent to the kernel, with a plain 
 
 ### Discard and write-zeroes
 
-Used only if the backend implements `DiscardBackend` or `WriteZeroesBackend` (or, with a `Handler`, `HandlerDiscard`/`HandlerWriteZeroes`).
+Requires DiscardBackend/WriteZeroesBackend, or HandlerDiscard/HandlerWriteZeroes with a Handler.
 
 | Field | Default | Effect |
 |---|---|---|
@@ -76,7 +76,7 @@ Used only if the backend implements `DiscardBackend` or `WriteZeroesBackend` (or
 
 ### Data copy modes
 
-How request data moves between the kernel and the server. The default copies it into a per-tag buffer and needs nothing beyond kernel 6.0.
+Default copy uses per-tag buffers. The kernel protocol dates to 6.0; go-ublk requires 6.4.
 
 | Field | Kernel | Effect |
 |---|---|---|
@@ -92,7 +92,7 @@ How request data moves between the kernel and the server. The default copies it 
 | `EnableIoctlEncode` | | Deprecated, no effect: ioctl-encoded commands are always used |
 | `DeviceName` | | Deprecated, no effect: ublk devices have no name |
 
-Features requested automatically when the kernel has them, because they cost nothing: `UPDATE_SIZE` (6.16+, for `Device.Resize`), with a recovery mode `QUIESCE` (6.16+, so `Detach` drains in-flight I/O first), and with zero copy `AUTO_BUF_REG` (6.16+).
+When supported, go-ublk also requests UPDATE_SIZE for Resize, QUIESCE for recoverable-device handoff, and AUTO_BUF_REG for zero copy (all 6.16+).
 
 ## What reaches the kernel
 
@@ -125,7 +125,7 @@ type Options struct {
 | `Logger` | Receives the library's messages and its internal control-plane and queue diagnostics. Without it the library logs nothing. Control-plane logging is process-wide: the most recent call with a `Logger` sets it |
 | `Debug` | Enables debug logging. The I/O hot path never logs, but debug output elsewhere can change timing |
 | `Observer` | Called for every read, write, discard and flush with size, latency and success. If you supply one, `Device.Metrics()` stays empty |
-| `StopTimeout` | How long `Stop`/`Close` wait for the kernel's `STOP_DEV` (which first drains in-flight I/O through the backend) and `DEL_DEV`. On timeout the call fails and the device keeps serving |
+| `StopTimeout` | Bounds STOP_DEV (including the backend drain) and DEL_DEV waits. A failed STOP leaves serving resources intact; a DEL timeout occurs after serving has stopped and deletion waits for remaining references |
 
 ## Exported constants
 
