@@ -810,7 +810,7 @@ func (e *engine) dispatchValidated(i int, r *Request, d uapi.UblksrvIODesc) {
 	if e.cfg.inline {
 		r.state.Store(reqDispatching)
 		e.call(r)
-		if !r.state.CompareAndSwap(reqDispatching, reqAsync) {
+		if completion.ReturnInline(&r.state) {
 			e.commit(r) // completed before the handler returned
 		}
 		return

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/ehrlich-b/go-ublk/internal/completion"
 	"github.com/ehrlich-b/go-ublk/internal/uapi"
 )
 
@@ -122,11 +123,11 @@ type Request struct {
 // to reqDone (inline: the engine commits it when the handler returns) or
 // reqQueued (pushed to the engine's completion list).
 const (
-	reqIdle uint32 = iota
-	reqDispatching
-	reqAsync
-	reqDone
-	reqQueued
+	reqIdle        = completion.Idle
+	reqDispatching = completion.Dispatching
+	reqAsync       = completion.Async
+	reqDone        = completion.Done
+	reqQueued      = completion.Queued
 )
 
 // Complete finishes the request. On success a data operation reports its full
@@ -172,27 +173,23 @@ func (r *Request) CompleteZoneAppend(sector uint64, err error) {
 		r.finish(-Errno(err))
 		return
 	}
-	r.lba = sector
-	r.finish(int32(r.Length))
+	r.finishResult(int32(r.Length), sector, true)
 }
 
 func (r *Request) finish(res int32) {
-	r.result = res
-	r.e.beforeCommit(r)
-	for {
-		switch s := r.state.Load(); s {
-		case reqDispatching:
-			if r.state.CompareAndSwap(reqDispatching, reqDone) {
-				return // the engine commits it when the handler returns
-			}
-		case reqAsync:
-			if r.state.CompareAndSwap(reqAsync, reqQueued) {
-				r.e.push(r)
-				return
-			}
-		default:
-			panic(fmt.Sprintf("ublk: request queue %d tag %d completed twice", r.Queue, r.Tag))
+	r.finishResult(res, 0, false)
+}
+
+func (r *Request) finishResult(res int32, lba uint64, appendResult bool) {
+	err := completion.Finish(&r.state, func() {
+		r.result = res
+		if appendResult {
+			r.lba = lba
 		}
+		r.e.beforeCommit(r)
+	}, func() { r.e.push(r) })
+	if err != nil {
+		panic(fmt.Sprintf("ublk: request queue %d tag %d completed twice", r.Queue, r.Tag))
 	}
 }
 
