@@ -44,15 +44,17 @@ func (l memLogger) Debugf(format string, args ...interface{}) {
 
 func main() {
 	var (
-		sizeStr    = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
-		zip        = flag.Bool("zip", false, "Compress the contents in RAM (flate, 64KB chunks)")
-		verbose    = flag.Bool("v", false, "Verbose output")
-		minimal    = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
-		numQueues  = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
-		queueDepth = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
-		cpuprofile = flag.String("cpuprofile", "", "Write CPU profile to file")
-		memprofile = flag.String("memprofile", "", "Write memory profile to file")
-		delSpec    = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all' to reap every registered device")
+		sizeStr     = flag.String("size", "64M", "Size of the memory disk (e.g., 64M, 1G)")
+		backendName = flag.String("backend", "ram", "Backend: ram or null (complete without touching data)")
+		inline      = flag.Bool("inline", false, "Run handlers on the queue's I/O thread")
+		zip         = flag.Bool("zip", false, "Compress the contents in RAM (flate, 64KB chunks)")
+		verbose     = flag.Bool("v", false, "Verbose output")
+		minimal     = flag.Bool("minimal", false, "Use minimal resource parameters for debugging")
+		numQueues   = flag.Int("queues", 0, "Number of I/O queues (0 = auto-detect based on CPU count)")
+		queueDepth  = flag.Int("depth", 64, "Queue depth (number of concurrent I/Os per queue)")
+		cpuprofile  = flag.String("cpuprofile", "", "Write CPU profile to file")
+		memprofile  = flag.String("memprofile", "", "Write memory profile to file")
+		delSpec     = flag.String("del", "", "Delete stuck device(s) and exit: a device ID (e.g. 3) or 'all' to reap every registered device")
 	)
 	flag.Parse()
 
@@ -85,20 +87,36 @@ func main() {
 		log.Fatalf("Invalid size '%s': %v", *sizeStr, err)
 	}
 
-	// Create the backend. Both are plain ublk.Backend implementations; the
-	// device does not know or care which one is behind it.
+	// The null handler measures dispatch without storage or data access.
+	params := ublk.DefaultParams(nil)
 	var backend ublk.Backend
 	zipped := (*zipBackend)(nil)
-	if *zip {
-		zipped = newZipBackend(size)
-		backend = zipped
-	} else {
-		backend = newMemoryBackend(size)
+	switch *backendName {
+	case "ram":
+		if *zip {
+			zipped = newZipBackend(size)
+			backend = zipped
+		} else {
+			backend = newMemoryBackend(size)
+		}
+		params.Backend = backend
+		defer backend.Close()
+	case "null":
+		if *zip {
+			log.Fatal("-zip requires -backend ram")
+		}
+		params.Size = size
+		params.Handler = ublk.RequestHandlerFunc(func(r ublk.RequestHandle) {
+			if err := r.Complete(nil); err != nil {
+				panic(err)
+			}
+		})
+	default:
+		log.Fatalf("invalid backend %q: use ram or null", *backendName)
 	}
-	defer backend.Close()
 
 	// Create device parameters
-	params := ublk.DefaultParams(backend)
+	params.Inline = *inline
 	if *minimal {
 		// Use minimal parameters for testing
 		params.QueueDepth = 1 // Absolute minimum
@@ -125,7 +143,8 @@ func main() {
 	if *minimal {
 		logger.Info("using minimal queue depth for faster initialization", "depth", params.QueueDepth)
 	}
-	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size, "compressed", *zip)
+	logger.Info("creating memory disk", "size", formatSize(size), "size_bytes", size,
+		"backend", *backendName, "compressed", *zip, "inline", *inline)
 
 	// Create and serve the device
 	ctx, cancel := context.WithCancel(context.Background())
